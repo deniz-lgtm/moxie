@@ -12,6 +12,7 @@ const navLinks = [
   { href: "/inspections", label: "Inspections" },
   { href: "/unit-turns", label: "Unit Turns" },
   { href: "/maintenance", label: "Maintenance" },
+  { href: "/leasing", label: "Leasing" },
 ];
 
 export default function RootLayout({

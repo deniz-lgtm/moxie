@@ -32,6 +32,34 @@ const colorMap: Record<string, string> = {
   vacant: "bg-blue-100 text-blue-800",
   turning: "bg-yellow-100 text-yellow-800",
   ready: "bg-emerald-100 text-emerald-800",
+  // Application statuses
+  incomplete: "bg-yellow-100 text-yellow-800",
+  under_review: "bg-purple-100 text-purple-800",
+  approved: "bg-green-100 text-green-800",
+  denied: "bg-red-100 text-red-800",
+  // Applicant statuses (not_started already defined above)
+  complete: "bg-green-100 text-green-800",
+  in_review: "bg-purple-100 text-purple-800",
+  rejected: "bg-red-100 text-red-800",
+  // Document statuses
+  missing: "bg-red-50 text-red-700",
+  uploaded: "bg-blue-100 text-blue-800",
+  verified: "bg-green-100 text-green-800",
+  // Nudge statuses
+  sent: "bg-blue-100 text-blue-800",
+  delivered: "bg-emerald-100 text-emerald-700",
+  opened: "bg-green-100 text-green-800",
+  failed: "bg-red-100 text-red-800",
+  // Tour registration
+  confirmed: "bg-green-100 text-green-800",
+  attended: "bg-emerald-100 text-emerald-700",
+  no_show: "bg-red-100 text-red-800",
+  rescheduled: "bg-orange-100 text-orange-800",
+  cancelled: "bg-slate-100 text-slate-600",
+  // Roles
+  primary: "bg-indigo-100 text-indigo-800",
+  co_applicant: "bg-blue-100 text-blue-800",
+  guarantor: "bg-amber-100 text-amber-800",
 };
 
 function formatLabel(value: string): string {

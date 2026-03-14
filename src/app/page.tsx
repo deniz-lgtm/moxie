@@ -4,6 +4,7 @@ import {
   inspections,
   unitTurns,
   maintenanceRequests,
+  applicationGroups,
 } from "@/lib/mock-data";
 
 const toolCards = [
@@ -30,6 +31,14 @@ const toolCards = [
     stat: `${dashboardStats.openMaintenanceRequests} open`,
     icon: "🔧",
     color: "border-l-red-500",
+  },
+  {
+    title: "Leasing",
+    href: "/leasing",
+    description: "Application tracking, document collection, and open house tour scheduling for prospective tenants.",
+    stat: `${dashboardStats.activeApplications} applications · ${dashboardStats.upcomingTours} tours`,
+    icon: "📝",
+    color: "border-l-purple-500",
   },
 ];
 
@@ -75,7 +84,7 @@ export default function Dashboard() {
       </div>
 
       {/* Tool Cards */}
-      <div className="grid md:grid-cols-3 gap-6">
+      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6">
         {toolCards.map((card) => (
           <Link key={card.href} href={card.href}>
             <div
@@ -101,7 +110,7 @@ export default function Dashboard() {
       </div>
 
       {/* Activity Feed */}
-      <div className="grid md:grid-cols-3 gap-6">
+      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6">
         {/* Recent Inspections */}
         <div className="bg-card rounded-xl border border-border p-5">
           <div className="flex items-center justify-between mb-4">
@@ -186,6 +195,44 @@ export default function Dashboard() {
                 </p>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Leasing Activity */}
+        <div className="bg-card rounded-xl border border-border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">Leasing</h3>
+            <Link href="/leasing" className="text-sm text-accent hover:underline">
+              View all
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {applicationGroups
+              .filter((g) => g.status === "incomplete")
+              .slice(0, 3)
+              .map((group) => {
+                const totalSteps = group.applicants.reduce((s, a) => s + a.steps.length, 0);
+                const doneSteps = group.applicants.reduce(
+                  (s, a) => s + a.steps.filter((st) => st.status === "complete").length, 0
+                );
+                const appPct = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0;
+                return (
+                  <div key={group.id} className="py-2 border-b border-border last:border-0">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">
+                        {group.propertyName} #{group.unitNumber}
+                      </p>
+                      <span className="text-xs text-muted-foreground">{appPct}%</span>
+                    </div>
+                    <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${appPct}%` }} />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {group.applicants.filter((a) => a.role !== "guarantor").length} applicants &middot; {group.leaseCycle.replace("_", " ")}
+                    </p>
+                  </div>
+                );
+              })}
           </div>
         </div>
       </div>

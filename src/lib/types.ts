@@ -123,6 +123,104 @@ export interface MaintenanceRequest {
   appfolioWorkOrderId?: string;
 }
 
+// --- Leasing: Applications ---
+export type ApplicantRole = "primary" | "co_applicant" | "guarantor";
+export type StepStatus = "pending" | "complete" | "in_review" | "rejected";
+export type DocType = "government_id" | "proof_of_enrollment" | "proof_of_income" | "guarantor_form" | "other";
+export type NudgeStatus = "scheduled" | "sent" | "delivered" | "opened" | "failed";
+export type NudgeChannel = "email" | "sms";
+export type ApplicationGroupStatus = "incomplete" | "under_review" | "approved" | "denied";
+export type LeaseCycle = "fall_2026" | "spring_2027" | "summer_2026";
+
+export interface ApplicantStep {
+  id: string;
+  name: string;
+  description: string;
+  required: boolean;
+  status: StepStatus;
+  completedAt?: string;
+}
+
+export interface DocumentUpload {
+  id: string;
+  type: DocType;
+  label: string;
+  fileName?: string;
+  uploadedAt?: string;
+  status: "missing" | "uploaded" | "verified" | "rejected";
+}
+
+export interface Nudge {
+  id: string;
+  channel: NudgeChannel;
+  message: string;
+  scheduledAt: string;
+  sentAt?: string;
+  status: NudgeStatus;
+}
+
+export interface Applicant {
+  id: string;
+  groupId: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: ApplicantRole;
+  guarantorFor?: string;
+  steps: ApplicantStep[];
+  documents: DocumentUpload[];
+  nudges: Nudge[];
+  status: "not_started" | "in_progress" | "complete";
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface ApplicationGroup {
+  id: string;
+  propertyId: string;
+  propertyName: string;
+  unitNumber: string;
+  unitDetails: string;
+  leaseCycle: LeaseCycle;
+  targetMoveIn: string;
+  monthlyRent: number;
+  applicants: Applicant[];
+  status: ApplicationGroupStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- Leasing: Tours ---
+export type TourRegistrationStatus = "confirmed" | "pending" | "attended" | "no_show" | "rescheduled" | "cancelled";
+
+export interface TourRegistration {
+  id: string;
+  prospectName: string;
+  prospectEmail: string;
+  prospectPhone?: string;
+  status: TourRegistrationStatus;
+  registeredAt: string;
+  source?: string;
+  notes?: string;
+  followUpSent?: boolean;
+}
+
+export interface TourSlot {
+  id: string;
+  propertyId: string;
+  propertyName: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  host: string;
+  capacity: number;
+  registrations: TourRegistration[];
+  preReminderStatus: "scheduled" | "sent" | "not_set";
+  postFollowUpStatus: "scheduled" | "sent" | "not_set";
+  notes: string;
+  createdAt: string;
+}
+
 // --- Dashboard Stats ---
 export interface DashboardStats {
   totalUnits: number;
@@ -132,4 +230,6 @@ export interface DashboardStats {
   activeInspections: number;
   openMaintenanceRequests: number;
   upcomingTurns: number;
+  activeApplications: number;
+  upcomingTours: number;
 }
