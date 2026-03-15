@@ -232,4 +232,35 @@ export interface DashboardStats {
   upcomingTurns: number;
   activeApplications: number;
   upcomingTours: number;
+  upcomingMoveOuts: number;
+  vendorCount: number;
+  pendingRubs: string;
+  reportsDue: number;
+  activeCapitalProjects: number;
+  pendingNotices: number;
+}
+
+// --- App Launcher ---
+export type UserRole = "property_manager" | "maintenance_tech" | "leasing_agent" | "asset_manager" | "owner";
+export type AppCategory = "operations" | "leasing" | "finance" | "asset_management" | "communications";
+
+export interface AppConfig {
+  id: string;
+  name: string;
+  description: string;
+  href: string;
+  icon: string;
+  category: AppCategory;
+  categoryLabel: string;
+  categoryColor: string;
+  roles: UserRole[];
+  isBuilt: boolean;
+  statLabel?: string;
+}
+
+export interface AppCategoryConfig {
+  id: AppCategory;
+  label: string;
+  color: string;
+  order: number;
 }

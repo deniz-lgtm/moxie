@@ -10,6 +10,10 @@ import {
   ApplicantStep,
   DocumentUpload,
   TourSlot,
+  UserRole,
+  AppCategory,
+  AppConfig,
+  AppCategoryConfig,
 } from "./types";
 
 // --- Properties (USC off-campus housing) ---
@@ -601,4 +605,198 @@ export const dashboardStats: DashboardStats = {
   upcomingTurns: 2,
   activeApplications: 3,
   upcomingTours: 3,
+  upcomingMoveOuts: 4,
+  vendorCount: 12,
+  pendingRubs: "March pending",
+  reportsDue: 2,
+  activeCapitalProjects: 1,
+  pendingNotices: 2,
 };
+
+// --- App Launcher Configuration ---
+export const appCategories: AppCategoryConfig[] = [
+  { id: "operations", label: "Operations", color: "blue", order: 1 },
+  { id: "leasing", label: "Leasing", color: "purple", order: 2 },
+  { id: "finance", label: "Finance", color: "emerald", order: 3 },
+  { id: "asset_management", label: "Asset Management", color: "amber", order: 4 },
+  { id: "communications", label: "Communications", color: "rose", order: 5 },
+];
+
+export const apps: AppConfig[] = [
+  // --- Operations ---
+  {
+    id: "inspections",
+    name: "Inspections",
+    description: "Move-in, move-out, and quarterly inspections with condition tracking and photos",
+    href: "/inspections",
+    icon: "ClipboardCheck",
+    category: "operations",
+    categoryLabel: "Operations",
+    categoryColor: "blue",
+    roles: ["property_manager", "maintenance_tech"],
+    isBuilt: true,
+    statLabel: `${dashboardStats.activeInspections} active`,
+  },
+  {
+    id: "unit-turns",
+    name: "Unit Turns",
+    description: "Manage the full move-out to move-in workflow — cleaning, paint, repairs, walkthroughs",
+    href: "/unit-turns",
+    icon: "RefreshCw",
+    category: "operations",
+    categoryLabel: "Operations",
+    categoryColor: "blue",
+    roles: ["property_manager", "maintenance_tech"],
+    isBuilt: true,
+    statLabel: `${dashboardStats.upcomingTurns} in progress`,
+  },
+  {
+    id: "maintenance",
+    name: "Maintenance",
+    description: "Track work orders from submission through completion. Assign vendors and monitor costs",
+    href: "/maintenance",
+    icon: "Wrench",
+    category: "operations",
+    categoryLabel: "Operations",
+    categoryColor: "blue",
+    roles: ["property_manager", "maintenance_tech"],
+    isBuilt: true,
+    statLabel: `${dashboardStats.openMaintenanceRequests} open`,
+  },
+  {
+    id: "move-in-out",
+    name: "Move In / Move Out",
+    description: "Tenant-facing checklist for move day: key handoff, utility setup, welcome packet, condition photos",
+    href: "/move-in-out",
+    icon: "Truck",
+    category: "operations",
+    categoryLabel: "Operations",
+    categoryColor: "blue",
+    roles: ["property_manager", "maintenance_tech", "leasing_agent"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.upcomingMoveOuts} upcoming`,
+  },
+  {
+    id: "vendors",
+    name: "Vendor Directory",
+    description: "Preferred vendors, performance tracking, insurance status, and contact info. Synced with Notion",
+    href: "/vendors",
+    icon: "Users",
+    category: "operations",
+    categoryLabel: "Operations",
+    categoryColor: "blue",
+    roles: ["property_manager", "maintenance_tech"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.vendorCount} vendors`,
+  },
+  // --- Leasing ---
+  {
+    id: "applications",
+    name: "Applications",
+    description: "Track lease applications, co-applicant progress, document uploads, guarantor status",
+    href: "/leasing/applications",
+    icon: "FileText",
+    category: "leasing",
+    categoryLabel: "Leasing",
+    categoryColor: "purple",
+    roles: ["property_manager", "leasing_agent"],
+    isBuilt: true,
+    statLabel: `${dashboardStats.activeApplications} active`,
+  },
+  {
+    id: "tours",
+    name: "Tour Scheduling",
+    description: "Manage open house tours with automated reminders and post-tour follow-ups",
+    href: "/leasing/tours",
+    icon: "Calendar",
+    category: "leasing",
+    categoryLabel: "Leasing",
+    categoryColor: "purple",
+    roles: ["property_manager", "leasing_agent"],
+    isBuilt: true,
+    statLabel: `${dashboardStats.upcomingTours} upcoming`,
+  },
+  // --- Finance ---
+  {
+    id: "rubs",
+    name: "RUBs",
+    description: "Ratio Utility Billing — split water, gas, electric, and trash costs across tenants by sqft or occupancy",
+    href: "/rubs",
+    icon: "Zap",
+    category: "finance",
+    categoryLabel: "Finance",
+    categoryColor: "emerald",
+    roles: ["property_manager", "asset_manager", "owner"],
+    isBuilt: false,
+    statLabel: dashboardStats.pendingRubs,
+  },
+  {
+    id: "reports",
+    name: "Monthly Reports",
+    description: "Generate and review monthly P&L, occupancy, and maintenance cost reports per property",
+    href: "/reports",
+    icon: "BarChart3",
+    category: "finance",
+    categoryLabel: "Finance",
+    categoryColor: "emerald",
+    roles: ["property_manager", "asset_manager", "owner"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.reportsDue} reports due`,
+  },
+  // --- Asset Management ---
+  {
+    id: "portfolio",
+    name: "Portfolio Overview",
+    description: "Property-level performance dashboard: occupancy, revenue, expense ratios, and NOI per property",
+    href: "/portfolio",
+    icon: "Building2",
+    category: "asset_management",
+    categoryLabel: "Asset Management",
+    categoryColor: "amber",
+    roles: ["property_manager", "asset_manager", "owner"],
+    isBuilt: false,
+    statLabel: "3 properties",
+  },
+  {
+    id: "capital-projects",
+    name: "Capital Projects",
+    description: "Track large improvements: roof replacements, HVAC upgrades, renovations with budget vs actual",
+    href: "/capital-projects",
+    icon: "HardHat",
+    category: "asset_management",
+    categoryLabel: "Asset Management",
+    categoryColor: "amber",
+    roles: ["property_manager", "asset_manager"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.activeCapitalProjects} active`,
+  },
+  // --- Communications ---
+  {
+    id: "notices",
+    name: "Tenant Notices",
+    description: "Draft and send lease violation notices, rent reminders, and building-wide announcements",
+    href: "/notices",
+    icon: "Bell",
+    category: "communications",
+    categoryLabel: "Communications",
+    categoryColor: "rose",
+    roles: ["property_manager", "leasing_agent"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.pendingNotices} pending`,
+  },
+];
+
+export const currentUserRole: UserRole = "property_manager";
+
+export function getAppsForRole(role: UserRole): AppConfig[] {
+  return apps.filter((app) => app.roles.includes(role));
+}
+
+export function getAppsByCategory(appList: AppConfig[]): Record<string, AppConfig[]> {
+  const grouped: Record<string, AppConfig[]> = {};
+  for (const app of appList) {
+    if (!grouped[app.category]) grouped[app.category] = [];
+    grouped[app.category].push(app);
+  }
+  return grouped;
+}

@@ -1,240 +1,175 @@
 import Link from "next/link";
 import {
   dashboardStats,
-  inspections,
-  unitTurns,
-  maintenanceRequests,
-  applicationGroups,
+  appCategories,
+  currentUserRole,
+  getAppsForRole,
+  getAppsByCategory,
 } from "@/lib/mock-data";
+import type { AppConfig } from "@/lib/types";
+import {
+  ClipboardCheck,
+  RefreshCw,
+  Wrench,
+  Truck,
+  Users,
+  FileText,
+  Calendar,
+  Zap,
+  BarChart3,
+  Building2,
+  HardHat,
+  Bell,
+  type LucideIcon,
+} from "lucide-react";
 
-const toolCards = [
-  {
-    title: "Inspections",
-    href: "/inspections",
-    description: "Move-in, move-out, and quarterly inspections with condition tracking and photos.",
-    stat: `${dashboardStats.activeInspections} active`,
-    icon: "📋",
-    color: "border-l-blue-500",
-  },
-  {
-    title: "Unit Turns",
-    href: "/unit-turns",
-    description: "Manage the full move-out to move-in workflow — cleaning, paint, repairs, and walkthroughs.",
-    stat: `${dashboardStats.upcomingTurns} in progress`,
-    icon: "🔄",
-    color: "border-l-amber-500",
-  },
-  {
-    title: "Maintenance",
-    href: "/maintenance",
-    description: "Track work orders from submission through completion. Assign vendors and monitor costs.",
-    stat: `${dashboardStats.openMaintenanceRequests} open`,
-    icon: "🔧",
-    color: "border-l-red-500",
-  },
-  {
-    title: "Leasing",
-    href: "/leasing",
-    description: "Application tracking, document collection, and open house tour scheduling for prospective tenants.",
-    stat: `${dashboardStats.activeApplications} applications · ${dashboardStats.upcomingTours} tours`,
-    icon: "📝",
-    color: "border-l-purple-500",
-  },
-];
+const iconMap: Record<string, LucideIcon> = {
+  ClipboardCheck,
+  RefreshCw,
+  Wrench,
+  Truck,
+  Users,
+  FileText,
+  Calendar,
+  Zap,
+  BarChart3,
+  Building2,
+  HardHat,
+  Bell,
+};
 
-function StatCard({ label, value, subtext }: { label: string; value: number; subtext?: string }) {
-  return (
-    <div className="bg-card rounded-xl border border-border p-5">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="text-3xl font-bold mt-1">{value}</p>
-      {subtext && <p className="text-xs text-muted-foreground mt-1">{subtext}</p>}
+const colorMap: Record<string, { border: string; bg: string; text: string; dot: string }> = {
+  blue: { border: "border-t-blue-500", bg: "bg-blue-50", text: "text-blue-600", dot: "bg-blue-500" },
+  purple: { border: "border-t-purple-500", bg: "bg-purple-50", text: "text-purple-600", dot: "bg-purple-500" },
+  emerald: { border: "border-t-emerald-500", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500" },
+  amber: { border: "border-t-amber-500", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500" },
+  rose: { border: "border-t-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500" },
+};
+
+function AppCard({ app }: { app: AppConfig }) {
+  const Icon = iconMap[app.icon];
+  const colors = colorMap[app.categoryColor] || colorMap.blue;
+
+  const card = (
+    <div
+      className={`bg-card rounded-2xl border border-border border-t-4 ${colors.border} p-6 h-full ${
+        app.isBuilt
+          ? "hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
+          : "opacity-60 cursor-not-allowed"
+      }`}
+    >
+      <div className="flex items-start justify-between">
+        <div className={`w-12 h-12 rounded-xl ${colors.bg} flex items-center justify-center`}>
+          {Icon && <Icon size={28} className={colors.text} />}
+        </div>
+        {!app.isBuilt && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+            Coming Soon
+          </span>
+        )}
+      </div>
+      <h3 className="text-base font-semibold mt-4">{app.name}</h3>
+      <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+        {app.description}
+      </p>
+      {app.statLabel && (
+        <div className="mt-4 pt-3 border-t border-border">
+          <span className={`text-sm font-medium ${colors.text}`}>
+            {app.statLabel}
+          </span>
+        </div>
+      )}
     </div>
+  );
+
+  if (!app.isBuilt) return card;
+
+  return (
+    <Link href={app.href}>
+      {card}
+    </Link>
+  );
+}
+
+function CategorySection({
+  label,
+  color,
+  apps: categoryApps,
+}: {
+  label: string;
+  color: string;
+  apps: AppConfig[];
+}) {
+  const colors = colorMap[color] || colorMap.blue;
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-5">
+        <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
+        <h2 className="text-lg font-semibold">{label}</h2>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {categoryApps.map((app) => (
+          <AppCard key={app.id} app={app} />
+        ))}
+      </div>
+    </section>
   );
 }
 
 export default function Dashboard() {
-  const recentInspections = inspections
-    .filter((i) => i.status !== "completed")
-    .slice(0, 3);
-  const activeTurns = unitTurns.filter((t) => t.status !== "completed");
-  const urgentMaintenance = maintenanceRequests
-    .filter((m) => m.status !== "completed" && m.status !== "closed")
-    .sort((a, b) => {
-      const order = { emergency: 0, high: 1, medium: 2, low: 3 };
-      return order[a.priority] - order[b.priority];
-    })
-    .slice(0, 3);
+  const visibleApps = getAppsForRole(currentUserRole);
+  const grouped = getAppsByCategory(visibleApps);
+  const sortedCategories = appCategories
+    .filter((cat) => grouped[cat.id]?.length)
+    .sort((a, b) => a.order - b.order);
+
+  const occupancyPct = Math.round(
+    (dashboardStats.occupiedUnits / dashboardStats.totalUnits) * 100
+  );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground mt-1">
-          Moxie Management &mdash; USC Off-Campus Housing Overview
+          Choose a tool to get started
         </p>
       </div>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Units" value={dashboardStats.totalUnits} />
-        <StatCard label="Occupied" value={dashboardStats.occupiedUnits} subtext={`${Math.round((dashboardStats.occupiedUnits / dashboardStats.totalUnits) * 100)}% occupancy`} />
-        <StatCard label="Vacant" value={dashboardStats.vacantUnits} />
-        <StatCard label="Turning" value={dashboardStats.turningUnits} />
+      {/* Compact Stats Strip */}
+      <div className="bg-card rounded-xl border border-border px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <div>
+          <span className="font-semibold text-foreground">{dashboardStats.totalUnits}</span>{" "}
+          <span className="text-muted-foreground">units</span>
+        </div>
+        <div className="text-border">|</div>
+        <div>
+          <span className="font-semibold text-foreground">{occupancyPct}%</span>{" "}
+          <span className="text-muted-foreground">occupied</span>
+        </div>
+        <div className="text-border">|</div>
+        <div>
+          <span className="font-semibold text-foreground">{dashboardStats.vacantUnits}</span>{" "}
+          <span className="text-muted-foreground">vacant</span>
+        </div>
+        <div className="text-border">|</div>
+        <div>
+          <span className="font-semibold text-foreground">{dashboardStats.turningUnits}</span>{" "}
+          <span className="text-muted-foreground">turning</span>
+        </div>
       </div>
 
-      {/* Tool Cards */}
-      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {toolCards.map((card) => (
-          <Link key={card.href} href={card.href}>
-            <div
-              className={`bg-card rounded-xl border border-border border-l-4 ${card.color} p-6 hover:shadow-lg transition-shadow cursor-pointer h-full`}
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">{card.title}</h2>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    {card.description}
-                  </p>
-                </div>
-                <span className="text-2xl">{card.icon}</span>
-              </div>
-              <div className="mt-4 pt-4 border-t border-border">
-                <span className="text-sm font-medium text-accent">
-                  {card.stat}
-                </span>
-              </div>
-            </div>
-          </Link>
+      {/* App Grid by Category */}
+      <div className="space-y-10">
+        {sortedCategories.map((cat) => (
+          <CategorySection
+            key={cat.id}
+            label={cat.label}
+            color={cat.color}
+            apps={grouped[cat.id]}
+          />
         ))}
-      </div>
-
-      {/* Activity Feed */}
-      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {/* Recent Inspections */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Upcoming Inspections</h3>
-            <Link href="/inspections" className="text-sm text-accent hover:underline">
-              View all
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {recentInspections.map((insp) => (
-              <div key={insp.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <div>
-                  <p className="text-sm font-medium">
-                    {insp.propertyName} #{insp.unitNumber}
-                  </p>
-                  <p className="text-xs text-muted-foreground capitalize">
-                    {insp.type.replace("_", " ")} &middot; {insp.scheduledDate}
-                  </p>
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${insp.status === "scheduled" ? "bg-blue-100 text-blue-800" : "bg-yellow-100 text-yellow-800"}`}>
-                  {insp.status.replace("_", " ")}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Active Turns */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Active Unit Turns</h3>
-            <Link href="/unit-turns" className="text-sm text-accent hover:underline">
-              View all
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {activeTurns.map((turn) => {
-              const completed = turn.tasks.filter((t) => t.status === "completed").length;
-              const pct = Math.round((completed / turn.tasks.length) * 100);
-              return (
-                <div key={turn.id} className="py-2 border-b border-border last:border-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">
-                      {turn.propertyName} #{turn.unitNumber}
-                    </p>
-                    <span className="text-xs text-muted-foreground">{pct}%</span>
-                  </div>
-                  <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-accent rounded-full transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Target: {turn.targetReadyDate}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Urgent Maintenance */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Urgent Maintenance</h3>
-            <Link href="/maintenance" className="text-sm text-accent hover:underline">
-              View all
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {urgentMaintenance.map((req) => (
-              <div key={req.id} className="py-2 border-b border-border last:border-0">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">{req.title}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${req.priority === "emergency" ? "bg-red-100 text-red-800" : req.priority === "high" ? "bg-orange-100 text-orange-800" : "bg-yellow-100 text-yellow-800"}`}>
-                    {req.priority}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Leasing Activity */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Leasing</h3>
-            <Link href="/leasing" className="text-sm text-accent hover:underline">
-              View all
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {applicationGroups
-              .filter((g) => g.status === "incomplete")
-              .slice(0, 3)
-              .map((group) => {
-                const totalSteps = group.applicants.reduce((s, a) => s + a.steps.length, 0);
-                const doneSteps = group.applicants.reduce(
-                  (s, a) => s + a.steps.filter((st) => st.status === "complete").length, 0
-                );
-                const appPct = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0;
-                return (
-                  <div key={group.id} className="py-2 border-b border-border last:border-0">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">
-                        {group.propertyName} #{group.unitNumber}
-                      </p>
-                      <span className="text-xs text-muted-foreground">{appPct}%</span>
-                    </div>
-                    <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${appPct}%` }} />
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {group.applicants.filter((a) => a.role !== "guarantor").length} applicants &middot; {group.leaseCycle.replace("_", " ")}
-                    </p>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
       </div>
     </div>
   );
