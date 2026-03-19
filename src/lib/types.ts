@@ -238,6 +238,8 @@ export interface DashboardStats {
   reportsDue: number;
   activeCapitalProjects: number;
   pendingNotices: number;
+  trackedComps: number;
+  recurringIssues: number;
 }
 
 // --- App Launcher ---

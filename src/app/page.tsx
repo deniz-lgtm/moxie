@@ -20,6 +20,8 @@ import {
   Building2,
   HardHat,
   Bell,
+  TrendingUp,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,6 +38,8 @@ const iconMap: Record<string, LucideIcon> = {
   Building2,
   HardHat,
   Bell,
+  TrendingUp,
+  MessageSquare,
 };
 
 const colorMap: Record<string, { border: string; bg: string; text: string; dot: string }> = {

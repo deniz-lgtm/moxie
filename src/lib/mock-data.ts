@@ -611,6 +611,8 @@ export const dashboardStats: DashboardStats = {
   reportsDue: 2,
   activeCapitalProjects: 1,
   pendingNotices: 2,
+  trackedComps: 3,
+  recurringIssues: 2,
 };
 
 // --- App Launcher Configuration ---
@@ -716,6 +718,19 @@ export const apps: AppConfig[] = [
     isBuilt: true,
     statLabel: `${dashboardStats.upcomingTours} upcoming`,
   },
+  {
+    id: "comp-watch",
+    name: "Comp Watch",
+    description: "Track competitor rents near USC — price drops, concessions, and demand signals during leasing season",
+    href: "/comp-watch",
+    icon: "TrendingUp",
+    category: "leasing",
+    categoryLabel: "Leasing",
+    categoryColor: "purple",
+    roles: ["property_manager", "leasing_agent", "asset_manager", "owner"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.trackedComps} comps tracked`,
+  },
   // --- Finance ---
   {
     id: "rubs",
@@ -783,6 +798,19 @@ export const apps: AppConfig[] = [
     roles: ["property_manager", "leasing_agent"],
     isBuilt: false,
     statLabel: `${dashboardStats.pendingNotices} pending`,
+  },
+  {
+    id: "resident-pulse",
+    name: "Resident Pulse",
+    description: "Spot recurring issues from maintenance tickets, inspections, and reviews — surfaces the top problems each month",
+    href: "/resident-pulse",
+    icon: "MessageSquare",
+    category: "communications",
+    categoryLabel: "Communications",
+    categoryColor: "rose",
+    roles: ["property_manager", "leasing_agent", "asset_manager"],
+    isBuilt: false,
+    statLabel: `${dashboardStats.recurringIssues} recurring issues`,
   },
 ];
 
