@@ -16,6 +16,7 @@ import {
 } from "./appfolio";
 import type {
   Property,
+  Unit,
   MaintenanceRequest,
   DashboardStats,
   MaintenanceCategory,
@@ -70,6 +71,59 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
     unitCount: Number(p.UnitCount || p.unit_count || 0),
   }));
   return { data: properties, source: "appfolio" };
+}
+
+// --- Units (unit-centric, with property context) ---
+// Rent roll has: UnitId, Unit, PropertyName, PropertyId, Status, Tenant,
+//   BdBa ("2/1"), SquareFt, Rent, LeaseFrom, LeaseTo, PortfolioId, ...
+function parseBdBa(val: string | null | undefined): { bed: number | null; bath: number | null } {
+  if (!val) return { bed: null, bath: null };
+  const parts = val.split("/").map((s) => s.trim().replace("--", ""));
+  const bed = parts[0] ? parseInt(parts[0], 10) : null;
+  const bath = parts[1] ? parseInt(parts[1], 10) : null;
+  return { bed: isNaN(bed as number) ? null : bed, bath: isNaN(bath as number) ? null : bath };
+}
+
+function parseSqft(val: string | null | undefined): number | null {
+  if (!val) return null;
+  const n = parseInt(String(val).replace(/,/g, ""), 10);
+  return isNaN(n) ? null : n;
+}
+
+export async function fetchUnits(): Promise<{ data: Unit[]; source: "appfolio" }> {
+  const rentRollRows = await afGetRentRoll();
+  if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
+    return { data: [], source: "appfolio" };
+  }
+
+  let filtered = filterByPortfolio(rentRollRows);
+  if (filtered.length === 0) filtered = rentRollRows;
+
+  const units: Unit[] = filtered.map((r: any) => {
+    const unitNum = String(r.Unit || r.UnitName || "");
+    const propName = String(r.PropertyName || "");
+    const { bed, bath } = parseBdBa(r.BdBa);
+    const status = String(r.Status || "").toLowerCase() as Unit["status"];
+
+    return {
+      id: String(r.UnitId || ""),
+      propertyId: String(r.PropertyId || ""),
+      propertyName: propName,
+      number: unitNum,
+      displayName: `${propName} #${unitNum}`,
+      bedrooms: bed,
+      bathrooms: bath,
+      sqft: parseSqft(r.SquareFt),
+      rent: r.Rent || null,
+      status: (["current", "vacant", "notice", "future"].includes(status) ? status : "vacant") as Unit["status"],
+      tenant: r.Tenant || null,
+      leaseFrom: r.LeaseFrom || null,
+      leaseTo: r.LeaseTo || null,
+      appfolioId: r.UnitId ? String(r.UnitId) : undefined,
+    };
+  });
+
+  return { data: units, source: "appfolio" };
 }
 
 // --- Leasing Stats (Pre-leased for upcoming academic year) ---

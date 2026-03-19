@@ -39,13 +39,13 @@ export const properties: Property[] = [
 ];
 
 export const units: Unit[] = [
-  { id: "unit-1", propertyId: "prop-1", number: "101", bedrooms: 2, bathrooms: 1, sqft: 850, status: "occupied", currentTenantId: "t-1" },
-  { id: "unit-2", propertyId: "prop-1", number: "102", bedrooms: 1, bathrooms: 1, sqft: 600, status: "turning" },
-  { id: "unit-3", propertyId: "prop-1", number: "201", bedrooms: 3, bathrooms: 2, sqft: 1100, status: "occupied", currentTenantId: "t-2" },
-  { id: "unit-4", propertyId: "prop-2", number: "A1", bedrooms: 2, bathrooms: 1, sqft: 800, status: "vacant" },
-  { id: "unit-5", propertyId: "prop-2", number: "B3", bedrooms: 4, bathrooms: 2, sqft: 1400, status: "occupied", currentTenantId: "t-3" },
-  { id: "unit-6", propertyId: "prop-3", number: "301", bedrooms: 2, bathrooms: 2, sqft: 950, status: "occupied", currentTenantId: "t-4" },
-  { id: "unit-7", propertyId: "prop-3", number: "105", bedrooms: 1, bathrooms: 1, sqft: 550, status: "turning" },
+  { id: "unit-1", propertyId: "prop-1", propertyName: "The Lorenzo", number: "101", displayName: "The Lorenzo #101", bedrooms: 2, bathrooms: 1, sqft: 850, status: "current", tenant: "Alex T.", rent: "2400.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-2", propertyId: "prop-1", propertyName: "The Lorenzo", number: "102", displayName: "The Lorenzo #102", bedrooms: 1, bathrooms: 1, sqft: 600, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
+  { id: "unit-3", propertyId: "prop-1", propertyName: "The Lorenzo", number: "201", displayName: "The Lorenzo #201", bedrooms: 3, bathrooms: 2, sqft: 1100, status: "current", tenant: "Priya S.", rent: "3600.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-4", propertyId: "prop-2", propertyName: "Cardinal Gardens", number: "A1", displayName: "Cardinal Gardens #A1", bedrooms: 2, bathrooms: 1, sqft: 800, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
+  { id: "unit-5", propertyId: "prop-2", propertyName: "Cardinal Gardens", number: "B3", displayName: "Cardinal Gardens #B3", bedrooms: 4, bathrooms: 2, sqft: 1400, status: "current", tenant: "Jordan P.", rent: "4200.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-6", propertyId: "prop-3", propertyName: "Troy Hall", number: "301", displayName: "Troy Hall #301", bedrooms: 2, bathrooms: 2, sqft: 950, status: "current", tenant: "Marcus W.", rent: "2800.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-7", propertyId: "prop-3", propertyName: "Troy Hall", number: "105", displayName: "Troy Hall #105", bedrooms: 1, bathrooms: 1, sqft: 550, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
 ];
 
 // --- Inspections ---

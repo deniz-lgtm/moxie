@@ -2,7 +2,8 @@
 // Moxie Management — Core Types
 // ============================================
 
-// --- Properties ---
+// --- Properties & Units ---
+// Units are the primary entity. Property is context (which building the unit is in).
 export interface Property {
   id: string;
   name: string;
@@ -14,12 +15,18 @@ export interface Property {
 export interface Unit {
   id: string;
   propertyId: string;
+  propertyName: string;
   number: string;
-  bedrooms: number;
-  bathrooms: number;
-  sqft?: number;
-  currentTenantId?: string;
-  status: "occupied" | "vacant" | "turning" | "ready";
+  /** Display label: "PropertyName #UnitNumber" */
+  displayName: string;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  sqft: number | null;
+  rent: string | null;
+  status: "current" | "vacant" | "notice" | "future";
+  tenant: string | null;
+  leaseFrom: string | null;
+  leaseTo: string | null;
   appfolioId?: string;
 }
 
