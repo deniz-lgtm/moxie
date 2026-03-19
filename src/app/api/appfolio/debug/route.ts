@@ -78,7 +78,81 @@ export async function GET() {
     }
   } catch { /* ignore */ }
 
+  // Cross-reference diagnostic: compare PropertyIds between property_directory and rent_roll
+  let crossRef: any = {};
+  try {
+    // Fetch all property_directory rows
+    const propUrl = new URL(`${base}/property_directory.json`);
+    propUrl.searchParams.set("paginate_results", "true");
+    const propRes = await fetch(propUrl.toString(), { headers });
+    const propData = propRes.ok ? await propRes.json() : { results: [] };
+    let propRows = propData.results || [];
+    // Follow pagination
+    let nextPage = propData.next_page_url;
+    while (nextPage) {
+      const np = await fetch(nextPage, { headers });
+      if (!np.ok) break;
+      const npd = await np.json();
+      propRows = propRows.concat(npd.results || []);
+      nextPage = npd.next_page_url;
+    }
+
+    // Fetch all rent_roll rows
+    const rrUrl = new URL(`${base}/rent_roll.json`);
+    rrUrl.searchParams.set("paginate_results", "true");
+    const rrRes = await fetch(rrUrl.toString(), { headers });
+    const rrData = rrRes.ok ? await rrRes.json() : { results: [] };
+    let rrRows = rrData.results || [];
+    let rrNext = rrData.next_page_url;
+    while (rrNext) {
+      const np = await fetch(rrNext, { headers });
+      if (!np.ok) break;
+      const npd = await np.json();
+      rrRows = rrRows.concat(npd.results || []);
+      rrNext = npd.next_page_url;
+    }
+
+    // Find Moxie properties in property_directory
+    const moxieProps = propRows.filter((p: any) => {
+      const portfolio = String(p.Portfolio || p.PortfolioName || p.PropertyGroupName || "");
+      return portfolio === "Moxie Management";
+    });
+    const moxiePropertyIds = moxieProps.map((p: any) => String(p.PropertyId || p.property_id || ""));
+
+    // Find unique PropertyIds in rent roll
+    const rrPropertyIds = [...new Set(rrRows.map((r: any) => String(r.PropertyId || r.property_id || "")))];
+
+    // Find matches
+    const moxieIdSet = new Set(moxiePropertyIds);
+    const matchingRrRows = rrRows.filter((r: any) => moxieIdSet.has(String(r.PropertyId || r.property_id || "")));
+
+    crossRef = {
+      propertyDirectoryTotal: propRows.length,
+      moxiePropertiesCount: moxieProps.length,
+      moxiePropertyIds: moxiePropertyIds.slice(0, 20),
+      moxieSampleRows: moxieProps.slice(0, 3).map((p: any) => ({
+        PropertyId: p.PropertyId,
+        PropertyAddress: p.PropertyAddress,
+        Portfolio: p.Portfolio,
+        PortfolioName: p.PortfolioName,
+        PropertyGroupName: p.PropertyGroupName,
+      })),
+      rentRollTotal: rrRows.length,
+      rentRollUniquePropertyIds: rrPropertyIds.slice(0, 20),
+      rentRollSampleRow: rrRows.length > 0 ? Object.fromEntries(
+        Object.entries(rrRows[0]).filter(([k]) => ["PropertyId", "property_id", "PropertyName", "PortfolioId", "Portfolio", "PortfolioName"].includes(k))
+      ) : {},
+      matchingRentRollRows: matchingRrRows.length,
+      portfolioFieldsInPropDir: propRows.length > 0
+        ? Object.keys(propRows[0]).filter((k: string) => /portfolio|group/i.test(k))
+        : [],
+    };
+  } catch (e: any) {
+    crossRef = { error: e.message };
+  }
+
   return NextResponse.json({
+    crossRef,
     portfolios,
     rentRoll,
     vacancy_as_of_aug15: vacancy815,

@@ -64,6 +64,53 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   });
 }
 
+/** Diagnostic: show cross-reference details for debugging the Moxie filter */
+export async function debugMoxieFilter() {
+  const propRows = await afGetProperties();
+  const rentRollRows = await afGetRentRoll();
+
+  // What fields does property_directory have?
+  const propFields = propRows?.length > 0 ? Object.keys(propRows[0]) : [];
+
+  // What fields does rent_roll have?
+  const rrFields = rentRollRows?.length > 0 ? Object.keys(rentRollRows[0]) : [];
+
+  // Which property_directory rows match "Moxie Management"?
+  const moxieProps = (propRows || []).filter((p: any) => {
+    const portfolio = String(p.Portfolio || p.PortfolioName || p.PropertyGroupName || "");
+    return portfolio === PORTFOLIO_NAME;
+  });
+  const moxiePropertyIds = moxieProps.map((p: any) => String(p.PropertyId || p.property_id || ""));
+
+  // What PropertyIds exist in rent roll?
+  const rrPropertyIds = [...new Set((rentRollRows || []).map((r: any) => String(r.PropertyId || r.property_id || "")))];
+
+  // How many rent roll rows match?
+  const moxieIdSet = new Set(moxiePropertyIds);
+  const matchCount = (rentRollRows || []).filter((r: any) => moxieIdSet.has(String(r.PropertyId || r.property_id || ""))).length;
+
+  return {
+    propertyDirectory: {
+      totalRows: (propRows || []).length,
+      fields: propFields,
+      portfolioRelatedFields: propFields.filter(k => /portfolio|group|management/i.test(k)),
+      sampleRow: propRows?.[0] || null,
+      moxieMatchCount: moxieProps.length,
+      moxiePropertyIds: moxiePropertyIds.slice(0, 30),
+    },
+    rentRoll: {
+      totalRows: (rentRollRows || []).length,
+      fields: rrFields,
+      uniquePropertyIds: rrPropertyIds.slice(0, 30),
+      sampleRow: rentRollRows?.[0] || null,
+    },
+    crossRef: {
+      matchingRentRollRows: matchCount,
+      moxieIdSetSize: moxieIdSet.size,
+    },
+  };
+}
+
 // --- Properties ---
 export async function fetchProperties(): Promise<{ data: Property[]; source: "appfolio" }> {
   const rows = await afGetProperties();
