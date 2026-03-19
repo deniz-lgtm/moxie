@@ -40,9 +40,12 @@ export async function GET() {
 
   async function fetchSampleWithDates(report: string) {
     try {
-      const url = `${base}/${report}.json?paginate_results=true&from_date=${fmt(lastYear)}&to_date=${fmt(today)}`;
-      const res = await fetch(url, { headers });
-      if (!res.ok) return { error: `HTTP ${res.status}` };
+      const url = new URL(`${base}/${report}.json`);
+      url.searchParams.set("paginate_results", "true");
+      url.searchParams.set("from_date", fmt(lastYear));
+      url.searchParams.set("to_date", fmt(today));
+      const res = await fetch(url.toString(), { headers });
+      if (!res.ok) return { error: `HTTP ${res.status}`, url: url.toString() };
       const data = await res.json();
       const rows = data.results || data || [];
       return {

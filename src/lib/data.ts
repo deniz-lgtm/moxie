@@ -6,7 +6,6 @@
 
 import {
   getProperties as afGetProperties,
-  getUnits as afGetUnits,
   getWorkOrders as afGetWorkOrders,
   getRentRoll as afGetRentRoll,
 } from "./appfolio";
@@ -79,31 +78,26 @@ export async function fetchUnitStats(): Promise<{
     };
   }
   try {
-    // Fetch in parallel: all rentable units + rent roll (active leases)
-    const [unitRows, rentRollRows] = await Promise.all([
-      afGetUnits(),
-      afGetRentRoll(),
-    ]);
+    // Rent roll includes ALL units with a Status field:
+    //   "Current" = occupied, "Vacant" = vacant, etc.
+    const rentRollRows = await afGetRentRoll();
 
-    if (!Array.isArray(unitRows) || unitRows.length === 0) {
-      throw new Error("No unit data returned");
+    if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
+      throw new Error("No rent roll data returned");
     }
 
-    // Only count rentable units
-    const rentableUnits = unitRows.filter(
-      (u: any) => String(u.Rentable || u.rentable || "").toLowerCase() !== "no"
-    );
-    const total = rentableUnits.length;
+    const total = rentRollRows.length;
+    let occupied = 0;
+    let vacant = 0;
 
-    // Occupied = units that appear on the rent roll (have an active lease)
-    const occupiedUnitIds = new Set(
-      (rentRollRows || []).map((r: any) => String(r.UnitId || r.unit_id || r.UnitID || "")).filter(Boolean)
-    );
-    const occupied = rentableUnits.filter((u: any) =>
-      occupiedUnitIds.has(String(u.UnitId || u.unit_id || u.UnitID || ""))
-    ).length;
-
-    const vacant = total - occupied;
+    for (const row of rentRollRows) {
+      const status = String(row.Status || row.status || "").toLowerCase();
+      if (status === "current" || status === "notice") {
+        occupied++;
+      } else {
+        vacant++;
+      }
+    }
 
     return { total, occupied, vacant, turning: 0, source: "appfolio" };
   } catch (error) {
