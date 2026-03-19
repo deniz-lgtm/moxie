@@ -1,12 +1,13 @@
 import Link from "next/link";
 import {
-  dashboardStats,
   appCategories,
   currentUserRole,
   getAppsForRole,
   getAppsByCategory,
+  apps,
 } from "@/lib/mock-data";
-import type { AppConfig } from "@/lib/types";
+import { fetchDashboardStats } from "@/lib/data";
+import type { AppConfig, DashboardStats } from "@/lib/types";
 import {
   ClipboardCheck,
   RefreshCw,
@@ -49,6 +50,29 @@ const colorMap: Record<string, { border: string; bg: string; text: string; dot: 
   amber: { border: "border-t-amber-500", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500" },
   rose: { border: "border-t-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500" },
 };
+
+function applyLiveStats(appList: AppConfig[], stats: DashboardStats): AppConfig[] {
+  const statMap: Record<string, string> = {
+    inspections: `${stats.activeInspections} active`,
+    "unit-turns": `${stats.upcomingTurns} in progress`,
+    maintenance: `${stats.openMaintenanceRequests} open`,
+    "move-in-out": `${stats.upcomingMoveOuts} upcoming`,
+    vendors: `${stats.vendorCount} vendors`,
+    applications: `${stats.activeApplications} active`,
+    tours: `${stats.upcomingTours} upcoming`,
+    "comp-watch": `${stats.trackedComps} comps tracked`,
+    rubs: stats.pendingRubs,
+    reports: `${stats.reportsDue} reports due`,
+    portfolio: `${stats.totalUnits} units`,
+    "capital-projects": `${stats.activeCapitalProjects} active`,
+    notices: `${stats.pendingNotices} pending`,
+    "resident-pulse": `${stats.recurringIssues} recurring issues`,
+  };
+  return appList.map((app) => ({
+    ...app,
+    statLabel: statMap[app.id] || app.statLabel,
+  }));
+}
 
 function AppCard({ app }: { app: AppConfig }) {
   const Icon = iconMap[app.icon];
@@ -120,22 +144,32 @@ function CategorySection({
   );
 }
 
-export default function Dashboard() {
-  const visibleApps = getAppsForRole(currentUserRole);
+export default async function Dashboard() {
+  const { data: stats, source } = await fetchDashboardStats();
+
+  const rawApps = getAppsForRole(currentUserRole);
+  const visibleApps = applyLiveStats(rawApps, stats);
   const grouped = getAppsByCategory(visibleApps);
   const sortedCategories = appCategories
     .filter((cat) => grouped[cat.id]?.length)
     .sort((a, b) => a.order - b.order);
 
-  const occupancyPct = Math.round(
-    (dashboardStats.occupiedUnits / dashboardStats.totalUnits) * 100
-  );
+  const occupancyPct = stats.totalUnits > 0
+    ? Math.round((stats.occupiedUnits / stats.totalUnits) * 100)
+    : 0;
 
   return (
     <div className="space-y-10">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          {source === "appfolio" && (
+            <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
+              Live from AppFolio
+            </span>
+          )}
+        </div>
         <p className="text-muted-foreground mt-1">
           Choose a tool to get started
         </p>
@@ -144,7 +178,7 @@ export default function Dashboard() {
       {/* Compact Stats Strip */}
       <div className="bg-card rounded-xl border border-border px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <div>
-          <span className="font-semibold text-foreground">{dashboardStats.totalUnits}</span>{" "}
+          <span className="font-semibold text-foreground">{stats.totalUnits}</span>{" "}
           <span className="text-muted-foreground">units</span>
         </div>
         <div className="text-border">|</div>
@@ -154,12 +188,12 @@ export default function Dashboard() {
         </div>
         <div className="text-border">|</div>
         <div>
-          <span className="font-semibold text-foreground">{dashboardStats.vacantUnits}</span>{" "}
+          <span className="font-semibold text-foreground">{stats.vacantUnits}</span>{" "}
           <span className="text-muted-foreground">vacant</span>
         </div>
         <div className="text-border">|</div>
         <div>
-          <span className="font-semibold text-foreground">{dashboardStats.turningUnits}</span>{" "}
+          <span className="font-semibold text-foreground">{stats.turningUnits}</span>{" "}
           <span className="text-muted-foreground">turning</span>
         </div>
       </div>

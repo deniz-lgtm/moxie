@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { maintenanceRequests } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
+import { maintenanceRequests as mockRequests } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
   MaintenanceRequest,
   MaintenanceStatus,
-  MaintenancePriority,
 } from "@/lib/types";
 
 const STATUS_OPTIONS: MaintenanceStatus[] = [
@@ -19,11 +18,32 @@ const STATUS_OPTIONS: MaintenanceStatus[] = [
 ];
 
 export default function MaintenancePage() {
-  const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>(maintenanceRequests);
+  const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>(mockRequests);
   const [selected, setSelected] = useState<MaintenanceRequest | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [newNote, setNewNote] = useState("");
+  const [dataSource, setDataSource] = useState<"mock" | "appfolio">("mock");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadWorkOrders() {
+      try {
+        const res = await fetch("/api/appfolio/work-orders");
+        if (!res.ok) throw new Error("API error");
+        const json = await res.json();
+        if (json.workOrders && json.workOrders.length > 0) {
+          setAllRequests(json.workOrders);
+          setDataSource(json.source || "appfolio");
+        }
+      } catch {
+        // Keep mock data on failure
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadWorkOrders();
+  }, []);
 
   const filtered = allRequests
     .filter((r) => {
@@ -213,10 +233,19 @@ export default function MaintenancePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Maintenance Requests</h1>
-        <p className="text-muted-foreground mt-1">
-          Track and manage work orders across all properties
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Maintenance Requests</h1>
+            <p className="text-muted-foreground mt-1">
+              Track and manage work orders across all properties
+            </p>
+          </div>
+          {dataSource === "appfolio" && (
+            <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
+              Live from AppFolio
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -246,43 +275,52 @@ export default function MaintenancePage() {
         </select>
       </div>
 
-      {/* Request Cards */}
-      <div className="space-y-3">
-        {filtered.map((req) => (
-          <button
-            key={req.id}
-            onClick={() => setSelected(req)}
-            className="w-full text-left bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow cursor-pointer"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold truncate">{req.title}</h3>
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
-                </p>
-                <p className="text-sm text-muted-foreground mt-1 truncate">
-                  {req.description}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 ml-4 shrink-0">
-                <StatusBadge value={req.priority} />
-                <StatusBadge value={req.status} />
-              </div>
-            </div>
-            <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-              <span className="capitalize">{req.category}</span>
-              <div className="flex items-center gap-3">
-                {req.assignedTo && <span>Assigned: {req.assignedTo}</span>}
-                {req.scheduledDate && <span>Scheduled: {req.scheduledDate}</span>}
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-8 text-muted-foreground text-sm">
+          Loading work orders...
+        </div>
+      )}
 
-      {filtered.length === 0 && (
+      {/* Request Cards */}
+      {!loading && (
+        <div className="space-y-3">
+          {filtered.map((req) => (
+            <button
+              key={req.id}
+              onClick={() => setSelected(req)}
+              className="w-full text-left bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow cursor-pointer"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold truncate">{req.title}</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1 truncate">
+                    {req.description}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 ml-4 shrink-0">
+                  <StatusBadge value={req.priority} />
+                  <StatusBadge value={req.status} />
+                </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+                <span className="capitalize">{req.category}</span>
+                <div className="flex items-center gap-3">
+                  {req.assignedTo && <span>Assigned: {req.assignedTo}</span>}
+                  {req.scheduledDate && <span>Scheduled: {req.scheduledDate}</span>}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!loading && filtered.length === 0 && (
         <div className="text-center py-12 text-muted-foreground">
           No maintenance requests match the current filters.
         </div>

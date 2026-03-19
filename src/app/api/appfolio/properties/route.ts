@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { getProperties } from "@/lib/appfolio";
+import { fetchProperties } from "@/lib/data";
 
 export async function GET() {
   try {
-    const properties = await getProperties();
-    return NextResponse.json({ properties });
+    const { data, source } = await fetchProperties();
+    return NextResponse.json({ properties: data, source });
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message || "Failed to fetch properties from AppFolio" },
+      { error: error.message || "Failed to fetch properties" },
       { status: 500 }
     );
   }
