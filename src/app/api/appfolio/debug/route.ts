@@ -32,10 +32,34 @@ export async function GET() {
     }
   }
 
-  const [units, workOrders] = await Promise.all([
+  const today = new Date();
+  const lastYear = new Date();
+  lastYear.setFullYear(lastYear.getFullYear() - 1);
+  const fmt = (d: Date) =>
+    `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+
+  async function fetchSampleWithDates(report: string) {
+    try {
+      const url = `${base}/${report}.json?paginate_results=true&from_date=${fmt(lastYear)}&to_date=${fmt(today)}`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) return { error: `HTTP ${res.status}` };
+      const data = await res.json();
+      const rows = data.results || data || [];
+      return {
+        totalRows: rows.length,
+        fields: rows.length > 0 ? Object.keys(rows[0]) : [],
+        sample: rows.slice(0, 2),
+      };
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  }
+
+  const [units, rentRoll, workOrders] = await Promise.all([
     fetchSample("unit_directory"),
-    fetchSample("work_order_detail"),
+    fetchSample("rent_roll"),
+    fetchSampleWithDates("work_order_detail"),
   ]);
 
-  return NextResponse.json({ units, workOrders });
+  return NextResponse.json({ units, rentRoll, workOrders });
 }

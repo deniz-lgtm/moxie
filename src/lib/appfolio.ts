@@ -92,6 +92,7 @@ export async function getTenants(params?: { property_id?: string; status?: strin
 }
 
 // --- Work Orders ---
+// work_order_detail requires from_date and to_date
 export async function getWorkOrders(params?: {
   property_id?: string;
   status?: string;
@@ -100,8 +101,17 @@ export async function getWorkOrders(params?: {
   const queryParams: Record<string, string> = {};
   if (params?.property_id) queryParams.property_id = params.property_id;
   if (params?.status) queryParams.status = params.status;
-  if (params?.created_after) queryParams.from_date = params.created_after;
+  // Default to last 12 months
+  const toDate = new Date();
+  const fromDate = new Date();
+  fromDate.setFullYear(fromDate.getFullYear() - 1);
+  queryParams.from_date = params?.created_after || formatDate(fromDate);
+  queryParams.to_date = formatDate(toDate);
   return appfolioFetchAll("/reports/work_order_detail.json", queryParams);
+}
+
+function formatDate(d: Date): string {
+  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
 }
 
 // --- Unit Vacancy ---

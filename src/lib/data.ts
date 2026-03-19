@@ -8,6 +8,7 @@ import {
   getProperties as afGetProperties,
   getUnits as afGetUnits,
   getWorkOrders as afGetWorkOrders,
+  getRentRoll as afGetRentRoll,
 } from "./appfolio";
 import {
   properties as mockProperties,
@@ -59,8 +60,8 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
 }
 
 // --- Units & Vacancy ---
-// AppFolio unit_directory report returns rows like:
-// { property_name, unit_name, status, bedrooms, bathrooms, sq_ft, market_rent, tenant_name, ... }
+// unit_directory gives total unit count (RentStatus is unreliable/null).
+// rent_roll gives currently occupied units (units with an active lease).
 export async function fetchUnitStats(): Promise<{
   total: number;
   occupied: number;
@@ -78,26 +79,33 @@ export async function fetchUnitStats(): Promise<{
     };
   }
   try {
-    const rows = await afGetUnits();
-    if (!Array.isArray(rows) || rows.length === 0) {
+    // Fetch in parallel: all rentable units + rent roll (active leases)
+    const [unitRows, rentRollRows] = await Promise.all([
+      afGetUnits(),
+      afGetRentRoll(),
+    ]);
+
+    if (!Array.isArray(unitRows) || unitRows.length === 0) {
       throw new Error("No unit data returned");
     }
-    const total = rows.length;
-    let occupied = 0;
-    let vacant = 0;
-    let turning = 0;
-    for (const u of rows) {
-      const status = String(u.status || u.unit_status || u.vacancy_status || "").toLowerCase();
-      const hasTenant = !!(u.tenant_name || u.current_tenant || u.tenant_id);
-      if (status.includes("occupied") || status.includes("current") || (hasTenant && !status.includes("vacant"))) {
-        occupied++;
-      } else if (status.includes("turn") || status.includes("make ready") || status.includes("make_ready")) {
-        turning++;
-      } else {
-        vacant++;
-      }
-    }
-    return { total, occupied, vacant, turning, source: "appfolio" };
+
+    // Only count rentable units
+    const rentableUnits = unitRows.filter(
+      (u: any) => String(u.Rentable || u.rentable || "").toLowerCase() !== "no"
+    );
+    const total = rentableUnits.length;
+
+    // Occupied = units that appear on the rent roll (have an active lease)
+    const occupiedUnitIds = new Set(
+      (rentRollRows || []).map((r: any) => String(r.UnitId || r.unit_id || r.UnitID || "")).filter(Boolean)
+    );
+    const occupied = rentableUnits.filter((u: any) =>
+      occupiedUnitIds.has(String(u.UnitId || u.unit_id || u.UnitID || ""))
+    ).length;
+
+    const vacant = total - occupied;
+
+    return { total, occupied, vacant, turning: 0, source: "appfolio" };
   } catch (error) {
     console.error("AppFolio units fetch failed, using mock data:", error);
     return {
