@@ -13,6 +13,7 @@ import {
   getWorkOrders as afGetWorkOrders,
   getRentRoll as afGetRentRoll,
   getVacancyReport as afGetVacancyReport,
+  getTenants as afGetTenants,
 } from "./appfolio";
 import type {
   Property,
@@ -22,6 +23,7 @@ import type {
   MaintenanceCategory,
   MaintenancePriority,
   MaintenanceStatus,
+  ApplicationGroup,
 } from "./types";
 
 // Portfolio name to filter by
@@ -255,6 +257,10 @@ function parseSqft(val: string | null | undefined): number | null {
 }
 
 export async function fetchUnits(): Promise<{ data: Unit[]; source: "appfolio" }> {
+  // Pre-warm the Moxie property ID cache BEFORE fetching rent roll
+  // to avoid concurrent API calls that trigger AppFolio rate limiting.
+  await getMoxiePropertyIds();
+
   const rentRollRows = await afGetRentRoll();
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
     return { data: [], source: "appfolio" };
@@ -303,13 +309,15 @@ export async function fetchUnitStats(): Promise<{
   unleased: number;
   source: "appfolio";
 }> {
-  // Pre-warm the Moxie property ID cache alongside the other fetches
-  // so we don't do a serial property_directory fetch inside filterToMoxie.
+  // Fetch Moxie property IDs FIRST (sequential) to avoid concurrent API calls
+  // that trigger AppFolio rate limiting. The cache is then used by filterToMoxie.
+  await getMoxiePropertyIds();
+
+  // Now fetch rent roll and vacancy in parallel (property_directory is already cached).
   // Vacancy report with future as_of_date may fail (400) — make it non-fatal.
   const [rentRollRows, vacancyRows] = await Promise.all([
     afGetRentRoll(),
     afGetVacancyReport(NEXT_YEAR_START).catch(() => [] as any[]),
-    getMoxiePropertyIds().catch(() => new Set<string>()), // pre-warm cache
   ]);
 
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
@@ -409,6 +417,8 @@ export async function fetchMaintenanceRequests(params?: {
   property_id?: string;
   status?: string;
 }): Promise<{ data: MaintenanceRequest[]; source: "appfolio" }> {
+  // Ensure Moxie property IDs are cached before fetching work orders
+  await getMoxiePropertyIds();
   const allRows = await afGetWorkOrders(params);
   const rows = await filterToMoxie(allRows || []);
   const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
@@ -439,15 +449,99 @@ export async function fetchMaintenanceRequests(params?: {
   return { data: requests, source: "appfolio" };
 }
 
+// --- Applications (from AppFolio tenant directory) ---
+// AppFolio tenant_directory includes applicants (TenantStatus = "Applicant" or similar).
+// We group them by property+unit to create ApplicationGroup-like records.
+export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; source: "appfolio" }> {
+  await getMoxiePropertyIds();
+  const allTenants = await afGetTenants({ status: "applicant" }).catch(() => [] as any[]);
+  const tenants = await filterToMoxie(allTenants || []);
+
+  // Group applicants by property + unit
+  const groupMap = new Map<string, any[]>();
+  for (const t of tenants) {
+    const propName = String(t.PropertyName || t.property_name || "");
+    const unit = String(t.Unit || t.UnitName || t.unit_name || "");
+    const key = `${t.PropertyId || t.property_id || ""}:${unit}`;
+    if (!groupMap.has(key)) groupMap.set(key, []);
+    groupMap.get(key)!.push(t);
+  }
+
+  const groups: ApplicationGroup[] = [];
+  let idx = 0;
+  for (const [key, members] of groupMap) {
+    idx++;
+    const first = members[0];
+    const propName = String(first.PropertyName || first.property_name || "");
+    const unit = String(first.Unit || first.UnitName || first.unit_name || "");
+
+    const applicants = members.map((m: any, i: number) => ({
+      id: String(m.TenantId || m.tenant_id || `app-${idx}-${i}`),
+      groupId: `grp-${idx}`,
+      name: String(m.TenantName || m.tenant_name || m.Name || "Unknown"),
+      email: String(m.Email || m.TenantEmail || m.email || ""),
+      phone: m.Phone || m.TenantPhone || m.phone || undefined,
+      role: (i === 0 ? "primary" : "co_applicant") as "primary" | "co_applicant",
+      steps: [
+        { id: `s-${idx}-${i}-1`, name: "Application Submitted", description: "Complete online application", required: true, status: "complete" as const },
+        { id: `s-${idx}-${i}-2`, name: "Background Check", description: "Credit and background screening", required: true, status: (m.ScreeningStatus === "Completed" || m.screening_status === "completed" ? "complete" : "in_review") as "complete" | "in_review" },
+        { id: `s-${idx}-${i}-3`, name: "Income Verification", description: "Verify income documentation", required: true, status: "pending" as const },
+        { id: `s-${idx}-${i}-4`, name: "Lease Signing", description: "Sign the lease agreement", required: true, status: "pending" as const },
+      ],
+      documents: [],
+      nudges: [],
+      status: "in_progress" as const,
+      startedAt: m.ApplicationDate || m.application_date || m.CreatedAt || new Date().toISOString(),
+    }));
+
+    // Determine group status based on member data
+    const hasApproved = members.some((m: any) => {
+      const s = String(m.TenantStatus || m.tenant_status || m.Status || "").toLowerCase();
+      return s === "approved" || s === "current";
+    });
+    const hasDenied = members.some((m: any) => {
+      const s = String(m.TenantStatus || m.tenant_status || m.Status || "").toLowerCase();
+      return s === "denied" || s === "rejected";
+    });
+
+    groups.push({
+      id: `grp-${idx}`,
+      propertyId: String(first.PropertyId || first.property_id || ""),
+      propertyName: propName,
+      unitNumber: unit,
+      unitDetails: "",
+      leaseCycle: "fall_2026",
+      targetMoveIn: "08/15/2026",
+      monthlyRent: 0,
+      applicants,
+      status: hasApproved ? "approved" : hasDenied ? "denied" : "incomplete",
+      createdAt: first.ApplicationDate || first.application_date || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return { data: groups, source: "appfolio" };
+}
+
 // --- Aggregated Dashboard Stats ---
 export async function fetchDashboardStats(): Promise<{ data: DashboardStats; source: "appfolio" }> {
-  const [unitStats, maintenanceResult] = await Promise.all([
+  // getMoxiePropertyIds() is called inside each sub-function and cached,
+  // but we pre-warm it here to serialize the property_directory call.
+  await getMoxiePropertyIds();
+
+  const [unitStats, maintenanceResult, applicationsResult] = await Promise.all([
     fetchUnitStats(),
     fetchMaintenanceRequests().catch(() => ({ data: [] as MaintenanceRequest[], source: "appfolio" as const })),
+    fetchApplications().catch(() => ({ data: [] as ApplicationGroup[], source: "appfolio" as const })),
   ]);
 
   const openStatuses = new Set(["submitted", "assigned", "in_progress", "awaiting_parts"]);
   const openMaintenance = maintenanceResult.data.filter((r) => openStatuses.has(r.status)).length;
+  const activeApps = applicationsResult.data.filter((g) => g.status === "incomplete" || g.status === "under_review").length;
+
+  // Count upcoming move-outs from rent roll (leases ending within 60 days)
+  const now = new Date();
+  const sixtyDaysOut = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
 
   const stats: DashboardStats = {
     totalUnits: unitStats.total,
@@ -458,7 +552,7 @@ export async function fetchDashboardStats(): Promise<{ data: DashboardStats; sou
     openMaintenanceRequests: openMaintenance,
     activeInspections: 0,
     upcomingTurns: 0,
-    activeApplications: 0,
+    activeApplications: activeApps || applicationsResult.data.length,
     upcomingTours: 0,
     upcomingMoveOuts: 0,
     vendorCount: 0,

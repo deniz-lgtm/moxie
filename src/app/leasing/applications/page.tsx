@@ -1,15 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { applicationGroups } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
+import { applicationGroups as mockApplicationGroups } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { ApplicationGroup, Applicant } from "@/lib/types";
 
 export default function ApplicationsPage() {
-  const [allGroups, setAllGroups] = useState<ApplicationGroup[]>(applicationGroups);
+  const [allGroups, setAllGroups] = useState<ApplicationGroup[]>(mockApplicationGroups);
   const [selectedGroup, setSelectedGroup] = useState<ApplicationGroup | null>(null);
   const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [dataSource, setDataSource] = useState<string>("mock");
+
+  useEffect(() => {
+    fetch("/api/appfolio/applications")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.applications && data.applications.length > 0) {
+          setAllGroups(data.applications);
+          setDataSource(data.source || "appfolio");
+        }
+      })
+      .catch(() => {
+        // Keep mock data on error
+      });
+  }, []);
 
   const filtered = allGroups.filter((g) => {
     if (filterStatus !== "all" && g.status !== filterStatus) return false;

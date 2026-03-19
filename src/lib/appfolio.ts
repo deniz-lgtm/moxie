@@ -128,3 +128,19 @@ export async function getRentRoll(propertyId?: string) {
   if (propertyId) params.property_id = propertyId;
   return appfolioFetchAll("/reports/rent_roll.json", params);
 }
+
+// --- Aged Receivables ---
+export async function getAgedReceivables() {
+  return appfolioFetchAll("/reports/aged_receivables_detail.json");
+}
+
+// --- General Ledger ---
+export async function getGeneralLedger(params?: {
+  from_date?: string;
+  to_date?: string;
+}) {
+  const queryParams: Record<string, string> = {};
+  if (params?.from_date) queryParams.from_date = params.from_date;
+  if (params?.to_date) queryParams.to_date = params.to_date;
+  return appfolioFetchAll("/reports/general_ledger.json", queryParams);
+}

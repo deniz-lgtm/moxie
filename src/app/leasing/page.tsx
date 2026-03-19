@@ -1,7 +1,20 @@
 import Link from "next/link";
-import { applicationGroups, tourSlots } from "@/lib/mock-data";
+import { applicationGroups as mockApplicationGroups, tourSlots } from "@/lib/mock-data";
+import { fetchApplications } from "@/lib/data";
 
-export default function LeasingPage() {
+export const dynamic = "force-dynamic";
+
+export default async function LeasingPage() {
+  let applicationGroups = mockApplicationGroups;
+  try {
+    const result = await fetchApplications();
+    if (result.data.length > 0) {
+      applicationGroups = result.data;
+    }
+  } catch {
+    // Fall back to mock data
+  }
+
   const incompleteApps = applicationGroups.filter((g) => g.status === "incomplete");
   const reviewApps = applicationGroups.filter((g) => g.status === "under_review");
   const upcomingTours = tourSlots.filter((t) => new Date(t.date) >= new Date("2026-03-14"));
