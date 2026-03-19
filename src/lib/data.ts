@@ -30,33 +30,47 @@ const PORTFOLIO_NAME = "Moxie Management";
 // Next lease year start date for vacancy projection
 const NEXT_YEAR_START = "08/15/2026";
 
-/** Filter rows to only Moxie Management portfolio */
-function filterByPortfolio(rows: any[]): any[] {
-  // Try matching on PortfolioName or PropertyGroupName
-  // If that field doesn't exist, try PortfolioId once we know which ID maps to Moxie
-  return rows.filter((row) => {
-    const portfolio = row.PortfolioName || row.Portfolio || row.PropertyGroupName || "";
-    return portfolio === PORTFOLIO_NAME;
-  });
+/**
+ * Get the set of PropertyIds that belong to "Moxie Management" portfolio.
+ * The property_directory report has a `Portfolio` field; the rent roll does not.
+ * So we cross-reference: fetch property_directory → extract Moxie PropertyIds →
+ * use those to filter rent roll / vacancy / work order rows by PropertyId.
+ */
+let _moxiePropertyIds: Set<string> | null = null;
+
+async function getMoxiePropertyIds(): Promise<Set<string>> {
+  if (_moxiePropertyIds) return _moxiePropertyIds;
+
+  const rows = await afGetProperties();
+  const ids = new Set<string>();
+  for (const row of rows || []) {
+    const portfolio = String(row.Portfolio || row.PortfolioName || row.PropertyGroupName || "");
+    if (portfolio === PORTFOLIO_NAME) {
+      const id = String(row.PropertyId || row.property_id || "");
+      if (id) ids.add(id);
+    }
+  }
+  _moxiePropertyIds = ids;
+  return ids;
 }
 
-/** Check if a row belongs to the Moxie portfolio by PortfolioId */
-function filterByPortfolioId(rows: any[], portfolioId: number | string): any[] {
+/** Filter any report's rows to only Moxie Management properties (by PropertyId cross-ref) */
+async function filterToMoxie(rows: any[]): Promise<any[]> {
+  const moxieIds = await getMoxiePropertyIds();
+  if (moxieIds.size === 0) return rows; // fallback: no filter if lookup failed
   return rows.filter((row) => {
-    return String(row.PortfolioId) === String(portfolioId) ||
-           String(row.portfolio_id) === String(portfolioId);
+    const pid = String(row.PropertyId || row.property_id || "");
+    return moxieIds.has(pid);
   });
 }
 
 // --- Properties ---
 export async function fetchProperties(): Promise<{ data: Property[]; source: "appfolio" }> {
   const rows = await afGetProperties();
-  // Try name-based filter first, fall back to showing all if no portfolio field
-  let filtered = filterByPortfolio(rows || []);
-  if (filtered.length === 0) {
-    // Portfolio field might not exist on property_directory — return all
-    filtered = rows || [];
-  }
+  const moxieIds = await getMoxiePropertyIds();
+  const filtered = moxieIds.size > 0
+    ? (rows || []).filter((p: any) => moxieIds.has(String(p.PropertyId || p.property_id || "")))
+    : rows || [];
   const properties: Property[] = filtered.map((p: any, i: number) => ({
     id: String(p.PropertyId || p.property_id || `prop-${i}`),
     name: p.PropertyName || p.property_name || "",
@@ -96,8 +110,7 @@ export async function fetchUnits(): Promise<{ data: Unit[]; source: "appfolio" }
     return { data: [], source: "appfolio" };
   }
 
-  let filtered = filterByPortfolio(rentRollRows);
-  if (filtered.length === 0) filtered = rentRollRows;
+  const filtered = await filterToMoxie(rentRollRows);
 
   const units: Unit[] = filtered.map((r: any) => {
     const unitNum = String(r.Unit || r.UnitName || "");
@@ -149,17 +162,9 @@ export async function fetchUnitStats(): Promise<{
     throw new Error("No rent roll data returned");
   }
 
-  // Filter to Moxie Management portfolio
-  let moxieRentRoll = filterByPortfolio(rentRollRows);
-  let moxieVacancy = filterByPortfolio(vacancyRows || []);
-
-  // If portfolio name filter didn't work (field might not exist), try PortfolioId
-  if (moxieRentRoll.length === 0) {
-    // Discover Moxie portfolio ID from properties that aren't the Sacramento ones
-    // For now, try all — the portfolio filter will be refined once we see the data
-    moxieRentRoll = rentRollRows;
-    moxieVacancy = vacancyRows || [];
-  }
+  // Filter to Moxie Management portfolio (cross-ref property_directory)
+  const moxieRentRoll = await filterToMoxie(rentRollRows);
+  const moxieVacancy = await filterToMoxie(vacancyRows || []);
 
   const total = moxieRentRoll.length;
 
@@ -250,8 +255,9 @@ export async function fetchMaintenanceRequests(params?: {
   property_id?: string;
   status?: string;
 }): Promise<{ data: MaintenanceRequest[]; source: "appfolio" }> {
-  const rows = await afGetWorkOrders(params);
-  const requests: MaintenanceRequest[] = (rows || []).map((wo: any, i: number) => ({
+  const allRows = await afGetWorkOrders(params);
+  const rows = await filterToMoxie(allRows || []);
+  const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
     id: String(wo.WorkOrderId || wo.work_order_id || wo.Id || `wo-${i}`),
     unitId: String(wo.UnitId || wo.unit_id || ""),
     propertyId: String(wo.PropertyId || wo.property_id || ""),
