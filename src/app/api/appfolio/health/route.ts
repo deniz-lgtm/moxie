@@ -20,14 +20,14 @@ export async function GET() {
     });
   }
 
-  // Try a real API call to verify credentials work
+  // Try the v1 report-based API (correct endpoint structure)
   try {
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const url = `https://${dbName}.appfolio.com/api/v2/properties.json`;
+    const url = `https://${dbName}.appfolio.com/api/v1/reports/property_directory.json?paginate_results=true`;
     const res = await fetch(url, {
       headers: {
         Authorization: `Basic ${credentials}`,
-        "Content-Type": "application/json",
+        Accept: "application/json",
       },
     });
 
@@ -36,18 +36,24 @@ export async function GET() {
       return NextResponse.json({
         status: "error",
         httpStatus: res.status,
+        url_attempted: `https://${dbName}.appfolio.com/api/v1/reports/property_directory.json`,
         detail: text.slice(0, 500),
-        url: url.replace(clientId!, "***").replace(clientSecret!, "***"),
       });
     }
 
     const data = await res.json();
-    const count = Array.isArray(data) ? data.length : (data.properties?.length ?? "unknown");
+    const results = data.results || data || [];
+    const count = Array.isArray(results) ? results.length : "unknown";
 
     return NextResponse.json({
       status: "connected",
       database: dbName,
+      apiVersion: "v1",
+      endpoint: "reports/property_directory",
       propertiesFound: count,
+      sampleFields: Array.isArray(results) && results.length > 0
+        ? Object.keys(results[0])
+        : [],
     });
   } catch (error: any) {
     return NextResponse.json({

@@ -1,18 +1,16 @@
 // ============================================
 // Data Layer — AppFolio API with mock fallback
 // ============================================
-// Tries to fetch real data from AppFolio API.
+// Tries to fetch real data from AppFolio report-based API.
 // Falls back to mock data if API credentials aren't configured or API fails.
 
 import {
   getProperties as afGetProperties,
   getUnits as afGetUnits,
   getWorkOrders as afGetWorkOrders,
-  getVacancyReport as afGetVacancyReport,
 } from "./appfolio";
 import {
   properties as mockProperties,
-  units as mockUnits,
   maintenanceRequests as mockMaintenance,
   dashboardStats as mockDashboardStats,
 } from "./mock-data";
@@ -34,18 +32,24 @@ function isAppFolioConfigured(): boolean {
 }
 
 // --- Properties ---
+// AppFolio property_directory report returns rows like:
+// { property_name, property_address, property_city, property_state, property_zip, unit_count, ... }
 export async function fetchProperties(): Promise<{ data: Property[]; source: "appfolio" | "mock" }> {
   if (!isAppFolioConfigured()) {
     return { data: mockProperties, source: "mock" };
   }
   try {
-    const result = await afGetProperties();
-    const properties: Property[] = (result.properties || result || []).map((p: any) => ({
-      id: String(p.id),
-      name: p.name || p.description || "",
-      address: [p.address_line_1, p.city, p.state, p.zip].filter(Boolean).join(", "),
-      unitCount: p.unit_count || 0,
-      appfolioId: String(p.id),
+    const rows = await afGetProperties();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { data: mockProperties, source: "mock" };
+    }
+    const properties: Property[] = rows.map((p: any, i: number) => ({
+      id: String(p.property_id || p.id || `prop-${i}`),
+      name: p.property_name || p.name || p.description || "",
+      address: [p.property_address || p.address_line_1 || p.address, p.property_city || p.city, p.property_state || p.state, p.property_zip || p.zip]
+        .filter(Boolean)
+        .join(", "),
+      unitCount: Number(p.unit_count || p.total_units || 0),
     }));
     return { data: properties, source: "appfolio" };
   } catch (error) {
@@ -55,6 +59,8 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
 }
 
 // --- Units & Vacancy ---
+// AppFolio unit_directory report returns rows like:
+// { property_name, unit_name, status, bedrooms, bathrooms, sq_ft, market_rent, tenant_name, ... }
 export async function fetchUnitStats(): Promise<{
   total: number;
   occupied: number;
@@ -72,17 +78,20 @@ export async function fetchUnitStats(): Promise<{
     };
   }
   try {
-    const result = await afGetUnits();
-    const units = result.units || result || [];
-    const total = units.length;
+    const rows = await afGetUnits();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new Error("No unit data returned");
+    }
+    const total = rows.length;
     let occupied = 0;
     let vacant = 0;
     let turning = 0;
-    for (const u of units) {
-      const status = (u.status || "").toLowerCase();
-      if (status === "occupied" || status === "current" || u.tenant_id || u.current_tenant_id) {
+    for (const u of rows) {
+      const status = String(u.status || u.unit_status || u.vacancy_status || "").toLowerCase();
+      const hasTenant = !!(u.tenant_name || u.current_tenant || u.tenant_id);
+      if (status.includes("occupied") || status.includes("current") || (hasTenant && !status.includes("vacant"))) {
         occupied++;
-      } else if (status === "turning" || status === "make_ready") {
+      } else if (status.includes("turn") || status.includes("make ready") || status.includes("make_ready")) {
         turning++;
       } else {
         vacant++;
@@ -102,6 +111,9 @@ export async function fetchUnitStats(): Promise<{
 }
 
 // --- Work Orders / Maintenance ---
+// AppFolio work_order_detail report returns rows like:
+// { work_order_id, property_name, unit_name, description, status, priority, category,
+//   assigned_to, vendor_name, tenant_name, created_date, completed_date, ... }
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
   electrical: "electrical",
@@ -148,35 +160,34 @@ export async function fetchMaintenanceRequests(params?: {
     return { data: mockMaintenance, source: "mock" };
   }
   try {
-    const result = await afGetWorkOrders(params);
-    const workOrders = result.work_orders || result || [];
-    const requests: MaintenanceRequest[] = workOrders.map((wo: any) => ({
-      id: String(wo.id),
-      unitId: wo.unit_id ? String(wo.unit_id) : "",
-      propertyId: wo.property_id ? String(wo.property_id) : "",
-      unitNumber: wo.unit_number || wo.unit_name || "",
-      propertyName: wo.property_name || wo.property_description || "",
-      tenantName: wo.tenant_name || wo.reported_by || "—",
+    const rows = await afGetWorkOrders(params);
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { data: mockMaintenance, source: "mock" };
+    }
+    const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
+      id: String(wo.work_order_id || wo.id || `wo-${i}`),
+      unitId: String(wo.unit_id || ""),
+      propertyId: String(wo.property_id || ""),
+      unitNumber: String(wo.unit_name || wo.unit_number || ""),
+      propertyName: String(wo.property_name || wo.property || ""),
+      tenantName: String(wo.tenant_name || wo.reported_by || "—"),
       tenantPhone: wo.tenant_phone || undefined,
       tenantEmail: wo.tenant_email || undefined,
-      category: CATEGORY_MAP[(wo.category || "general").toLowerCase()] || "general",
-      priority: PRIORITY_MAP[(wo.priority || "normal").toLowerCase()] || "medium",
-      status: STATUS_MAP[(wo.status || "open").toLowerCase()] || "submitted",
-      title: wo.description || wo.summary || wo.subject || "Work Order",
-      description: wo.detail || wo.description || wo.notes || "",
-      photos: wo.photos || wo.attachments || [],
-      assignedTo: wo.assigned_to || wo.assignee || undefined,
-      vendor: wo.vendor || wo.vendor_name || undefined,
+      category: CATEGORY_MAP[String(wo.category || wo.work_order_category || "general").toLowerCase()] || "general",
+      priority: PRIORITY_MAP[String(wo.priority || "normal").toLowerCase()] || "medium",
+      status: STATUS_MAP[String(wo.status || wo.work_order_status || "open").toLowerCase()] || "submitted",
+      title: String(wo.job_description || wo.description || wo.summary || wo.subject || "Work Order"),
+      description: String(wo.detail || wo.job_description || wo.description || ""),
+      photos: [],
+      assignedTo: wo.assigned_to || wo.assigned_users || undefined,
+      vendor: wo.vendor_name || wo.vendor || undefined,
       estimatedCost: wo.estimated_cost ? Number(wo.estimated_cost) : undefined,
-      actualCost: wo.actual_cost ? Number(wo.actual_cost) : undefined,
-      scheduledDate: wo.scheduled_date || wo.due_date || undefined,
-      completedDate: wo.completed_date || wo.resolved_date || undefined,
-      notes: wo.work_order_notes
-        ? wo.work_order_notes.map((n: any) => typeof n === "string" ? n : n.body || n.note || "")
-        : [],
+      actualCost: wo.actual_cost || wo.total_cost ? Number(wo.actual_cost || wo.total_cost) : undefined,
+      scheduledDate: wo.scheduled_end || wo.scheduled_date || wo.due_date || undefined,
+      completedDate: wo.completed_on || wo.completed_date || undefined,
+      notes: [],
       createdAt: wo.created_at || wo.created_date || new Date().toISOString(),
-      updatedAt: wo.updated_at || wo.modified_date || new Date().toISOString(),
-      appfolioWorkOrderId: String(wo.id),
+      updatedAt: wo.updated_at || wo.last_updated || new Date().toISOString(),
     }));
     return { data: requests, source: "appfolio" };
   } catch (error) {

@@ -1,122 +1,117 @@
 // ============================================
 // AppFolio Property Manager API Integration
 // ============================================
-// To set up:
-// 1. Request API access from AppFolio (https://www.appfolio.com/developers)
-// 2. Add these to .env.local:
-//    APPFOLIO_CLIENT_ID=xxx
-//    APPFOLIO_CLIENT_SECRET=xxx
-//    APPFOLIO_DATABASE_NAME=xxx        (your AppFolio subdomain/database)
+// AppFolio uses a report-based API at:
+//   https://{database}.appfolio.com/api/v1/reports/{report_name}.json
 //
-// AppFolio API docs: https://help.appfolio.com/s/article/API-Overview
+// Auth: HTTP Basic Auth with Client ID + Client Secret
+// Credentials: AppFolio PM → General Settings → Manage API Settings → Reports API Credentials
+//
+// Required env vars:
+//   APPFOLIO_CLIENT_ID
+//   APPFOLIO_CLIENT_SECRET
+//   APPFOLIO_DATABASE_NAME    (your AppFolio subdomain, e.g. "mbtenants")
 
-const BASE_URL = `https://${process.env.APPFOLIO_DATABASE_NAME}.appfolio.com/api/v2`;
+const getBaseUrl = () =>
+  `https://${process.env.APPFOLIO_DATABASE_NAME}.appfolio.com/api/v1`;
 
-async function appfolioFetch(endpoint: string, options: RequestInit = {}) {
+function getAuthHeaders() {
   const clientId = process.env.APPFOLIO_CLIENT_ID;
   const clientSecret = process.env.APPFOLIO_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    throw new Error("AppFolio API credentials not configured. Set APPFOLIO_CLIENT_ID and APPFOLIO_CLIENT_SECRET in .env.local");
+    throw new Error(
+      "AppFolio API credentials not configured. Set APPFOLIO_CLIENT_ID and APPFOLIO_CLIENT_SECRET."
+    );
   }
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  return {
+    Authorization: `Basic ${credentials}`,
+    Accept: "application/json",
+  };
+}
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+async function appfolioFetch(endpoint: string, params?: Record<string, string>) {
+  const url = new URL(`${getBaseUrl()}${endpoint}`);
+  url.searchParams.set("paginate_results", "true");
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value) url.searchParams.set(key, value);
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: getAuthHeaders(),
+    next: { revalidate: 300 }, // cache for 5 minutes
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`AppFolio API error ${response.status}: ${text}`);
+    throw new Error(`AppFolio API error ${response.status}: ${text.slice(0, 300)}`);
   }
 
   return response.json();
 }
 
-// --- Properties ---
+// Helper to follow paginated results
+async function appfolioFetchAll(endpoint: string, params?: Record<string, string>) {
+  let result = await appfolioFetch(endpoint, params);
+  let allResults = result.results || [];
+
+  while (result.next_page_url) {
+    const response = await fetch(result.next_page_url, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) break;
+    result = await response.json();
+    allResults = allResults.concat(result.results || []);
+  }
+
+  return allResults;
+}
+
+// --- Property Directory ---
 export async function getProperties() {
-  return appfolioFetch("/properties.json");
+  return appfolioFetchAll("/reports/property_directory.json");
 }
 
-export async function getProperty(propertyId: string) {
-  return appfolioFetch(`/properties/${propertyId}.json`);
-}
-
-// --- Units ---
+// --- Unit Directory ---
 export async function getUnits(propertyId?: string) {
-  const params = propertyId ? `?property_id=${propertyId}` : "";
-  return appfolioFetch(`/units.json${params}`);
+  const params: Record<string, string> = {};
+  if (propertyId) params.property_id = propertyId;
+  return appfolioFetchAll("/reports/unit_directory.json", params);
 }
 
-// --- Tenants / Leases ---
+// --- Tenant Directory ---
 export async function getTenants(params?: { property_id?: string; status?: string }) {
-  const searchParams = new URLSearchParams();
-  if (params?.property_id) searchParams.set("property_id", params.property_id);
-  if (params?.status) searchParams.set("status", params.status);
-  const qs = searchParams.toString();
-  return appfolioFetch(`/tenants.json${qs ? `?${qs}` : ""}`);
+  const queryParams: Record<string, string> = {};
+  if (params?.property_id) queryParams.property_id = params.property_id;
+  if (params?.status) queryParams.tenant_status = params.status;
+  return appfolioFetchAll("/reports/tenant_directory.json", queryParams);
 }
 
-// --- Work Orders (Maintenance) ---
+// --- Work Orders ---
 export async function getWorkOrders(params?: {
   property_id?: string;
   status?: string;
   created_after?: string;
 }) {
-  const searchParams = new URLSearchParams();
-  if (params?.property_id) searchParams.set("property_id", params.property_id);
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.created_after) searchParams.set("created_after", params.created_after);
-  const qs = searchParams.toString();
-  return appfolioFetch(`/work_orders.json${qs ? `?${qs}` : ""}`);
+  const queryParams: Record<string, string> = {};
+  if (params?.property_id) queryParams.property_id = params.property_id;
+  if (params?.status) queryParams.status = params.status;
+  if (params?.created_after) queryParams.from_date = params.created_after;
+  return appfolioFetchAll("/reports/work_order_detail.json", queryParams);
 }
 
-export async function createWorkOrder(data: {
-  property_id: string;
-  unit_id?: string;
-  description: string;
-  priority: string;
-  category?: string;
-  assigned_to?: string;
-}) {
-  return appfolioFetch("/work_orders.json", {
-    method: "POST",
-    body: JSON.stringify({ work_order: data }),
-  });
-}
-
-export async function updateWorkOrder(
-  workOrderId: string,
-  data: { status?: string; notes?: string; assigned_to?: string }
-) {
-  return appfolioFetch(`/work_orders/${workOrderId}.json`, {
-    method: "PATCH",
-    body: JSON.stringify({ work_order: data }),
-  });
-}
-
-// --- Bills / Invoices ---
-export async function getBills(params?: { property_id?: string; status?: string }) {
-  const searchParams = new URLSearchParams();
-  if (params?.property_id) searchParams.set("property_id", params.property_id);
-  if (params?.status) searchParams.set("status", params.status);
-  const qs = searchParams.toString();
-  return appfolioFetch(`/bills.json${qs ? `?${qs}` : ""}`);
-}
-
-// --- Vacancy Report ---
+// --- Unit Vacancy ---
 export async function getVacancyReport() {
-  return appfolioFetch("/reports/vacancy.json");
+  return appfolioFetchAll("/reports/unit_vacancy_detail.json");
 }
 
 // --- Rent Roll ---
 export async function getRentRoll(propertyId?: string) {
-  const params = propertyId ? `?property_id=${propertyId}` : "";
-  return appfolioFetch(`/reports/rent_roll.json${params}`);
+  const params: Record<string, string> = {};
+  if (propertyId) params.property_id = propertyId;
+  return appfolioFetchAll("/reports/rent_roll.json", params);
 }
