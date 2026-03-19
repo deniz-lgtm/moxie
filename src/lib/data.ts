@@ -39,6 +39,7 @@ const NEXT_YEAR_START = "08/15/2026";
  * We also build a set of Moxie property addresses for fallback matching.
  */
 let _moxiePropertyIds: Set<string> | null = null;
+let _moxiePortfolioIds: Set<string> | null = null;
 let _moxiePropertyAddresses: Set<string> | null = null;
 
 function normalizeAddress(addr: string): string {
@@ -50,17 +51,22 @@ async function getMoxiePropertyIds(): Promise<Set<string>> {
 
   const rows = await afGetProperties();
   const ids = new Set<string>();
+  const portfolioIds = new Set<string>();
   const addrs = new Set<string>();
 
   for (const row of rows || []) {
     // Try every plausible field name for the portfolio column
+    // Note: AppFolio sometimes has trailing spaces (e.g. "Moxie Management ")
     const portfolio = String(
       row.Portfolio || row.PortfolioName || row.portfolio ||
       row.portfolio_name || row.PropertyGroupName || ""
-    );
+    ).trim();
     if (portfolio === PORTFOLIO_NAME) {
       const id = String(row.PropertyId || row.property_id || "");
       if (id) ids.add(id);
+      // Collect PortfolioId values for fallback matching on rent roll
+      const pid = row.PortfolioId || row.portfolio_id;
+      if (pid != null) portfolioIds.add(String(pid));
       // Also store address for fallback matching
       const addr = String(row.PropertyAddress || row.property_address || row.PropertyStreetAddress1 || "");
       if (addr) addrs.add(normalizeAddress(addr));
@@ -68,6 +74,7 @@ async function getMoxiePropertyIds(): Promise<Set<string>> {
   }
 
   _moxiePropertyIds = ids;
+  _moxiePortfolioIds = portfolioIds;
   _moxiePropertyAddresses = addrs;
   return ids;
 }
@@ -93,7 +100,16 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   });
   if (byId.length > 0) return byId;
 
-  // Fallback: try matching by property address substring
+  // Fallback 1: try matching by PortfolioId (rent roll has this field)
+  if (_moxiePortfolioIds && _moxiePortfolioIds.size > 0) {
+    const byPortfolioId = rows.filter((row) => {
+      const pid = row.PortfolioId || row.portfolio_id;
+      return pid != null && _moxiePortfolioIds!.has(String(pid));
+    });
+    if (byPortfolioId.length > 0) return byPortfolioId;
+  }
+
+  // Fallback 2: try matching by property address substring
   if (_moxiePropertyAddresses && _moxiePropertyAddresses.size > 0) {
     const byAddr = rows.filter((row) => {
       const addr = normalizeAddress(
@@ -140,7 +156,7 @@ export async function debugMoxieFilter() {
   const moxieProps = (propRows || []).filter((p: any) => {
     const portfolio = String(
       p.Portfolio || p.PortfolioName || p.portfolio || p.portfolio_name || p.PropertyGroupName || ""
-    );
+    ).trim();
     return portfolio === PORTFOLIO_NAME;
   });
   const moxiePropertyIds = moxieProps.map((p: any) => String(p.PropertyId || p.property_id || ""));
