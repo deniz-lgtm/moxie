@@ -35,33 +35,85 @@ const NEXT_YEAR_START = "08/15/2026";
  * The property_directory report has a `Portfolio` field; the rent roll does not.
  * So we cross-reference: fetch property_directory → extract Moxie PropertyIds →
  * use those to filter rent roll / vacancy / work order rows by PropertyId.
+ *
+ * We also build a set of Moxie property addresses for fallback matching.
  */
 let _moxiePropertyIds: Set<string> | null = null;
+let _moxiePropertyAddresses: Set<string> | null = null;
+
+function normalizeAddress(addr: string): string {
+  return addr.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
 
 async function getMoxiePropertyIds(): Promise<Set<string>> {
   if (_moxiePropertyIds) return _moxiePropertyIds;
 
   const rows = await afGetProperties();
   const ids = new Set<string>();
+  const addrs = new Set<string>();
+
   for (const row of rows || []) {
-    const portfolio = String(row.Portfolio || row.PortfolioName || row.PropertyGroupName || "");
+    // Try every plausible field name for the portfolio column
+    const portfolio = String(
+      row.Portfolio || row.PortfolioName || row.portfolio ||
+      row.portfolio_name || row.PropertyGroupName || ""
+    );
     if (portfolio === PORTFOLIO_NAME) {
       const id = String(row.PropertyId || row.property_id || "");
       if (id) ids.add(id);
+      // Also store address for fallback matching
+      const addr = String(row.PropertyAddress || row.property_address || row.PropertyStreetAddress1 || "");
+      if (addr) addrs.add(normalizeAddress(addr));
     }
   }
+
   _moxiePropertyIds = ids;
+  _moxiePropertyAddresses = addrs;
   return ids;
 }
 
-/** Filter any report's rows to only Moxie Management properties (by PropertyId cross-ref) */
+/**
+ * Filter any report's rows to only Moxie Management properties.
+ * Primary: match by PropertyId cross-ref.
+ * Fallback: if PropertyId match yields 0 rows, try matching by address.
+ * Last resort: if nothing matches, return all rows (better than showing 0).
+ */
 async function filterToMoxie(rows: any[]): Promise<any[]> {
+  if (!rows || rows.length === 0) return rows;
+
   const moxieIds = await getMoxiePropertyIds();
-  if (moxieIds.size === 0) return rows; // fallback: no filter if lookup failed
-  return rows.filter((row) => {
+
+  // If we couldn't find any Moxie properties at all, return everything
+  if (moxieIds.size === 0) return rows;
+
+  // Try filtering by PropertyId
+  const byId = rows.filter((row) => {
     const pid = String(row.PropertyId || row.property_id || "");
     return moxieIds.has(pid);
   });
+  if (byId.length > 0) return byId;
+
+  // Fallback: try matching by property address substring
+  if (_moxiePropertyAddresses && _moxiePropertyAddresses.size > 0) {
+    const byAddr = rows.filter((row) => {
+      const addr = normalizeAddress(
+        String(row.PropertyAddress || row.property_address || row.PropertyName || row.property_name || "")
+      );
+      if (!addr) return false;
+      for (const moxieAddr of _moxiePropertyAddresses!) {
+        if (addr.includes(moxieAddr) || moxieAddr.includes(addr)) return true;
+      }
+      return false;
+    });
+    if (byAddr.length > 0) return byAddr;
+  }
+
+  // Last resort: return all rows rather than showing 0
+  console.warn(
+    `[Moxie] filterToMoxie: no matches found. Moxie IDs: ${[...(moxieIds)].slice(0, 5).join(",")}, ` +
+    `sample row PropertyId: ${rows[0]?.PropertyId || rows[0]?.property_id || "N/A"}`
+  );
+  return rows;
 }
 
 /** Diagnostic: show cross-reference details for debugging the Moxie filter */
@@ -75,9 +127,20 @@ export async function debugMoxieFilter() {
   // What fields does rent_roll have?
   const rrFields = rentRollRows?.length > 0 ? Object.keys(rentRollRows[0]) : [];
 
+  // Show all unique values for every portfolio-like field
+  const portfolioFieldValues: Record<string, string[]> = {};
+  for (const field of propFields) {
+    if (/portfolio|group|management/i.test(field)) {
+      const vals = Array.from(new Set((propRows || []).map((p: any) => String(p[field] || "")))) as string[];
+      portfolioFieldValues[field] = vals.slice(0, 10);
+    }
+  }
+
   // Which property_directory rows match "Moxie Management"?
   const moxieProps = (propRows || []).filter((p: any) => {
-    const portfolio = String(p.Portfolio || p.PortfolioName || p.PropertyGroupName || "");
+    const portfolio = String(
+      p.Portfolio || p.PortfolioName || p.portfolio || p.portfolio_name || p.PropertyGroupName || ""
+    );
     return portfolio === PORTFOLIO_NAME;
   });
   const moxiePropertyIds = moxieProps.map((p: any) => String(p.PropertyId || p.property_id || ""));
@@ -95,8 +158,10 @@ export async function debugMoxieFilter() {
       fields: propFields,
       portfolioRelatedFields: propFields.filter(k => /portfolio|group|management/i.test(k)),
       sampleRow: propRows?.[0] || null,
+      portfolioFieldValues,
       moxieMatchCount: moxieProps.length,
       moxiePropertyIds: moxiePropertyIds.slice(0, 30),
+      moxieSampleRow: moxieProps[0] || null,
     },
     rentRoll: {
       totalRows: (rentRollRows || []).length,
