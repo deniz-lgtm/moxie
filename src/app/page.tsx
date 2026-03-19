@@ -147,7 +147,35 @@ function CategorySection({
 }
 
 export default async function Dashboard() {
-  const { data: stats, source } = await fetchDashboardStats();
+  let stats: DashboardStats;
+  let source: string = "mock";
+  try {
+    const result = await fetchDashboardStats();
+    stats = result.data;
+    source = result.source;
+  } catch (e) {
+    console.error("Dashboard stats fetch failed, using defaults:", e);
+    stats = {
+      totalUnits: 0,
+      occupiedUnits: 0,
+      vacantUnits: 0,
+      turningUnits: 0,
+      preLeasedUnits: 0,
+      openMaintenanceRequests: 0,
+      activeInspections: 0,
+      upcomingTurns: 0,
+      activeApplications: 0,
+      upcomingTours: 0,
+      upcomingMoveOuts: 0,
+      vendorCount: 0,
+      pendingRubs: "—",
+      reportsDue: 0,
+      activeCapitalProjects: 0,
+      pendingNotices: 0,
+      trackedComps: 0,
+      recurringIssues: 0,
+    };
+  }
 
   const rawApps = getAppsForRole(currentUserRole);
   const visibleApps = applyLiveStats(rawApps, stats);
