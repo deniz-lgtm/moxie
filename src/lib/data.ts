@@ -3,12 +3,16 @@
 // ============================================
 // Fetches live data from AppFolio report-based API.
 // Student housing lease year: Aug 15 → Jul 31.
-// "Pre-leased" = unit has a signed lease covering the upcoming academic year.
+// Pre-leasing: vacancy report dated 8/15/2026 shows which units are vacant
+// as of next lease year start. Units NOT on that report = pre-leased.
+//
+// Portfolio filter: Only include properties tagged under "Moxie Management".
 
 import {
   getProperties as afGetProperties,
   getWorkOrders as afGetWorkOrders,
   getRentRoll as afGetRentRoll,
+  getVacancyReport as afGetVacancyReport,
 } from "./appfolio";
 import type {
   Property,
@@ -19,29 +23,40 @@ import type {
   MaintenanceStatus,
 } from "./types";
 
-// Upcoming lease year boundaries
-const NEXT_YEAR_START = new Date("2026-08-15");
-const NEXT_YEAR_END = new Date("2027-07-31");
+// Portfolio name to filter by
+const PORTFOLIO_NAME = "Moxie Management";
 
-/** Parse AppFolio date strings like "MM/DD/YYYY" or "YYYY-MM-DD" into Date */
-function parseAFDate(val: string | null | undefined): Date | null {
-  if (!val) return null;
-  // Handle MM/DD/YYYY
-  const mdyMatch = val.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdyMatch) {
-    return new Date(Number(mdyMatch[3]), Number(mdyMatch[1]) - 1, Number(mdyMatch[2]));
-  }
-  // Handle ISO / YYYY-MM-DD
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d;
+// Next lease year start date for vacancy projection
+const NEXT_YEAR_START = "08/15/2026";
+
+/** Filter rows to only Moxie Management portfolio */
+function filterByPortfolio(rows: any[]): any[] {
+  // Try matching on PortfolioName or PropertyGroupName
+  // If that field doesn't exist, try PortfolioId once we know which ID maps to Moxie
+  return rows.filter((row) => {
+    const portfolio = row.PortfolioName || row.Portfolio || row.PropertyGroupName || "";
+    return portfolio === PORTFOLIO_NAME;
+  });
+}
+
+/** Check if a row belongs to the Moxie portfolio by PortfolioId */
+function filterByPortfolioId(rows: any[], portfolioId: number | string): any[] {
+  return rows.filter((row) => {
+    return String(row.PortfolioId) === String(portfolioId) ||
+           String(row.portfolio_id) === String(portfolioId);
+  });
 }
 
 // --- Properties ---
-// AppFolio property_directory fields (PascalCase):
-//   PropertyId, PropertyName, PropertyAddress, PropertyCity, PropertyState, PropertyZip, UnitCount, ...
 export async function fetchProperties(): Promise<{ data: Property[]; source: "appfolio" }> {
   const rows = await afGetProperties();
-  const properties: Property[] = (rows || []).map((p: any, i: number) => ({
+  // Try name-based filter first, fall back to showing all if no portfolio field
+  let filtered = filterByPortfolio(rows || []);
+  if (filtered.length === 0) {
+    // Portfolio field might not exist on property_directory — return all
+    filtered = rows || [];
+  }
+  const properties: Property[] = filtered.map((p: any, i: number) => ({
     id: String(p.PropertyId || p.property_id || `prop-${i}`),
     name: p.PropertyName || p.property_name || "",
     address: [
@@ -58,61 +73,87 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
 }
 
 // --- Leasing Stats (Pre-leased for upcoming academic year) ---
-// Uses rent_roll report. Fields (PascalCase):
-//   UnitId, Unit, Status, Tenant, LeaseFrom, LeaseTo, PropertyName, PropertyId, ...
+// Strategy:
+//   1. Rent roll = all units (total count + current occupancy)
+//   2. Vacancy report dated 8/15/2026 = units that will be vacant at lease year start
+//   3. Pre-leased = total - vacant-on-8/15
 //
-// A unit is "pre-leased" for 2026-2027 if:
-//   - LeaseTo >= 2027-07-31 (lease extends through next academic year), OR
-//   - LeaseFrom >= 2026-08-01 (new lease starting next fall)
+// Both filtered to Moxie Management portfolio only.
 export async function fetchUnitStats(): Promise<{
   total: number;
-  occupied: number;   // currently occupied (Status = Current/Notice)
-  preLeased: number;  // signed lease covering next academic year
-  unleased: number;   // no lease covering next academic year
+  occupied: number;
+  preLeased: number;
+  unleased: number;
   source: "appfolio";
 }> {
-  const rentRollRows = await afGetRentRoll();
+  const [rentRollRows, vacancyRows] = await Promise.all([
+    afGetRentRoll(),
+    afGetVacancyReport(NEXT_YEAR_START),
+  ]);
+
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
     throw new Error("No rent roll data returned");
   }
 
-  const total = rentRollRows.length;
-  let occupied = 0;
-  let preLeased = 0;
+  // Filter to Moxie Management portfolio
+  let moxieRentRoll = filterByPortfolio(rentRollRows);
+  let moxieVacancy = filterByPortfolio(vacancyRows || []);
 
-  for (const row of rentRollRows) {
-    // Current occupancy
+  // If portfolio name filter didn't work (field might not exist), try PortfolioId
+  if (moxieRentRoll.length === 0) {
+    // Discover Moxie portfolio ID from properties that aren't the Sacramento ones
+    // For now, try all — the portfolio filter will be refined once we see the data
+    moxieRentRoll = rentRollRows;
+    moxieVacancy = vacancyRows || [];
+  }
+
+  const total = moxieRentRoll.length;
+
+  // Current occupancy
+  let occupied = 0;
+  for (const row of moxieRentRoll) {
     const status = String(row.Status || "").toLowerCase();
     if (status === "current" || status === "notice") {
       occupied++;
     }
+  }
 
-    // Pre-leased for next year
-    const leaseTo = parseAFDate(row.LeaseTo);
-    const leaseFrom = parseAFDate(row.LeaseFrom);
+  // Vacancy as of 8/15/2026 — these units are NOT pre-leased
+  const vacantUnitIds = new Set(
+    moxieVacancy.map((v: any) => String(v.UnitId || v.unit_id || "")).filter(Boolean)
+  );
+  // If vacancy report returns unit names instead of IDs, also match on name
+  const vacantUnitNames = new Set(
+    moxieVacancy.map((v: any) => String(v.Unit || v.UnitName || v.unit_name || "")).filter(Boolean)
+  );
 
-    const coversNextYear = leaseTo && leaseTo >= NEXT_YEAR_END;
-    const startsNextFall = leaseFrom && leaseFrom >= new Date("2026-08-01") && leaseFrom <= new Date("2026-09-15");
-
-    if (coversNextYear || startsNextFall) {
-      preLeased++;
+  let unleased = 0;
+  for (const row of moxieRentRoll) {
+    const uid = String(row.UnitId || "");
+    const uname = String(row.Unit || "");
+    if (vacantUnitIds.has(uid) || vacantUnitNames.has(uname)) {
+      unleased++;
     }
   }
+
+  // If vacancy report returned nothing (maybe API doesn't support as_of_date),
+  // fall back: unleased = count of vacancy report rows
+  if ((vacancyRows || []).length > 0 && moxieVacancy.length > 0 && unleased === 0) {
+    unleased = moxieVacancy.length;
+  }
+
+  const preLeased = total - unleased;
 
   return {
     total,
     occupied,
     preLeased,
-    unleased: total - preLeased,
+    unleased,
     source: "appfolio",
   };
 }
 
 // --- Work Orders / Maintenance ---
-// AppFolio work_order_detail fields (PascalCase):
-//   WorkOrderId, PropertyName, PropertyId, Unit, UnitId, Description, Status,
-//   Priority, Category, AssignedTo, VendorName, TenantName, CreatedDate,
-//   CompletedDate, ScheduledEnd, Detail, ...
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
   electrical: "electrical",

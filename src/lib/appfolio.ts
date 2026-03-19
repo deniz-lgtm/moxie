@@ -115,8 +115,11 @@ function formatDate(d: Date): string {
 }
 
 // --- Unit Vacancy ---
-export async function getVacancyReport() {
-  return appfolioFetchAll("/reports/unit_vacancy_detail.json");
+// Accepts an optional as_of_date (MM/DD/YYYY) to project future vacancy
+export async function getVacancyReport(asOfDate?: string) {
+  const params: Record<string, string> = {};
+  if (asOfDate) params.as_of_date = asOfDate;
+  return appfolioFetchAll("/reports/unit_vacancy_detail.json", params);
 }
 
 // --- Rent Roll ---

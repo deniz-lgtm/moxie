@@ -15,12 +15,22 @@ export async function GET() {
   const headers = { Authorization: `Basic ${credentials}`, Accept: "application/json" };
   const base = `https://${dbName}.appfolio.com/api/v1/reports`;
 
-  async function fetchSample(report: string) {
+  async function fetchReport(report: string, params?: Record<string, string>) {
     try {
-      const res = await fetch(`${base}/${report}.json?paginate_results=true`, { headers });
-      if (!res.ok) return { error: `HTTP ${res.status}` };
+      const url = new URL(`${base}/${report}.json`);
+      url.searchParams.set("paginate_results", "true");
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          url.searchParams.set(k, v);
+        }
+      }
+      const res = await fetch(url.toString(), { headers });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        return { error: `HTTP ${res.status}`, body: body.slice(0, 500) };
+      }
       const data = await res.json();
-      const rows = data.results || data || [];
+      const rows = data.results || [];
       return {
         totalRows: rows.length,
         nextPage: !!data.next_page_url,
@@ -32,68 +42,47 @@ export async function GET() {
     }
   }
 
-  const today = new Date();
-  const lastYear = new Date();
-  lastYear.setFullYear(lastYear.getFullYear() - 1);
-  const fmt = (d: Date) =>
-    `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
-
-  // Try work orders with different param combos to find what works
-  async function fetchWorkOrderAttempts() {
-    const attempts: Record<string, any> = {};
-
-    // Attempt 1: from_date + to_date with URLSearchParams
-    try {
-      const url = new URL(`${base}/work_order_detail.json`);
-      url.searchParams.set("paginate_results", "true");
-      url.searchParams.set("from_date", fmt(lastYear));
-      url.searchParams.set("to_date", fmt(today));
-      const res = await fetch(url.toString(), { headers });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        attempts["from_to_dates"] = { error: `HTTP ${res.status}`, body: body.slice(0, 500) };
-      } else {
-        const data = await res.json();
-        const rows = data.results || [];
-        attempts["from_to_dates"] = {
-          totalRows: rows.length,
-          fields: rows.length > 0 ? Object.keys(rows[0]) : [],
-          sample: rows.slice(0, 2),
-        };
-      }
-    } catch (e: any) {
-      attempts["from_to_dates"] = { error: e.message };
-    }
-
-    // Attempt 2: no date params at all
-    try {
-      const url2 = new URL(`${base}/work_order_detail.json`);
-      url2.searchParams.set("paginate_results", "true");
-      const res2 = await fetch(url2.toString(), { headers });
-      if (!res2.ok) {
-        const body = await res2.text().catch(() => "");
-        attempts["no_dates"] = { error: `HTTP ${res2.status}`, body: body.slice(0, 500) };
-      } else {
-        const data = await res2.json();
-        const rows = data.results || [];
-        attempts["no_dates"] = {
-          totalRows: rows.length,
-          fields: rows.length > 0 ? Object.keys(rows[0]) : [],
-          sample: rows.slice(0, 2),
-        };
-      }
-    } catch (e: any) {
-      attempts["no_dates"] = { error: e.message };
-    }
-
-    return attempts;
-  }
-
-  const [units, rentRoll, workOrders] = await Promise.all([
-    fetchSample("unit_directory"),
-    fetchSample("rent_roll"),
-    fetchWorkOrderAttempts(),
+  // Fetch all reports in parallel
+  const [rentRoll, vacancy815, workOrders, properties] = await Promise.all([
+    fetchReport("rent_roll"),
+    fetchReport("unit_vacancy_detail", { as_of_date: "08/15/2026" }),
+    fetchReport("work_order_detail", {
+      from_date: "03/19/2025",
+      to_date: "03/19/2026",
+    }),
+    fetchReport("property_directory"),
   ]);
 
-  return NextResponse.json({ units, rentRoll, workOrders });
+  // Extract unique portfolios from rent roll for discovery
+  let portfolios: any[] = [];
+  try {
+    const url = new URL(`${base}/rent_roll.json`);
+    url.searchParams.set("paginate_results", "true");
+    const res = await fetch(url.toString(), { headers });
+    if (res.ok) {
+      const data = await res.json();
+      const rows = data.results || [];
+      const seen = new Map<string, any>();
+      for (const r of rows) {
+        const key = `${r.PortfolioId || "null"}|${r.PropertyGroupId || "null"}`;
+        if (!seen.has(key)) {
+          seen.set(key, {
+            PortfolioId: r.PortfolioId,
+            PropertyGroupId: r.PropertyGroupId,
+            PropertyName: r.PropertyName,
+            PropertyType: r.PropertyType,
+          });
+        }
+      }
+      portfolios = Array.from(seen.values());
+    }
+  } catch { /* ignore */ }
+
+  return NextResponse.json({
+    portfolios,
+    rentRoll,
+    vacancy_as_of_aug15: vacancy815,
+    workOrders,
+    properties,
+  });
 }
