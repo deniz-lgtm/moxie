@@ -49,64 +49,85 @@ function normalizeAddress(addr: string): string {
 async function getMoxiePropertyIds(): Promise<Set<string>> {
   if (_moxiePropertyIds) return _moxiePropertyIds;
 
-  const rows = await afGetProperties();
-  const ids = new Set<string>();
-  const portfolioIds = new Set<string>();
-  const addrs = new Set<string>();
+  try {
+    const rows = await afGetProperties();
+    const ids = new Set<string>();
+    const portfolioIds = new Set<string>();
+    const addrs = new Set<string>();
 
-  for (const row of rows || []) {
-    // Try every plausible field name for the portfolio column
-    // Note: AppFolio sometimes has trailing spaces (e.g. "Moxie Management ")
-    const portfolio = String(
-      row.Portfolio || row.PortfolioName || row.portfolio ||
-      row.portfolio_name || row.PropertyGroupName || ""
-    ).trim();
-    if (portfolio === PORTFOLIO_NAME) {
-      const id = String(row.PropertyId || row.property_id || "");
-      if (id) ids.add(id);
-      // Collect PortfolioId values for fallback matching on rent roll
-      const pid = row.PortfolioId || row.portfolio_id;
-      if (pid != null) portfolioIds.add(String(pid));
-      // Also store address for fallback matching
-      const addr = String(row.PropertyAddress || row.property_address || row.PropertyStreetAddress1 || "");
-      if (addr) addrs.add(normalizeAddress(addr));
+    for (const row of rows || []) {
+      // Try every plausible field name for the portfolio column
+      // Note: AppFolio sometimes has trailing spaces (e.g. "Moxie Management ")
+      const portfolio = String(
+        row.Portfolio || row.PortfolioName || row.portfolio ||
+        row.portfolio_name || row.PropertyGroupName || ""
+      ).trim();
+      if (portfolio === PORTFOLIO_NAME) {
+        const id = String(row.PropertyId || row.property_id || "");
+        if (id) ids.add(id);
+        // Collect PortfolioId values for fallback matching on rent roll
+        const pid = row.PortfolioId || row.portfolio_id;
+        if (pid != null) portfolioIds.add(String(pid));
+        // Also store address for fallback matching
+        const addr = String(row.PropertyAddress || row.property_address || row.PropertyStreetAddress1 || "");
+        if (addr) addrs.add(normalizeAddress(addr));
+      }
     }
-  }
 
-  _moxiePropertyIds = ids;
-  _moxiePortfolioIds = portfolioIds;
-  _moxiePropertyAddresses = addrs;
-  return ids;
+    console.log(`[Moxie] getMoxiePropertyIds: found ${ids.size} Moxie properties, ${portfolioIds.size} portfolio IDs`);
+    _moxiePropertyIds = ids;
+    _moxiePortfolioIds = portfolioIds;
+    _moxiePropertyAddresses = addrs;
+    return ids;
+  } catch (e) {
+    console.error("[Moxie] getMoxiePropertyIds failed:", e);
+    // Return empty set — filterToMoxie will fall through to returning all rows
+    _moxiePropertyIds = new Set<string>();
+    _moxiePortfolioIds = new Set<string>();
+    _moxiePropertyAddresses = new Set<string>();
+    return _moxiePropertyIds;
+  }
 }
+
+// Known Moxie Management PortfolioId values (from property_directory).
+// Used as a guaranteed fallback when the property_directory API call fails.
+const MOXIE_PORTFOLIO_IDS = new Set(["10", "24"]);
 
 /**
  * Filter any report's rows to only Moxie Management properties.
- * Primary: match by PropertyId cross-ref.
- * Fallback: if PropertyId match yields 0 rows, try matching by address.
- * Last resort: if nothing matches, return all rows (better than showing 0).
+ * 1. PropertyId cross-ref from property_directory (if available)
+ * 2. PortfolioId matching (known Moxie PortfolioIds: 10, 24)
+ * 3. Address matching
+ * 4. Last resort: return all rows
  */
 async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (!rows || rows.length === 0) return rows;
 
   const moxieIds = await getMoxiePropertyIds();
 
-  // If we couldn't find any Moxie properties at all, return everything
-  if (moxieIds.size === 0) return rows;
-
-  // Try filtering by PropertyId
-  const byId = rows.filter((row) => {
-    const pid = String(row.PropertyId || row.property_id || "");
-    return moxieIds.has(pid);
-  });
-  if (byId.length > 0) return byId;
-
-  // Fallback 1: try matching by PortfolioId (rent roll has this field)
-  if (_moxiePortfolioIds && _moxiePortfolioIds.size > 0) {
-    const byPortfolioId = rows.filter((row) => {
-      const pid = row.PortfolioId || row.portfolio_id;
-      return pid != null && _moxiePortfolioIds!.has(String(pid));
+  // Try filtering by PropertyId (cross-ref from property_directory)
+  if (moxieIds.size > 0) {
+    const byId = rows.filter((row) => {
+      const pid = String(row.PropertyId || row.property_id || "");
+      return moxieIds.has(pid);
     });
-    if (byPortfolioId.length > 0) return byPortfolioId;
+    if (byId.length > 0) {
+      console.log(`[Moxie] filterToMoxie: matched ${byId.length}/${rows.length} rows by PropertyId`);
+      return byId;
+    }
+  }
+
+  // Fallback 1: PortfolioId from dynamic lookup or hardcoded known values
+  const portfolioIds = (_moxiePortfolioIds && _moxiePortfolioIds.size > 0)
+    ? _moxiePortfolioIds
+    : MOXIE_PORTFOLIO_IDS;
+  const byPortfolioId = rows.filter((row) => {
+    const pid = row.PortfolioId || row.portfolio_id;
+    return pid != null && portfolioIds.has(String(pid));
+  });
+  if (byPortfolioId.length > 0) {
+    console.log(`[Moxie] filterToMoxie: matched ${byPortfolioId.length}/${rows.length} rows by PortfolioId`);
+    return byPortfolioId;
   }
 
   // Fallback 2: try matching by property address substring
@@ -127,7 +148,8 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   // Last resort: return all rows rather than showing 0
   console.warn(
     `[Moxie] filterToMoxie: no matches found. Moxie IDs: ${[...(moxieIds)].slice(0, 5).join(",")}, ` +
-    `sample row PropertyId: ${rows[0]?.PropertyId || rows[0]?.property_id || "N/A"}`
+    `portfolioIds tried: ${[...portfolioIds].join(",")}, ` +
+    `sample row: PropertyId=${rows[0]?.PropertyId}, PortfolioId=${rows[0]?.PortfolioId}`
   );
   return rows;
 }
@@ -282,10 +304,11 @@ export async function fetchUnitStats(): Promise<{
   source: "appfolio";
 }> {
   // Pre-warm the Moxie property ID cache alongside the other fetches
-  // so we don't do a serial property_directory fetch inside filterToMoxie
+  // so we don't do a serial property_directory fetch inside filterToMoxie.
+  // Vacancy report with future as_of_date may fail (400) — make it non-fatal.
   const [rentRollRows, vacancyRows] = await Promise.all([
     afGetRentRoll(),
-    afGetVacancyReport(NEXT_YEAR_START),
+    afGetVacancyReport(NEXT_YEAR_START).catch(() => [] as any[]),
     getMoxiePropertyIds().catch(() => new Set<string>()), // pre-warm cache
   ]);
 
