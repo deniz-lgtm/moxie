@@ -281,13 +281,16 @@ export async function fetchUnitStats(): Promise<{
   unleased: number;
   source: "appfolio";
 }> {
+  // Pre-warm the Moxie property ID cache alongside the other fetches
+  // so we don't do a serial property_directory fetch inside filterToMoxie
   const [rentRollRows, vacancyRows] = await Promise.all([
     afGetRentRoll(),
     afGetVacancyReport(NEXT_YEAR_START),
+    getMoxiePropertyIds().catch(() => new Set<string>()), // pre-warm cache
   ]);
 
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
-    throw new Error("No rent roll data returned");
+    return { total: 0, occupied: 0, preLeased: 0, unleased: 0, source: "appfolio" as const };
   }
 
   // Filter to Moxie Management portfolio (cross-ref property_directory)
