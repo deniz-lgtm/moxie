@@ -156,7 +156,10 @@ export default async function Dashboard() {
     .filter((cat) => grouped[cat.id]?.length)
     .sort((a, b) => a.order - b.order);
 
-  const occupancyPct = stats.totalUnits > 0
+  const preLeasedPct = stats.totalUnits > 0
+    ? Math.round((stats.preLeasedUnits / stats.totalUnits) * 100)
+    : 0;
+  const currentOccPct = stats.totalUnits > 0
     ? Math.round((stats.occupiedUnits / stats.totalUnits) * 100)
     : 0;
 
@@ -177,26 +180,36 @@ export default async function Dashboard() {
         </p>
       </div>
 
-      {/* Compact Stats Strip */}
-      <div className="bg-card rounded-xl border border-border px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <div>
-          <span className="font-semibold text-foreground">{stats.totalUnits}</span>{" "}
-          <span className="text-muted-foreground">units</span>
+      {/* Leasing Stats Strip — Upcoming Year (Aug 2026 – Jul 2027) */}
+      <div className="bg-card rounded-xl border border-border px-6 py-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            2026–2027 Lease Year
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {currentOccPct}% currently occupied
+          </span>
         </div>
-        <div className="text-border">|</div>
-        <div>
-          <span className="font-semibold text-foreground">{occupancyPct}%</span>{" "}
-          <span className="text-muted-foreground">occupied</span>
-        </div>
-        <div className="text-border">|</div>
-        <div>
-          <span className="font-semibold text-foreground">{stats.vacantUnits}</span>{" "}
-          <span className="text-muted-foreground">vacant</span>
-        </div>
-        <div className="text-border">|</div>
-        <div>
-          <span className="font-semibold text-foreground">{stats.turningUnits}</span>{" "}
-          <span className="text-muted-foreground">turning</span>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <div>
+            <span className="font-semibold text-foreground">{stats.totalUnits}</span>{" "}
+            <span className="text-muted-foreground">total units</span>
+          </div>
+          <div className="text-border">|</div>
+          <div>
+            <span className="font-semibold text-green-600">{preLeasedPct}%</span>{" "}
+            <span className="text-muted-foreground">pre-leased</span>
+          </div>
+          <div className="text-border">|</div>
+          <div>
+            <span className="font-semibold text-green-600">{stats.preLeasedUnits}</span>{" "}
+            <span className="text-muted-foreground">leased</span>
+          </div>
+          <div className="text-border">|</div>
+          <div>
+            <span className="font-semibold text-amber-600">{stats.vacantUnits}</span>{" "}
+            <span className="text-muted-foreground">unleased</span>
+          </div>
         </div>
       </div>
 

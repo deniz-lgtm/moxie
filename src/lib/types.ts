@@ -227,6 +227,7 @@ export interface DashboardStats {
   occupiedUnits: number;
   vacantUnits: number;
   turningUnits: number;
+  preLeasedUnits: number;
   activeInspections: number;
   openMaintenanceRequests: number;
   upcomingTurns: number;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { maintenanceRequests as mockRequests } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
   MaintenanceRequest,
@@ -18,12 +17,12 @@ const STATUS_OPTIONS: MaintenanceStatus[] = [
 ];
 
 export default function MaintenancePage() {
-  const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>(mockRequests);
+  const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>([]);
   const [selected, setSelected] = useState<MaintenanceRequest | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [newNote, setNewNote] = useState("");
-  const [dataSource, setDataSource] = useState<"mock" | "appfolio">("mock");
+  const [dataSource, setDataSource] = useState<"appfolio" | "error">("appfolio");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,12 +31,10 @@ export default function MaintenancePage() {
         const res = await fetch("/api/appfolio/work-orders");
         if (!res.ok) throw new Error("API error");
         const json = await res.json();
-        if (json.workOrders && json.workOrders.length > 0) {
-          setAllRequests(json.workOrders);
-          setDataSource(json.source || "appfolio");
-        }
+        setAllRequests(json.workOrders || []);
+        setDataSource("appfolio");
       } catch {
-        // Keep mock data on failure
+        setDataSource("error");
       } finally {
         setLoading(false);
       }
@@ -240,11 +237,9 @@ export default function MaintenancePage() {
               Track and manage work orders across all properties
             </p>
           </div>
-          {dataSource === "appfolio" && (
-            <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
-              Live from AppFolio
-            </span>
-          )}
+          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
+            Live from AppFolio
+          </span>
         </div>
       </div>
 

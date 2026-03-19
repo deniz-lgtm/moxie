@@ -600,6 +600,7 @@ export const dashboardStats: DashboardStats = {
   occupiedUnits: 65,
   vacantUnits: 4,
   turningUnits: 5,
+  preLeasedUnits: 0,
   activeInspections: 2,
   openMaintenanceRequests: 3,
   upcomingTurns: 2,
