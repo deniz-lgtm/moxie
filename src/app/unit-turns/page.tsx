@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { unitTurns } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { UnitTurn, TurnTask, TurnTaskStatus } from "@/lib/types";
 
@@ -15,7 +14,7 @@ const TASK_CATEGORIES = [
 ] as const;
 
 export default function UnitTurnsPage() {
-  const [allTurns, setAllTurns] = useState<UnitTurn[]>(unitTurns);
+  const [allTurns, setAllTurns] = useState<UnitTurn[]>([]);
   const [selected, setSelected] = useState<UnitTurn | null>(null);
 
   function updateTaskStatus(taskId: string, status: TurnTaskStatus) {

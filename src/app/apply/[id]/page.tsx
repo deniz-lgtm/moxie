@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { applicationGroups } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { ApplicationGroup, Applicant, StepStatus } from "@/lib/types";
 
@@ -9,13 +8,22 @@ import type { ApplicationGroup, Applicant, StepStatus } from "@/lib/types";
 // In production this would be a public route with auth token, not behind the PM login
 
 export default function ApplyPortal({ params }: { params: Promise<{ id: string }> }) {
-  // For the mock, we find the applicant across all groups
-  const [allGroups] = useState<ApplicationGroup[]>(applicationGroups);
+  const [allGroups, setAllGroups] = useState<ApplicationGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/appfolio/applications")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.applications) setAllGroups(data.applications);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   let applicant: Applicant | null = null;
   let group: ApplicationGroup | null = null;
 
-  // In a real app we'd use the URL param + auth. For now, default to first incomplete applicant.
   for (const g of allGroups) {
     for (const a of g.applicants) {
       if (a.status !== "complete" && a.role !== "guarantor") {
@@ -29,6 +37,28 @@ export default function ApplyPortal({ params }: { params: Promise<{ id: string }
 
   const [currentApplicant, setCurrentApplicant] = useState<Applicant | null>(applicant);
   const [selectedView, setSelectedView] = useState<"checklist" | "documents" | "roommates">("checklist");
+
+  // Update currentApplicant when data loads
+  useEffect(() => {
+    if (!currentApplicant && allGroups.length > 0) {
+      for (const g of allGroups) {
+        for (const a of g.applicants) {
+          if (a.status !== "complete" && a.role !== "guarantor") {
+            setCurrentApplicant(a);
+            return;
+          }
+        }
+      }
+    }
+  }, [allGroups, currentApplicant]);
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <p className="text-muted-foreground">Loading application...</p>
+      </div>
+    );
+  }
 
   if (!currentApplicant || !group) {
     return (

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { inspections } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem } from "@/lib/types";
 
@@ -19,7 +18,7 @@ const ITEMS_BY_AREA: Record<string, string[]> = {
 const CONDITIONS: ConditionRating[] = ["excellent", "good", "fair", "poor", "damaged"];
 
 export default function InspectionsPage() {
-  const [allInspections, setAllInspections] = useState<Inspection[]>(inspections);
+  const [allInspections, setAllInspections] = useState<Inspection[]>([]);
   const [selected, setSelected] = useState<Inspection | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");

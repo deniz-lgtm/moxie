@@ -1,14 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { tourSlots, properties } from "@/lib/mock-data";
+import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { TourSlot, TourRegistration, TourRegistrationStatus } from "@/lib/types";
+import type { TourSlot, TourRegistration, TourRegistrationStatus, Property } from "@/lib/types";
 
 export default function ToursPage() {
-  const [allTours, setAllTours] = useState<TourSlot[]>(tourSlots);
+  const [allTours, setAllTours] = useState<TourSlot[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
   const [selected, setSelected] = useState<TourSlot | null>(null);
   const [filterProperty, setFilterProperty] = useState<string>("all");
+
+  useEffect(() => {
+    fetch("/api/appfolio/properties")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.properties) setProperties(data.properties);
+      })
+      .catch(() => {});
+  }, []);
 
   const filtered = allTours.filter((t) => {
     if (filterProperty !== "all" && t.propertyId !== filterProperty) return false;

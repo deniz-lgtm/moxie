@@ -1,23 +1,19 @@
 import Link from "next/link";
-import { applicationGroups as mockApplicationGroups, tourSlots } from "@/lib/mock-data";
 import { fetchApplications } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeasingPage() {
-  let applicationGroups = mockApplicationGroups;
+  let applicationGroups: Awaited<ReturnType<typeof fetchApplications>>["data"] = [];
   try {
     const result = await fetchApplications();
-    if (result.data.length > 0) {
-      applicationGroups = result.data;
-    }
+    applicationGroups = result.data;
   } catch {
-    // Fall back to mock data
+    // Empty on error
   }
 
   const incompleteApps = applicationGroups.filter((g) => g.status === "incomplete");
   const reviewApps = applicationGroups.filter((g) => g.status === "under_review");
-  const upcomingTours = tourSlots.filter((t) => new Date(t.date) >= new Date("2026-03-14"));
 
   // Find the most behind applicant across all groups
   const allApplicants = applicationGroups
@@ -36,10 +32,9 @@ export default async function LeasingPage() {
       return aPct - bPct;
     });
 
-  const totalRegistrations = upcomingTours.reduce(
-    (sum, t) => sum + t.registrations.filter((r) => r.status !== "cancelled").length,
-    0
-  );
+  // Tours not yet connected to AppFolio
+  const upcomingTours: any[] = [];
+  const totalRegistrations = 0;
 
   return (
     <div className="space-y-8">
