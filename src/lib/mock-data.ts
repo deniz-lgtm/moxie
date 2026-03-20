@@ -16,36 +16,36 @@ import {
   AppCategoryConfig,
 } from "./types";
 
-// --- Properties (USC off-campus housing) ---
+// --- Properties (Moxie Management placeholder data) ---
 export const properties: Property[] = [
   {
     id: "prop-1",
-    name: "The Lorenzo",
+    name: "Moxie on Adams",
     address: "325 W Adams Blvd, Los Angeles, CA 90007",
     unitCount: 24,
   },
   {
     id: "prop-2",
-    name: "Cardinal Gardens",
+    name: "Moxie on Hoover",
     address: "2707 S Hoover St, Los Angeles, CA 90007",
     unitCount: 18,
   },
   {
     id: "prop-3",
-    name: "Troy Hall",
+    name: "Moxie on 30th",
     address: "1050 W 30th St, Los Angeles, CA 90007",
     unitCount: 32,
   },
 ];
 
 export const units: Unit[] = [
-  { id: "unit-1", propertyId: "prop-1", propertyName: "The Lorenzo", number: "101", displayName: "The Lorenzo #101", bedrooms: 2, bathrooms: 1, sqft: 850, status: "current", tenant: "Alex T.", rent: "2400.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
-  { id: "unit-2", propertyId: "prop-1", propertyName: "The Lorenzo", number: "102", displayName: "The Lorenzo #102", bedrooms: 1, bathrooms: 1, sqft: 600, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
-  { id: "unit-3", propertyId: "prop-1", propertyName: "The Lorenzo", number: "201", displayName: "The Lorenzo #201", bedrooms: 3, bathrooms: 2, sqft: 1100, status: "current", tenant: "Priya S.", rent: "3600.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
-  { id: "unit-4", propertyId: "prop-2", propertyName: "Cardinal Gardens", number: "A1", displayName: "Cardinal Gardens #A1", bedrooms: 2, bathrooms: 1, sqft: 800, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
-  { id: "unit-5", propertyId: "prop-2", propertyName: "Cardinal Gardens", number: "B3", displayName: "Cardinal Gardens #B3", bedrooms: 4, bathrooms: 2, sqft: 1400, status: "current", tenant: "Jordan P.", rent: "4200.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
-  { id: "unit-6", propertyId: "prop-3", propertyName: "Troy Hall", number: "301", displayName: "Troy Hall #301", bedrooms: 2, bathrooms: 2, sqft: 950, status: "current", tenant: "Marcus W.", rent: "2800.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
-  { id: "unit-7", propertyId: "prop-3", propertyName: "Troy Hall", number: "105", displayName: "Troy Hall #105", bedrooms: 1, bathrooms: 1, sqft: 550, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
+  { id: "unit-1", propertyId: "prop-1", propertyName: "Moxie on Adams", number: "101", displayName: "Moxie on Adams #101", bedrooms: 2, bathrooms: 1, sqft: 850, status: "current", tenant: "Alex T.", rent: "2400.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-2", propertyId: "prop-1", propertyName: "Moxie on Adams", number: "102", displayName: "Moxie on Adams #102", bedrooms: 1, bathrooms: 1, sqft: 600, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
+  { id: "unit-3", propertyId: "prop-1", propertyName: "Moxie on Adams", number: "201", displayName: "Moxie on Adams #201", bedrooms: 3, bathrooms: 2, sqft: 1100, status: "current", tenant: "Priya S.", rent: "3600.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-4", propertyId: "prop-2", propertyName: "Moxie on Hoover", number: "A1", displayName: "Moxie on Hoover #A1", bedrooms: 2, bathrooms: 1, sqft: 800, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
+  { id: "unit-5", propertyId: "prop-2", propertyName: "Moxie on Hoover", number: "B3", displayName: "Moxie on Hoover #B3", bedrooms: 4, bathrooms: 2, sqft: 1400, status: "current", tenant: "Jordan P.", rent: "4200.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-6", propertyId: "prop-3", propertyName: "Moxie on 30th", number: "301", displayName: "Moxie on 30th #301", bedrooms: 2, bathrooms: 2, sqft: 950, status: "current", tenant: "Marcus W.", rent: "2800.00", leaseFrom: "08/15/2025", leaseTo: "07/31/2026" },
+  { id: "unit-7", propertyId: "prop-3", propertyName: "Moxie on 30th", number: "105", displayName: "Moxie on 30th #105", bedrooms: 1, bathrooms: 1, sqft: 550, status: "vacant", tenant: null, rent: null, leaseFrom: null, leaseTo: null },
 ];
 
 // --- Inspections ---
@@ -55,7 +55,7 @@ export const inspections: Inspection[] = [
     unitId: "unit-2",
     propertyId: "prop-1",
     unitNumber: "102",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     type: "move_out",
     status: "scheduled",
     scheduledDate: "2026-03-05",
@@ -70,7 +70,7 @@ export const inspections: Inspection[] = [
     unitId: "unit-4",
     propertyId: "prop-2",
     unitNumber: "A1",
-    propertyName: "Cardinal Gardens",
+    propertyName: "Moxie on Hoover",
     type: "move_in",
     status: "completed",
     scheduledDate: "2026-02-20",
@@ -92,7 +92,7 @@ export const inspections: Inspection[] = [
     unitId: "unit-6",
     propertyId: "prop-3",
     unitNumber: "301",
-    propertyName: "Troy Hall",
+    propertyName: "Moxie on 30th",
     type: "quarterly",
     status: "in_progress",
     scheduledDate: "2026-02-27",
@@ -114,7 +114,7 @@ export const unitTurns: UnitTurn[] = [
     unitId: "unit-2",
     propertyId: "prop-1",
     unitNumber: "102",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     moveOutDate: "2026-03-01",
     targetReadyDate: "2026-03-15",
     moveInDate: "2026-03-20",
@@ -138,7 +138,7 @@ export const unitTurns: UnitTurn[] = [
     unitId: "unit-7",
     propertyId: "prop-3",
     unitNumber: "105",
-    propertyName: "Troy Hall",
+    propertyName: "Moxie on 30th",
     moveOutDate: "2026-02-15",
     targetReadyDate: "2026-03-01",
     status: "in_progress",
@@ -163,7 +163,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     unitId: "unit-1",
     propertyId: "prop-1",
     unitNumber: "101",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     tenantName: "Alex T.",
     tenantPhone: "(213) 555-0142",
     category: "plumbing",
@@ -184,7 +184,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     unitId: "unit-5",
     propertyId: "prop-2",
     unitNumber: "B3",
-    propertyName: "Cardinal Gardens",
+    propertyName: "Moxie on Hoover",
     tenantName: "Jordan P.",
     tenantEmail: "jordan.p@usc.edu",
     category: "hvac",
@@ -202,7 +202,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     unitId: "unit-3",
     propertyId: "prop-1",
     unitNumber: "201",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     tenantName: "Priya S.",
     tenantPhone: "(213) 555-0198",
     category: "locksmith",
@@ -222,7 +222,7 @@ export const maintenanceRequests: MaintenanceRequest[] = [
     unitId: "unit-6",
     propertyId: "prop-3",
     unitNumber: "301",
-    propertyName: "Troy Hall",
+    propertyName: "Moxie on 30th",
     tenantName: "Marcus W.",
     category: "appliance",
     priority: "low",
@@ -293,7 +293,7 @@ export const applicationGroups: ApplicationGroup[] = [
   {
     id: "app-1",
     propertyId: "prop-1",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     unitNumber: "201",
     unitDetails: "3BR / 2BA · 1,100 sqft",
     leaseCycle: "fall_2026",
@@ -313,7 +313,7 @@ export const applicationGroups: ApplicationGroup[] = [
         steps: makeApplicantSteps({ "step-1": "complete", "step-2": "complete", "step-3": "complete", "step-5": "complete", "step-7": "complete", "step-8": "complete" }),
         documents: makeDocs("applicant", ["government_id", "proof_of_enrollment"]),
         nudges: [
-          { id: "n-1", channel: "email", message: "Hi Sarah, your application for The Lorenzo #201 is 75% complete. Upload your remaining documents to finalize.", scheduledAt: "2026-03-10T09:00:00Z", sentAt: "2026-03-10T09:00:00Z", status: "opened" },
+          { id: "n-1", channel: "email", message: "Hi Sarah, your application for Moxie on Adams #201 is 75% complete. Upload your remaining documents to finalize.", scheduledAt: "2026-03-10T09:00:00Z", sentAt: "2026-03-10T09:00:00Z", status: "opened" },
           { id: "n-2", channel: "sms", message: "Reminder: Complete your Moxie application — guarantor docs still needed.", scheduledAt: "2026-03-12T09:00:00Z", sentAt: "2026-03-12T09:01:00Z", status: "delivered" },
         ],
         status: "in_progress",
@@ -329,7 +329,7 @@ export const applicationGroups: ApplicationGroup[] = [
         steps: makeApplicantSteps({ "step-1": "complete", "step-2": "complete", "step-3": "complete", "step-5": "complete", "step-8": "complete" }),
         documents: makeDocs("applicant", ["government_id", "proof_of_enrollment"]),
         nudges: [
-          { id: "n-3", channel: "email", message: "Hi Jake, your roommate Sarah has started the application. Complete your steps to secure The Lorenzo #201.", scheduledAt: "2026-03-06T09:00:00Z", sentAt: "2026-03-06T09:00:00Z", status: "opened" },
+          { id: "n-3", channel: "email", message: "Hi Jake, your roommate Sarah has started the application. Complete your steps to secure Moxie on Adams #201.", scheduledAt: "2026-03-06T09:00:00Z", sentAt: "2026-03-06T09:00:00Z", status: "opened" },
         ],
         status: "in_progress",
         startedAt: "2026-03-06T10:00:00Z",
@@ -343,7 +343,7 @@ export const applicationGroups: ApplicationGroup[] = [
         steps: makeApplicantSteps({ "step-1": "complete", "step-8": "complete" }),
         documents: makeDocs("applicant", []),
         nudges: [
-          { id: "n-4", channel: "email", message: "Hi Ryan, your roommates have started the application for The Lorenzo #201. Get started now!", scheduledAt: "2026-03-06T09:00:00Z", sentAt: "2026-03-06T09:00:00Z", status: "delivered" },
+          { id: "n-4", channel: "email", message: "Hi Ryan, your roommates have started the application for Moxie on Adams #201. Get started now!", scheduledAt: "2026-03-06T09:00:00Z", sentAt: "2026-03-06T09:00:00Z", status: "delivered" },
           { id: "n-5", channel: "email", message: "Ryan, your application is only 25% complete. You need to upload your ID and enrollment docs.", scheduledAt: "2026-03-09T09:00:00Z", sentAt: "2026-03-09T09:00:00Z", status: "delivered" },
           { id: "n-6", channel: "sms", message: "URGENT: Ryan, your roommates are waiting on you. Complete your Moxie application today.", scheduledAt: "2026-03-12T09:00:00Z", sentAt: "2026-03-12T09:01:00Z", status: "sent" },
         ],
@@ -376,7 +376,7 @@ export const applicationGroups: ApplicationGroup[] = [
         steps: makeGuarantorSteps({ "gstep-1": "complete", "gstep-2": "complete", "gstep-3": "complete" }),
         documents: makeDocs("guarantor", ["government_id", "proof_of_income"]),
         nudges: [
-          { id: "n-7", channel: "email", message: "Hi Tom, Jake has listed you as a guarantor. Please complete the guarantee agreement for The Lorenzo #201.", scheduledAt: "2026-03-08T09:00:00Z", sentAt: "2026-03-08T09:00:00Z", status: "opened" },
+          { id: "n-7", channel: "email", message: "Hi Tom, Jake has listed you as a guarantor. Please complete the guarantee agreement for Moxie on Adams #201.", scheduledAt: "2026-03-08T09:00:00Z", sentAt: "2026-03-08T09:00:00Z", status: "opened" },
         ],
         status: "in_progress",
         startedAt: "2026-03-08T10:00:00Z",
@@ -398,7 +398,7 @@ export const applicationGroups: ApplicationGroup[] = [
   {
     id: "app-2",
     propertyId: "prop-2",
-    propertyName: "Cardinal Gardens",
+    propertyName: "Moxie on Hoover",
     unitNumber: "A1",
     unitDetails: "2BR / 1BA · 800 sqft",
     leaseCycle: "fall_2026",
@@ -471,7 +471,7 @@ export const applicationGroups: ApplicationGroup[] = [
   {
     id: "app-3",
     propertyId: "prop-3",
-    propertyName: "Troy Hall",
+    propertyName: "Moxie on 30th",
     unitNumber: "301",
     unitDetails: "2BR / 2BA · 950 sqft",
     leaseCycle: "fall_2026",
@@ -505,8 +505,8 @@ export const applicationGroups: ApplicationGroup[] = [
         steps: makeApplicantSteps({ "step-1": "complete" }),
         documents: makeDocs("applicant", []),
         nudges: [
-          { id: "n-9", channel: "email", message: "Hi Taylor, Jordan has started your joint application for Troy Hall #301. Complete your application now.", scheduledAt: "2026-03-11T09:00:00Z", sentAt: "2026-03-11T09:00:00Z", status: "delivered" },
-          { id: "n-10", channel: "sms", message: "Taylor — your Troy Hall application needs attention. Only 1 of 8 steps complete.", scheduledAt: "2026-03-13T09:00:00Z", status: "scheduled" },
+          { id: "n-9", channel: "email", message: "Hi Taylor, Jordan has started your joint application for Moxie on 30th #301. Complete your application now.", scheduledAt: "2026-03-11T09:00:00Z", sentAt: "2026-03-11T09:00:00Z", status: "delivered" },
+          { id: "n-10", channel: "sms", message: "Taylor — your Moxie on 30th application needs attention. Only 1 of 8 steps complete.", scheduledAt: "2026-03-13T09:00:00Z", status: "scheduled" },
         ],
         status: "in_progress",
         startedAt: "2026-03-11T15:00:00Z",
@@ -520,7 +520,7 @@ export const tourSlots: TourSlot[] = [
   {
     id: "tour-1",
     propertyId: "prop-1",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     date: "2026-03-21",
     startTime: "10:00 AM",
     endTime: "12:00 PM",
@@ -540,7 +540,7 @@ export const tourSlots: TourSlot[] = [
   {
     id: "tour-2",
     propertyId: "prop-2",
-    propertyName: "Cardinal Gardens",
+    propertyName: "Moxie on Hoover",
     date: "2026-03-22",
     startTime: "2:00 PM",
     endTime: "4:00 PM",
@@ -559,7 +559,7 @@ export const tourSlots: TourSlot[] = [
   {
     id: "tour-3",
     propertyId: "prop-3",
-    propertyName: "Troy Hall",
+    propertyName: "Moxie on 30th",
     date: "2026-03-29",
     startTime: "11:00 AM",
     endTime: "1:00 PM",
@@ -580,7 +580,7 @@ export const tourSlots: TourSlot[] = [
   {
     id: "tour-4",
     propertyId: "prop-1",
-    propertyName: "The Lorenzo",
+    propertyName: "Moxie on Adams",
     date: "2026-04-05",
     startTime: "1:00 PM",
     endTime: "3:00 PM",

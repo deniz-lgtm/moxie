@@ -29,9 +29,6 @@ import type {
 // Portfolio name to filter by
 const PORTFOLIO_NAME = "Moxie Management";
 
-// Next lease year start date for vacancy projection
-const NEXT_YEAR_START = "08/15/2026";
-
 /**
  * Get the set of PropertyIds that belong to "Moxie Management" portfolio.
  * The property_directory report has a `Portfolio` field; the rent roll does not.
@@ -295,11 +292,13 @@ export async function fetchUnits(): Promise<{ data: Unit[]; source: "appfolio" }
   return { data: units, source: "appfolio" };
 }
 
-// --- Leasing Stats (Pre-leased for upcoming academic year) ---
+// --- Leasing Stats ---
 // Strategy:
 //   1. Rent roll = all units (total count + current occupancy)
-//   2. Vacancy report dated 8/15/2026 = units that will be vacant at lease year start
-//   3. Pre-leased = total - vacant-on-8/15
+//   2. Current vacancy report = units that are currently vacant
+//   3. Rent roll Status field: "Current", "Notice", "Vacant", "Future"
+//      - "Future" = pre-leased (lease signed but not yet started)
+//      - "Vacant" = currently unleased
 //
 // Both filtered to Moxie Management portfolio only.
 export async function fetchUnitStats(): Promise<{
@@ -313,11 +312,10 @@ export async function fetchUnitStats(): Promise<{
   // that trigger AppFolio rate limiting. The cache is then used by filterToMoxie.
   await getMoxiePropertyIds();
 
-  // Now fetch rent roll and vacancy in parallel (property_directory is already cached).
-  // Vacancy report with future as_of_date may fail (400) — make it non-fatal.
+  // Fetch rent roll and current vacancy report in parallel.
   const [rentRollRows, vacancyRows] = await Promise.all([
     afGetRentRoll(),
-    afGetVacancyReport(NEXT_YEAR_START).catch(() => [] as any[]),
+    afGetVacancyReport().catch(() => [] as any[]),
   ]);
 
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
@@ -330,46 +328,36 @@ export async function fetchUnitStats(): Promise<{
 
   const total = moxieRentRoll.length;
 
-  // Current occupancy
+  // Derive stats from rent roll Status field
   let occupied = 0;
+  let vacant = 0;
+  let future = 0; // pre-leased
+  let notice = 0;
+
   for (const row of moxieRentRoll) {
     const status = String(row.Status || "").toLowerCase();
-    if (status === "current" || status === "notice") {
+    if (status === "current") {
       occupied++;
+    } else if (status === "notice") {
+      notice++;
+    } else if (status === "future") {
+      future++;
+    } else {
+      // "vacant" or any other status
+      vacant++;
     }
   }
 
-  // Vacancy as of 8/15/2026 — these units are NOT pre-leased
-  const vacantUnitIds = new Set(
-    moxieVacancy.map((v: any) => String(v.UnitId || v.unit_id || "")).filter(Boolean)
-  );
-  // If vacancy report returns unit names instead of IDs, also match on name
-  const vacantUnitNames = new Set(
-    moxieVacancy.map((v: any) => String(v.Unit || v.UnitName || v.unit_name || "")).filter(Boolean)
-  );
-
-  let unleased = 0;
-  for (const row of moxieRentRoll) {
-    const uid = String(row.UnitId || "");
-    const uname = String(row.Unit || "");
-    if (vacantUnitIds.has(uid) || vacantUnitNames.has(uname)) {
-      unleased++;
-    }
+  // If vacancy report has data, use it as the more accurate vacancy count
+  if (moxieVacancy.length > 0) {
+    vacant = moxieVacancy.length;
   }
-
-  // If vacancy report returned nothing (maybe API doesn't support as_of_date),
-  // fall back: unleased = count of vacancy report rows
-  if ((vacancyRows || []).length > 0 && moxieVacancy.length > 0 && unleased === 0) {
-    unleased = moxieVacancy.length;
-  }
-
-  const preLeased = total - unleased;
 
   return {
     total,
-    occupied,
-    preLeased,
-    unleased,
+    occupied: occupied + notice, // tenants in place (including those on notice)
+    preLeased: future,
+    unleased: vacant,
     source: "appfolio",
   };
 }
