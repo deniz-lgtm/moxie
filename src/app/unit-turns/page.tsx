@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { UnitTurn, TurnTask, TurnTaskStatus } from "@/lib/types";
+import type { UnitTurn, TurnTask, TurnTaskStatus, Property, Unit } from "@/lib/types";
 
 const TASK_CATEGORIES = [
   { value: "cleaning", label: "Cleaning" },
@@ -13,9 +13,85 @@ const TASK_CATEGORIES = [
   { value: "final_walk", label: "Final Walk" },
 ] as const;
 
+const DEFAULT_TASKS: { name: string; category: string }[] = [
+  { name: "Deep clean entire unit", category: "cleaning" },
+  { name: "Paint walls & trim", category: "paint" },
+  { name: "Patch holes & drywall repair", category: "repairs" },
+  { name: "Check/replace flooring", category: "flooring" },
+  { name: "Test all appliances", category: "appliances" },
+  { name: "Replace HVAC filters", category: "repairs" },
+  { name: "Check plumbing fixtures", category: "repairs" },
+  { name: "Final walkthrough", category: "final_walk" },
+];
+
 export default function UnitTurnsPage() {
   const [allTurns, setAllTurns] = useState<UnitTurn[]>([]);
   const [selected, setSelected] = useState<UnitTurn | null>(null);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newTurn, setNewTurn] = useState({
+    propertyId: "",
+    unitId: "",
+    moveOutDate: "",
+    targetReadyDate: "",
+    totalBudget: 0,
+  });
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/appfolio/properties").then((r) => r.json()),
+      fetch("/api/appfolio/units").then((r) => r.json()),
+    ])
+      .then(([propData, unitData]) => {
+        setProperties(propData.properties || []);
+        setUnits(unitData.units || []);
+        if (propData.properties?.length > 0) {
+          setNewTurn((n) => ({ ...n, propertyId: propData.properties[0].id }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const propertyUnits = units.filter((u) => u.propertyId === newTurn.propertyId);
+
+  function createTurn() {
+    if (!newTurn.unitId || !newTurn.moveOutDate || !newTurn.targetReadyDate) return;
+    const unit = units.find((u) => u.id === newTurn.unitId);
+    const property = properties.find((p) => p.id === newTurn.propertyId);
+    if (!unit || !property) return;
+
+    const now = new Date().toISOString();
+    const tasks: TurnTask[] = DEFAULT_TASKS.map((t, i) => ({
+      id: `task-${Date.now()}-${i}`,
+      name: t.name,
+      category: t.category as TurnTask["category"],
+      status: "not_started" as TurnTaskStatus,
+      dueDate: newTurn.targetReadyDate,
+      notes: "",
+    }));
+
+    const turn: UnitTurn = {
+      id: `turn-${Date.now()}`,
+      unitId: unit.id,
+      propertyId: property.id,
+      unitNumber: unit.number,
+      propertyName: property.name,
+      moveOutDate: newTurn.moveOutDate,
+      targetReadyDate: newTurn.targetReadyDate,
+      status: "pending",
+      outgoingTenant: unit.tenant || undefined,
+      tasks,
+      totalBudget: newTurn.totalBudget || undefined,
+      totalSpent: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setAllTurns((prev) => [turn, ...prev]);
+    setShowCreateForm(false);
+    setSelected(turn);
+    setNewTurn({ propertyId: properties[0]?.id || "", unitId: "", moveOutDate: "", targetReadyDate: "", totalBudget: 0 });
+  }
 
   function updateTaskStatus(taskId: string, status: TurnTaskStatus) {
     if (!selected) return;
@@ -200,12 +276,96 @@ export default function UnitTurnsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Unit Turns</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage move-out to move-in workflows
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Unit Turns</h1>
+          <p className="text-muted-foreground mt-1">
+            Manage move-out to move-in workflows
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreateForm(!showCreateForm)}
+          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+        >
+          {showCreateForm ? "Cancel" : "+ New Turn"}
+        </button>
       </div>
+
+      {showCreateForm && (
+        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+          <h2 className="font-semibold">Start Unit Turn</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Property</label>
+              <select
+                value={newTurn.propertyId}
+                onChange={(e) => setNewTurn({ ...newTurn, propertyId: e.target.value, unitId: "" })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
+              <select
+                value={newTurn.unitId}
+                onChange={(e) => setNewTurn({ ...newTurn, unitId: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                <option value="">Select unit...</option>
+                {propertyUnits.map((u) => (
+                  <option key={u.id} value={u.id}>#{u.number} — {u.tenant || "Vacant"}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Move-Out Date *</label>
+              <input
+                type="date"
+                value={newTurn.moveOutDate}
+                onChange={(e) => setNewTurn({ ...newTurn, moveOutDate: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Target Ready Date *</label>
+              <input
+                type="date"
+                value={newTurn.targetReadyDate}
+                onChange={(e) => setNewTurn({ ...newTurn, targetReadyDate: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Budget ($)</label>
+              <input
+                type="number"
+                value={newTurn.totalBudget || ""}
+                placeholder="0"
+                onChange={(e) => setNewTurn({ ...newTurn, totalBudget: parseFloat(e.target.value) || 0 })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            8 default tasks will be created (clean, paint, repairs, flooring, appliances, HVAC, plumbing, walkthrough).
+          </p>
+          <button
+            onClick={createTurn}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+          >
+            Create Unit Turn
+          </button>
+        </div>
+      )}
+
+      {allTurns.length === 0 && !showCreateForm && (
+        <div className="text-center py-12 text-muted-foreground">
+          No unit turns yet. Click &quot;+ New Turn&quot; to start a move-out workflow.
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-4">
         {allTurns.map((turn) => {

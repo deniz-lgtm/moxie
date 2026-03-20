@@ -5,6 +5,10 @@ import { StatusBadge } from "@/components/StatusBadge";
 import type {
   MaintenanceRequest,
   MaintenanceStatus,
+  MaintenancePriority,
+  MaintenanceCategory,
+  Property,
+  Unit,
 } from "@/lib/types";
 
 const STATUS_OPTIONS: MaintenanceStatus[] = [
@@ -16,6 +20,17 @@ const STATUS_OPTIONS: MaintenanceStatus[] = [
   "closed",
 ];
 
+const CATEGORY_OPTIONS: { value: MaintenanceCategory; label: string }[] = [
+  { value: "plumbing", label: "Plumbing" },
+  { value: "electrical", label: "Electrical" },
+  { value: "hvac", label: "HVAC" },
+  { value: "appliance", label: "Appliance" },
+  { value: "structural", label: "Structural" },
+  { value: "pest", label: "Pest Control" },
+  { value: "locksmith", label: "Locksmith" },
+  { value: "general", label: "General" },
+];
+
 export default function MaintenancePage() {
   const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>([]);
   const [selected, setSelected] = useState<MaintenanceRequest | null>(null);
@@ -24,14 +39,37 @@ export default function MaintenancePage() {
   const [newNote, setNewNote] = useState("");
   const [dataSource, setDataSource] = useState<"appfolio" | "error">("appfolio");
   const [loading, setLoading] = useState(true);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newRequest, setNewRequest] = useState({
+    propertyId: "",
+    unitId: "",
+    title: "",
+    description: "",
+    category: "general" as MaintenanceCategory,
+    priority: "medium" as MaintenancePriority,
+  });
 
   useEffect(() => {
-    async function loadWorkOrders() {
+    async function loadData() {
       try {
-        const res = await fetch("/api/appfolio/work-orders");
-        if (!res.ok) throw new Error("API error");
-        const json = await res.json();
-        setAllRequests(json.workOrders || []);
+        const [woRes, propRes, unitRes] = await Promise.all([
+          fetch("/api/appfolio/work-orders"),
+          fetch("/api/appfolio/properties"),
+          fetch("/api/appfolio/units"),
+        ]);
+        const [woJson, propJson, unitJson] = await Promise.all([
+          woRes.ok ? woRes.json() : { workOrders: [] },
+          propRes.ok ? propRes.json() : { properties: [] },
+          unitRes.ok ? unitRes.json() : { units: [] },
+        ]);
+        setAllRequests(woJson.workOrders || []);
+        setProperties(propJson.properties || []);
+        setUnits(unitJson.units || []);
+        if (propJson.properties?.length > 0) {
+          setNewRequest((r) => ({ ...r, propertyId: propJson.properties[0].id }));
+        }
         setDataSource("appfolio");
       } catch {
         setDataSource("error");
@@ -39,8 +77,40 @@ export default function MaintenancePage() {
         setLoading(false);
       }
     }
-    loadWorkOrders();
+    loadData();
   }, []);
+
+  const propertyUnits = units.filter((u) => u.propertyId === newRequest.propertyId);
+
+  function createRequest() {
+    if (!newRequest.title.trim() || !newRequest.unitId) return;
+    const unit = units.find((u) => u.id === newRequest.unitId);
+    const property = properties.find((p) => p.id === newRequest.propertyId);
+    if (!unit || !property) return;
+
+    const now = new Date().toISOString();
+    const request: MaintenanceRequest = {
+      id: `wo-${Date.now()}`,
+      unitId: unit.id,
+      propertyId: property.id,
+      unitNumber: unit.number,
+      propertyName: property.name,
+      tenantName: unit.tenant || "Vacant",
+      category: newRequest.category,
+      priority: newRequest.priority,
+      status: "submitted",
+      title: newRequest.title,
+      description: newRequest.description,
+      photos: [],
+      notes: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    setAllRequests((prev) => [request, ...prev]);
+    setShowCreateForm(false);
+    setSelected(request);
+    setNewRequest({ propertyId: properties[0]?.id || "", unitId: "", title: "", description: "", category: "general", priority: "medium" });
+  }
 
   const filtered = allRequests
     .filter((r) => {
@@ -229,19 +299,109 @@ export default function MaintenancePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Maintenance Requests</h1>
-            <p className="text-muted-foreground mt-1">
-              Track and manage work orders across all properties
-            </p>
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Maintenance Requests</h1>
+          <p className="text-muted-foreground mt-1">
+            Track and manage work orders across all properties
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
           <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
             Live from AppFolio
           </span>
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+          >
+            {showCreateForm ? "Cancel" : "+ New Request"}
+          </button>
         </div>
       </div>
+
+      {showCreateForm && (
+        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+          <h2 className="font-semibold">Create Work Order</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Property</label>
+              <select
+                value={newRequest.propertyId}
+                onChange={(e) => setNewRequest({ ...newRequest, propertyId: e.target.value, unitId: "" })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
+              <select
+                value={newRequest.unitId}
+                onChange={(e) => setNewRequest({ ...newRequest, unitId: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                <option value="">Select unit...</option>
+                {propertyUnits.map((u) => (
+                  <option key={u.id} value={u.id}>#{u.number} — {u.tenant || "Vacant"}</option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs text-muted-foreground block mb-1">Title *</label>
+              <input
+                type="text"
+                value={newRequest.title}
+                onChange={(e) => setNewRequest({ ...newRequest, title: e.target.value })}
+                placeholder="Brief description of the issue"
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Category</label>
+              <select
+                value={newRequest.category}
+                onChange={(e) => setNewRequest({ ...newRequest, category: e.target.value as MaintenanceCategory })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {CATEGORY_OPTIONS.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Priority</label>
+              <select
+                value={newRequest.priority}
+                onChange={(e) => setNewRequest({ ...newRequest, priority: e.target.value as MaintenancePriority })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="emergency">Emergency</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">Description</label>
+            <textarea
+              value={newRequest.description}
+              onChange={(e) => setNewRequest({ ...newRequest, description: e.target.value })}
+              placeholder="Detailed description..."
+              rows={3}
+              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card resize-none"
+            />
+          </div>
+          <button
+            onClick={createRequest}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+          >
+            Create Work Order
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3">

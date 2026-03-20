@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem } from "@/lib/types";
+import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem, Property, Unit } from "@/lib/types";
 
 const AREAS = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Hallway", "Closet", "Patio/Balcony"];
 const ITEMS_BY_AREA: Record<string, string[]> = {
@@ -16,12 +15,72 @@ const ITEMS_BY_AREA: Record<string, string[]> = {
   "Patio/Balcony": ["Surface", "Railing", "Lighting", "Door"],
 };
 const CONDITIONS: ConditionRating[] = ["excellent", "good", "fair", "poor", "damaged"];
+const INSPECTION_TYPES: { value: InspectionType; label: string }[] = [
+  { value: "move_in", label: "Move In" },
+  { value: "move_out", label: "Move Out" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "routine", label: "Routine" },
+];
 
 export default function InspectionsPage() {
   const [allInspections, setAllInspections] = useState<Inspection[]>([]);
   const [selected, setSelected] = useState<Inspection | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newInspection, setNewInspection] = useState({
+    propertyId: "",
+    unitId: "",
+    type: "routine" as InspectionType,
+    scheduledDate: "",
+    inspector: "",
+  });
+
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/appfolio/properties").then((r) => r.json()),
+      fetch("/api/appfolio/units").then((r) => r.json()),
+    ])
+      .then(([propData, unitData]) => {
+        setProperties(propData.properties || []);
+        setUnits(unitData.units || []);
+        if (propData.properties?.length > 0) {
+          setNewInspection((n) => ({ ...n, propertyId: propData.properties[0].id }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const propertyUnits = units.filter((u) => u.propertyId === newInspection.propertyId);
+
+  function createInspection() {
+    if (!newInspection.unitId || !newInspection.scheduledDate) return;
+    const unit = units.find((u) => u.id === newInspection.unitId);
+    const property = properties.find((p) => p.id === newInspection.propertyId);
+    if (!unit || !property) return;
+
+    const inspection: Inspection = {
+      id: `insp-${Date.now()}`,
+      unitId: unit.id,
+      propertyId: property.id,
+      unitNumber: unit.number,
+      propertyName: property.name,
+      type: newInspection.type,
+      status: "scheduled",
+      scheduledDate: newInspection.scheduledDate,
+      inspector: newInspection.inspector || "Unassigned",
+      items: [],
+      overallNotes: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setAllInspections((prev) => [inspection, ...prev]);
+    setShowCreateForm(false);
+    setSelected(inspection);
+    setNewInspection({ propertyId: properties[0]?.id || "", unitId: "", type: "routine", scheduledDate: "", inspector: "" });
+  }
 
   const filtered = allInspections.filter((i) => {
     if (filterStatus !== "all" && i.status !== filterStatus) return false;
@@ -245,7 +304,83 @@ export default function InspectionsPage() {
             Move-in, move-out, and quarterly inspections
           </p>
         </div>
+        <button
+          onClick={() => setShowCreateForm(!showCreateForm)}
+          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+        >
+          {showCreateForm ? "Cancel" : "+ New Inspection"}
+        </button>
       </div>
+
+      {showCreateForm && (
+        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+          <h2 className="font-semibold">Schedule Inspection</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Property</label>
+              <select
+                value={newInspection.propertyId}
+                onChange={(e) => setNewInspection({ ...newInspection, propertyId: e.target.value, unitId: "" })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
+              <select
+                value={newInspection.unitId}
+                onChange={(e) => setNewInspection({ ...newInspection, unitId: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                <option value="">Select unit...</option>
+                {propertyUnits.map((u) => (
+                  <option key={u.id} value={u.id}>#{u.number} — {u.tenant || "Vacant"}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Type</label>
+              <select
+                value={newInspection.type}
+                onChange={(e) => setNewInspection({ ...newInspection, type: e.target.value as InspectionType })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {INSPECTION_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Scheduled Date *</label>
+              <input
+                type="date"
+                value={newInspection.scheduledDate}
+                onChange={(e) => setNewInspection({ ...newInspection, scheduledDate: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Inspector</label>
+              <input
+                type="text"
+                value={newInspection.inspector}
+                onChange={(e) => setNewInspection({ ...newInspection, inspector: e.target.value })}
+                placeholder="Inspector name"
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+          </div>
+          <button
+            onClick={createInspection}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+          >
+            Create Inspection
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3">

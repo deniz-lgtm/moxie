@@ -9,23 +9,64 @@ export default function ToursPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [selected, setSelected] = useState<TourSlot | null>(null);
   const [filterProperty, setFilterProperty] = useState<string>("all");
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newTour, setNewTour] = useState({
+    propertyId: "",
+    date: "",
+    startTime: "10:00",
+    endTime: "12:00",
+    host: "",
+    capacity: 10,
+    notes: "",
+  });
 
   useEffect(() => {
     fetch("/api/appfolio/properties")
       .then((res) => res.json())
       .then((data) => {
-        if (data.properties) setProperties(data.properties);
+        if (data.properties) {
+          setProperties(data.properties);
+          if (data.properties.length > 0) {
+            setNewTour((n) => ({ ...n, propertyId: data.properties[0].id }));
+          }
+        }
       })
       .catch(() => {});
   }, []);
+
+  function createTour() {
+    if (!newTour.propertyId || !newTour.date) return;
+    const property = properties.find((p) => p.id === newTour.propertyId);
+    if (!property) return;
+
+    const tour: TourSlot = {
+      id: `tour-${Date.now()}`,
+      propertyId: property.id,
+      propertyName: property.name,
+      date: newTour.date,
+      startTime: newTour.startTime,
+      endTime: newTour.endTime,
+      host: newTour.host || "TBD",
+      capacity: newTour.capacity,
+      registrations: [],
+      preReminderStatus: "not_set",
+      postFollowUpStatus: "not_set",
+      notes: newTour.notes,
+      createdAt: new Date().toISOString(),
+    };
+    setAllTours((prev) => [tour, ...prev]);
+    setShowCreateForm(false);
+    setNewTour({ propertyId: properties[0]?.id || "", date: "", startTime: "10:00", endTime: "12:00", host: "", capacity: 10, notes: "" });
+  }
 
   const filtered = allTours.filter((t) => {
     if (filterProperty !== "all" && t.propertyId !== filterProperty) return false;
     return true;
   });
 
-  const upcoming = filtered.filter((t) => new Date(t.date) >= new Date("2026-03-14"));
-  const past = filtered.filter((t) => new Date(t.date) < new Date("2026-03-14"));
+  const today = new Date().toISOString().split("T")[0];
+  const upcoming = filtered.filter((t) => t.date >= today);
+  const past = filtered.filter((t) => t.date < today);
 
   function updateRegistrationStatus(regId: string, status: TourRegistrationStatus) {
     if (!selected) return;
@@ -193,12 +234,99 @@ export default function ToursPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Tour Scheduling</h1>
-        <p className="text-muted-foreground mt-1">
-          Open house tours — multiple prospects per showing
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Tour Scheduling</h1>
+          <p className="text-muted-foreground mt-1">
+            Open house tours — multiple prospects per showing
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreateForm(!showCreateForm)}
+          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+        >
+          {showCreateForm ? "Cancel" : "+ Schedule Tour"}
+        </button>
       </div>
+
+      {showCreateForm && (
+        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+          <h2 className="font-semibold">Schedule Open House</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Property *</label>
+              <select
+                value={newTour.propertyId}
+                onChange={(e) => setNewTour({ ...newTour, propertyId: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Date *</label>
+              <input
+                type="date"
+                value={newTour.date}
+                onChange={(e) => setNewTour({ ...newTour, date: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Start Time</label>
+              <input
+                type="time"
+                value={newTour.startTime}
+                onChange={(e) => setNewTour({ ...newTour, startTime: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">End Time</label>
+              <input
+                type="time"
+                value={newTour.endTime}
+                onChange={(e) => setNewTour({ ...newTour, endTime: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Host</label>
+              <input
+                type="text"
+                value={newTour.host}
+                onChange={(e) => setNewTour({ ...newTour, host: e.target.value })}
+                placeholder="Host name"
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Capacity</label>
+              <input
+                type="number"
+                value={newTour.capacity}
+                onChange={(e) => setNewTour({ ...newTour, capacity: parseInt(e.target.value) || 10 })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </div>
+          </div>
+          <textarea
+            placeholder="Notes (optional)"
+            value={newTour.notes}
+            onChange={(e) => setNewTour({ ...newTour, notes: e.target.value })}
+            rows={2}
+            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card resize-none"
+          />
+          <button
+            onClick={createTour}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+          >
+            Schedule Tour
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-3">
         <select
