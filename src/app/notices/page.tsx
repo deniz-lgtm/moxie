@@ -206,7 +206,7 @@ export default function NoticesPage() {
               >
                 <option value="">All Units</option>
                 {searchedUnits.map((u) => (
-                  <option key={u.id} value={u.id}>{u.unitName} — {u.tenant || "Vacant"}</option>
+                  <option key={u.id} value={u.id}>{u.unitName}</option>
                 ))}
               </select>
             </div>

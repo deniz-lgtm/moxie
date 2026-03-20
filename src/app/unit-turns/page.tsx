@@ -271,7 +271,7 @@ export default function UnitTurnsPage() {
               >
                 <option value="">Select unit...</option>
                 {filteredUnits.map((u) => (
-                  <option key={u.id} value={u.id}>{u.unitName} — {u.tenant || "Vacant"}</option>
+                  <option key={u.id} value={u.id}>{u.unitName}</option>
                 ))}
               </select>
             </div>
