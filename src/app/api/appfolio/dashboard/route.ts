@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { fetchDashboardStats } from "@/lib/data";
+import type { AcademicYear } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { data, source } = await fetchDashboardStats();
+    const url = new URL(request.url);
+    const academicYear = url.searchParams.get("academicYear") as AcademicYear | null;
+    const { data, source } = await fetchDashboardStats(academicYear || undefined);
     return NextResponse.json({ stats: data, source });
   } catch (error: any) {
     return NextResponse.json(

@@ -2,8 +2,21 @@
 // Moxie Management — Core Types
 // ============================================
 
+// --- Academic Year ---
+// USC student housing lease cycle: Aug 15 → Jul 31
+export type AcademicYear = "2025-2026" | "2026-2027" | "2027-2028";
+
+export function academicYearDates(year: AcademicYear): { leaseStart: string; leaseEnd: string } {
+  const startYear = parseInt(year.split("-")[0]);
+  return {
+    leaseStart: `${startYear}-08-15`,
+    leaseEnd: `${startYear + 1}-07-31`,
+  };
+}
+
 // --- Properties & Units ---
-// Units are the primary entity. Property is context (which building the unit is in).
+// Units are the primary entity. "Unit Name" = AppFolio "Unit Street Address 1".
+// Property is just context (which LLC/building the unit belongs to).
 export interface Property {
   id: string;
   name: string;
@@ -17,12 +30,14 @@ export interface Unit {
   propertyId: string;
   propertyName: string;
   number: string;
-  /** Display label: "PropertyName #UnitNumber" */
+  /** The primary display label — pulled from AppFolio "Unit Street Address 1" */
+  unitName: string;
+  /** Legacy display label */
   displayName: string;
   bedrooms: number | null;
   bathrooms: number | null;
   sqft: number | null;
-  rent: string | null;
+  rent: string | number | null;
   status: "current" | "vacant" | "notice" | "future";
   tenant: string | null;
   leaseFrom: string | null;

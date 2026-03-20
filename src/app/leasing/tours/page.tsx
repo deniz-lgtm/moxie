@@ -2,16 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { TourSlot, TourRegistration, TourRegistrationStatus, Property } from "@/lib/types";
+import type { TourSlot, TourRegistrationStatus, Unit } from "@/lib/types";
 
 export default function ToursPage() {
   const [allTours, setAllTours] = useState<TourSlot[]>([]);
-  const [properties, setProperties] = useState<Property[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [selected, setSelected] = useState<TourSlot | null>(null);
-  const [filterProperty, setFilterProperty] = useState<string>("all");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTour, setNewTour] = useState({
-    propertyId: "",
+    propertyName: "",
     date: "",
     startTime: "10:00",
     endTime: "12:00",
@@ -21,28 +20,24 @@ export default function ToursPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/properties")
+    fetch("/api/appfolio/units")
       .then((res) => res.json())
       .then((data) => {
-        if (data.properties) {
-          setProperties(data.properties);
-          if (data.properties.length > 0) {
-            setNewTour((n) => ({ ...n, propertyId: data.properties[0].id }));
-          }
-        }
+        setUnits(data.units || []);
       })
       .catch(() => {});
   }, []);
 
+  // Get unique property names from units for location options
+  const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
+
   function createTour() {
-    if (!newTour.propertyId || !newTour.date) return;
-    const property = properties.find((p) => p.id === newTour.propertyId);
-    if (!property) return;
+    if (!newTour.propertyName || !newTour.date) return;
 
     const tour: TourSlot = {
       id: `tour-${Date.now()}`,
-      propertyId: property.id,
-      propertyName: property.name,
+      propertyId: "",
+      propertyName: newTour.propertyName,
       date: newTour.date,
       startTime: newTour.startTime,
       endTime: newTour.endTime,
@@ -56,17 +51,12 @@ export default function ToursPage() {
     };
     setAllTours((prev) => [tour, ...prev]);
     setShowCreateForm(false);
-    setNewTour({ propertyId: properties[0]?.id || "", date: "", startTime: "10:00", endTime: "12:00", host: "", capacity: 10, notes: "" });
+    setNewTour({ propertyName: "", date: "", startTime: "10:00", endTime: "12:00", host: "", capacity: 10, notes: "" });
   }
 
-  const filtered = allTours.filter((t) => {
-    if (filterProperty !== "all" && t.propertyId !== filterProperty) return false;
-    return true;
-  });
-
   const today = new Date().toISOString().split("T")[0];
-  const upcoming = filtered.filter((t) => t.date >= today);
-  const past = filtered.filter((t) => t.date < today);
+  const upcoming = allTours.filter((t) => t.date >= today);
+  const past = allTours.filter((t) => t.date < today);
 
   function updateRegistrationStatus(regId: string, status: TourRegistrationStatus) {
     if (!selected) return;
@@ -100,7 +90,7 @@ export default function ToursPage() {
     const spotsLeft = selected.capacity - selected.registrations.filter(
       (r) => r.status !== "cancelled" && r.status !== "rescheduled"
     ).length;
-    const isPast = new Date(selected.date) < new Date("2026-03-14");
+    const isPast = selected.date < today;
 
     return (
       <div className="space-y-6">
@@ -171,9 +161,7 @@ export default function ToursPage() {
         {/* Registrations */}
         <div className="bg-card rounded-xl border border-border overflow-hidden">
           <div className="p-5 border-b border-border">
-            <h2 className="font-semibold">
-              Registrations ({selected.registrations.length})
-            </h2>
+            <h2 className="font-semibold">Registrations ({selected.registrations.length})</h2>
           </div>
           {selected.registrations.length > 0 ? (
             <div className="divide-y divide-border">
@@ -210,7 +198,7 @@ export default function ToursPage() {
                           : "border-border hover:bg-accent-light text-muted-foreground"
                       }`}
                     >
-                      {reg.followUpSent ? "✓ Follow-up Sent" : "Send Follow-up"}
+                      {reg.followUpSent ? "Follow-up Sent" : "Send Follow-up"}
                     </button>
                   </div>
                 </div>
@@ -221,7 +209,6 @@ export default function ToursPage() {
           )}
         </div>
 
-        {/* Notes */}
         {selected.notes && (
           <div className="bg-card rounded-xl border border-border p-5">
             <h2 className="font-semibold mb-2">Notes</h2>
@@ -237,9 +224,7 @@ export default function ToursPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Tour Scheduling</h1>
-          <p className="text-muted-foreground mt-1">
-            Open house tours — multiple prospects per showing
-          </p>
+          <p className="text-muted-foreground mt-1">Open house tours — multiple prospects per showing</p>
         </div>
         <button
           onClick={() => setShowCreateForm(!showCreateForm)}
@@ -254,14 +239,15 @@ export default function ToursPage() {
           <h2 className="font-semibold">Schedule Open House</h2>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Property *</label>
+              <label className="text-xs text-muted-foreground block mb-1">Location *</label>
               <select
-                value={newTour.propertyId}
-                onChange={(e) => setNewTour({ ...newTour, propertyId: e.target.value })}
+                value={newTour.propertyName}
+                onChange={(e) => setNewTour({ ...newTour, propertyName: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                <option value="">Select location...</option>
+                {propertyNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
                 ))}
               </select>
             </div>
@@ -328,19 +314,6 @@ export default function ToursPage() {
         </div>
       )}
 
-      <div className="flex gap-3">
-        <select
-          value={filterProperty}
-          onChange={(e) => setFilterProperty(e.target.value)}
-          className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
-        >
-          <option value="all">All Properties</option>
-          {properties.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
-
       {/* Upcoming */}
       {upcoming.length > 0 && (
         <div>
@@ -368,16 +341,11 @@ export default function ToursPage() {
                     </span>
                   </div>
                   <div className="mt-4 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      {registered}/{tour.capacity} spots filled
-                    </span>
+                    <span className="text-muted-foreground">{registered}/{tour.capacity} spots filled</span>
                     <span className="text-muted-foreground">Host: {tour.host}</span>
                   </div>
                   <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-accent rounded-full"
-                      style={{ width: `${(registered / tour.capacity) * 100}%` }}
-                    />
+                    <div className="h-full bg-accent rounded-full" style={{ width: `${(registered / tour.capacity) * 100}%` }} />
                   </div>
                 </button>
               );
@@ -392,7 +360,7 @@ export default function ToursPage() {
           <h2 className="text-lg font-semibold mb-3">Past Tours</h2>
           <div className="grid md:grid-cols-2 gap-4">
             {past.map((tour) => {
-              const attended = tour.registrations.filter((r) => r.status === "attended").length;
+              const attendedCount = tour.registrations.filter((r) => r.status === "attended").length;
               const total = tour.registrations.length;
               return (
                 <button
@@ -407,12 +375,10 @@ export default function ToursPage() {
                         {tour.date} · {tour.startTime} – {tour.endTime}
                       </p>
                     </div>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
-                      Past
-                    </span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">Past</span>
                   </div>
                   <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
-                    <span>{attended}/{total} attended</span>
+                    <span>{attendedCount}/{total} attended</span>
                     <span>Host: {tour.host}</span>
                   </div>
                 </button>
@@ -422,9 +388,9 @@ export default function ToursPage() {
         </div>
       )}
 
-      {filtered.length === 0 && (
+      {allTours.length === 0 && !showCreateForm && (
         <div className="text-center py-12 text-muted-foreground">
-          No tours scheduled for this property.
+          No tours scheduled. Click &quot;+ Schedule Tour&quot; to create an open house.
         </div>
       )}
     </div>

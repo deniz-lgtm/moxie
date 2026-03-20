@@ -7,7 +7,6 @@ import type {
   MaintenanceStatus,
   MaintenancePriority,
   MaintenanceCategory,
-  Property,
   Unit,
 } from "@/lib/types";
 
@@ -39,11 +38,10 @@ export default function MaintenancePage() {
   const [newNote, setNewNote] = useState("");
   const [dataSource, setDataSource] = useState<"appfolio" | "error">("appfolio");
   const [loading, setLoading] = useState(true);
-  const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [unitSearch, setUnitSearch] = useState("");
   const [newRequest, setNewRequest] = useState({
-    propertyId: "",
     unitId: "",
     title: "",
     description: "",
@@ -54,22 +52,16 @@ export default function MaintenancePage() {
   useEffect(() => {
     async function loadData() {
       try {
-        const [woRes, propRes, unitRes] = await Promise.all([
+        const [woRes, unitRes] = await Promise.all([
           fetch("/api/appfolio/work-orders"),
-          fetch("/api/appfolio/properties"),
           fetch("/api/appfolio/units"),
         ]);
-        const [woJson, propJson, unitJson] = await Promise.all([
+        const [woJson, unitJson] = await Promise.all([
           woRes.ok ? woRes.json() : { workOrders: [] },
-          propRes.ok ? propRes.json() : { properties: [] },
           unitRes.ok ? unitRes.json() : { units: [] },
         ]);
         setAllRequests(woJson.workOrders || []);
-        setProperties(propJson.properties || []);
         setUnits(unitJson.units || []);
-        if (propJson.properties?.length > 0) {
-          setNewRequest((r) => ({ ...r, propertyId: propJson.properties[0].id }));
-        }
         setDataSource("appfolio");
       } catch {
         setDataSource("error");
@@ -80,21 +72,22 @@ export default function MaintenancePage() {
     loadData();
   }, []);
 
-  const propertyUnits = units.filter((u) => u.propertyId === newRequest.propertyId);
+  const filteredUnits = unitSearch
+    ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
+    : units;
 
   function createRequest() {
     if (!newRequest.title.trim() || !newRequest.unitId) return;
     const unit = units.find((u) => u.id === newRequest.unitId);
-    const property = properties.find((p) => p.id === newRequest.propertyId);
-    if (!unit || !property) return;
+    if (!unit) return;
 
     const now = new Date().toISOString();
     const request: MaintenanceRequest = {
       id: `wo-${Date.now()}`,
       unitId: unit.id,
-      propertyId: property.id,
-      unitNumber: unit.number,
-      propertyName: property.name,
+      propertyId: unit.propertyId,
+      unitNumber: unit.unitName,
+      propertyName: unit.propertyName,
       tenantName: unit.tenant || "Vacant",
       category: newRequest.category,
       priority: newRequest.priority,
@@ -109,7 +102,7 @@ export default function MaintenancePage() {
     setAllRequests((prev) => [request, ...prev]);
     setShowCreateForm(false);
     setSelected(request);
-    setNewRequest({ propertyId: properties[0]?.id || "", unitId: "", title: "", description: "", category: "general", priority: "medium" });
+    setNewRequest({ unitId: "", title: "", description: "", category: "general", priority: "medium" });
   }
 
   const filtered = allRequests
@@ -323,28 +316,24 @@ export default function MaintenancePage() {
         <div className="bg-card rounded-xl border border-border p-5 space-y-4">
           <h2 className="font-semibold">Create Work Order</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Property</label>
-              <select
-                value={newRequest.propertyId}
-                onChange={(e) => setNewRequest({ ...newRequest, propertyId: e.target.value, unitId: "" })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
+            <div className="md:col-span-2">
               <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
+              <input
+                type="text"
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                placeholder="Search units..."
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card mb-1"
+              />
               <select
                 value={newRequest.unitId}
                 onChange={(e) => setNewRequest({ ...newRequest, unitId: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                size={5}
               >
                 <option value="">Select unit...</option>
-                {propertyUnits.map((u) => (
-                  <option key={u.id} value={u.id}>#{u.number} — {u.tenant || "Vacant"}</option>
+                {filteredUnits.map((u) => (
+                  <option key={u.id} value={u.id}>{u.unitName} — {u.tenant || "Vacant"}</option>
                 ))}
               </select>
             </div>

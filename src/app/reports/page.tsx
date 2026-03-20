@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Property } from "@/lib/types";
+import type { Unit } from "@/lib/types";
 
 type ReportType = "pnl" | "occupancy" | "maintenance_cost" | "rent_roll";
 type ReportStatus = "draft" | "generated" | "reviewed" | "sent";
@@ -25,30 +25,27 @@ const REPORT_TYPES: { value: ReportType; label: string; description: string }[] 
 ];
 
 export default function ReportsPage() {
-  const [properties, setProperties] = useState<Property[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filterType, setFilterType] = useState<string>("all");
   const [loading, setLoading] = useState(true);
 
   const [newReport, setNewReport] = useState({
-    propertyId: "",
+    propertyName: "",
     type: "pnl" as ReportType,
     month: "2026-03",
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/properties")
+    fetch("/api/appfolio/units")
       .then((res) => res.json())
-      .then((data) => {
-        setProperties(data.properties || []);
-        if (data.properties?.length > 0) {
-          setNewReport((r) => ({ ...r, propertyId: data.properties[0].id }));
-        }
-      })
+      .then((data) => setUnits(data.units || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
 
   const filtered = reports.filter((r) => {
     if (filterType !== "all" && r.type !== filterType) return false;
@@ -56,15 +53,12 @@ export default function ReportsPage() {
   });
 
   function createReport() {
-    if (!newReport.propertyId) return;
-    const property = properties.find((p) => p.id === newReport.propertyId);
-    if (!property) return;
-    const typeInfo = REPORT_TYPES.find((t) => t.value === newReport.type)!;
+    if (!newReport.propertyName) return;
 
     const report: Report = {
       id: `rpt-${Date.now()}`,
-      propertyId: newReport.propertyId,
-      propertyName: property.name,
+      propertyId: "",
+      propertyName: newReport.propertyName,
       type: newReport.type,
       month: newReport.month,
       status: "generated",
@@ -103,12 +97,13 @@ export default function ReportsPage() {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Property</label>
               <select
-                value={newReport.propertyId}
-                onChange={(e) => setNewReport({ ...newReport, propertyId: e.target.value })}
+                value={newReport.propertyName}
+                onChange={(e) => setNewReport({ ...newReport, propertyName: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                <option value="">Select property...</option>
+                {propertyNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
                 ))}
               </select>
             </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchUnits, debugMoxieFilter } from "@/lib/data";
+import type { AcademicYear } from "@/lib/types";
 
 export async function GET(request: Request) {
   try {
@@ -9,7 +10,8 @@ export async function GET(request: Request) {
       const diag = await debugMoxieFilter();
       return NextResponse.json(diag);
     }
-    const { data, source } = await fetchUnits();
+    const academicYear = url.searchParams.get("academicYear") as AcademicYear | null;
+    const { data, source } = await fetchUnits(academicYear || undefined);
     return NextResponse.json({ units: data, source });
   } catch (error: any) {
     return NextResponse.json(

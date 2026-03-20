@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Property } from "@/lib/types";
+import type { Unit } from "@/lib/types";
 
 type ProjectStatus = "planning" | "in_progress" | "on_hold" | "completed";
 type ProjectCategory = "roof" | "hvac" | "plumbing" | "electrical" | "renovation" | "landscaping" | "other";
@@ -42,14 +42,14 @@ const CATEGORIES: { value: ProjectCategory; label: string }[] = [
 ];
 
 export default function CapitalProjectsPage() {
-  const [properties, setProperties] = useState<Property[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [projects, setProjects] = useState<CapitalProject[]>([]);
   const [selected, setSelected] = useState<CapitalProject | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [newProject, setNewProject] = useState({
-    propertyId: "",
+    propertyName: "",
     name: "",
     category: "renovation" as ProjectCategory,
     budget: 0,
@@ -59,27 +59,22 @@ export default function CapitalProjectsPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/properties")
+    fetch("/api/appfolio/units")
       .then((res) => res.json())
-      .then((data) => {
-        setProperties(data.properties || []);
-        if (data.properties?.length > 0) {
-          setNewProject((p) => ({ ...p, propertyId: data.properties[0].id }));
-        }
-      })
+      .then((data) => setUnits(data.units || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
+  const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
+
   function createProject() {
-    if (!newProject.name.trim() || !newProject.propertyId) return;
-    const property = properties.find((p) => p.id === newProject.propertyId);
-    if (!property) return;
+    if (!newProject.name.trim() || !newProject.propertyName) return;
 
     const project: CapitalProject = {
       id: `cp-${Date.now()}`,
-      propertyId: newProject.propertyId,
-      propertyName: property.name,
+      propertyId: "",
+      propertyName: newProject.propertyName,
       name: newProject.name,
       category: newProject.category,
       status: "planning",
@@ -94,7 +89,7 @@ export default function CapitalProjectsPage() {
     };
     setProjects((prev) => [...prev, project]);
     setShowCreateForm(false);
-    setNewProject({ propertyId: properties[0]?.id || "", name: "", category: "renovation", budget: 0, contractor: "", targetDate: "", description: "" });
+    setNewProject({ propertyName: "", name: "", category: "renovation", budget: 0, contractor: "", targetDate: "", description: "" });
   }
 
   function updateProjectStatus(status: ProjectStatus) {
@@ -300,12 +295,13 @@ export default function CapitalProjectsPage() {
               className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
             />
             <select
-              value={newProject.propertyId}
-              onChange={(e) => setNewProject({ ...newProject, propertyId: e.target.value })}
+              value={newProject.propertyName}
+              onChange={(e) => setNewProject({ ...newProject, propertyName: e.target.value })}
               className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
             >
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+              <option value="">Select property...</option>
+              {propertyNames.map((name) => (
+                <option key={name} value={name}>{name}</option>
               ))}
             </select>
             <select

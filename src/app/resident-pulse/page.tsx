@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { MaintenanceRequest, Property } from "@/lib/types";
+import type { MaintenanceRequest } from "@/lib/types";
 
 type IssueCategory = string;
 type IssueSeverity = "low" | "medium" | "high" | "critical";
@@ -18,28 +18,17 @@ type RecurringIssue = {
 
 export default function ResidentPulsePage() {
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
-  const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterProperty, setFilterProperty] = useState<string>("all");
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/appfolio/work-orders").then((r) => r.json()),
-      fetch("/api/appfolio/properties").then((r) => r.json()),
-    ])
-      .then(([woData, propData]) => {
-        setWorkOrders(woData.workOrders || []);
-        setProperties(propData.properties || []);
-      })
+    fetch("/api/appfolio/work-orders")
+      .then((r) => r.json())
+      .then((data) => setWorkOrders(data.workOrders || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  // Analyze work orders to find recurring issues
-  const filteredOrders = workOrders.filter((wo) => {
-    if (filterProperty !== "all" && wo.propertyId !== filterProperty) return false;
-    return true;
-  });
+  const filteredOrders = workOrders;
 
   // Group by category
   const categoryGroups: Record<string, MaintenanceRequest[]> = {};
@@ -72,7 +61,8 @@ export default function ResidentPulsePage() {
   const emergencyCount = filteredOrders.filter((w) => w.priority === "emergency").length;
   const highCount = filteredOrders.filter((w) => w.priority === "high").length;
   const openCount = filteredOrders.filter((w) => w.status !== "completed" && w.status !== "closed").length;
-  const avgPerProperty = properties.length > 0 ? Math.round(filteredOrders.length / properties.length) : 0;
+  const uniqueProperties = [...new Set(workOrders.map((w) => w.propertyName).filter(Boolean))];
+  const avgPerProperty = uniqueProperties.length > 0 ? Math.round(filteredOrders.length / uniqueProperties.length) : 0;
 
   if (loading) {
     return (
@@ -92,19 +82,6 @@ export default function ResidentPulsePage() {
         <p className="text-muted-foreground mt-1">
           Recurring issues surfaced from maintenance tickets — top problems this month
         </p>
-      </div>
-
-      <div className="flex gap-3">
-        <select
-          value={filterProperty}
-          onChange={(e) => setFilterProperty(e.target.value)}
-          className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
-        >
-          <option value="all">All Properties</option>
-          {properties.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
       </div>
 
       {/* Summary cards */}

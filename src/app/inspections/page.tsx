@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem, Property, Unit } from "@/lib/types";
+import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem, Unit } from "@/lib/types";
 
 const AREAS = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Hallway", "Closet", "Patio/Balcony"];
 const ITEMS_BY_AREA: Record<string, string[]> = {
@@ -27,11 +27,10 @@ export default function InspectionsPage() {
   const [selected, setSelected] = useState<Inspection | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
-  const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [unitSearch, setUnitSearch] = useState("");
   const [newInspection, setNewInspection] = useState({
-    propertyId: "",
     unitId: "",
     type: "routine" as InspectionType,
     scheduledDate: "",
@@ -39,34 +38,27 @@ export default function InspectionsPage() {
   });
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/appfolio/properties").then((r) => r.json()),
-      fetch("/api/appfolio/units").then((r) => r.json()),
-    ])
-      .then(([propData, unitData]) => {
-        setProperties(propData.properties || []);
-        setUnits(unitData.units || []);
-        if (propData.properties?.length > 0) {
-          setNewInspection((n) => ({ ...n, propertyId: propData.properties[0].id }));
-        }
-      })
+    fetch("/api/appfolio/units")
+      .then((r) => r.json())
+      .then((data) => setUnits(data.units || []))
       .catch(() => {});
   }, []);
 
-  const propertyUnits = units.filter((u) => u.propertyId === newInspection.propertyId);
+  const filteredUnits = unitSearch
+    ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
+    : units;
 
   function createInspection() {
     if (!newInspection.unitId || !newInspection.scheduledDate) return;
     const unit = units.find((u) => u.id === newInspection.unitId);
-    const property = properties.find((p) => p.id === newInspection.propertyId);
-    if (!unit || !property) return;
+    if (!unit) return;
 
     const inspection: Inspection = {
       id: `insp-${Date.now()}`,
       unitId: unit.id,
-      propertyId: property.id,
-      unitNumber: unit.number,
-      propertyName: property.name,
+      propertyId: unit.propertyId,
+      unitNumber: unit.unitName,
+      propertyName: unit.propertyName,
       type: newInspection.type,
       status: "scheduled",
       scheduledDate: newInspection.scheduledDate,
@@ -79,7 +71,7 @@ export default function InspectionsPage() {
     setAllInspections((prev) => [inspection, ...prev]);
     setShowCreateForm(false);
     setSelected(inspection);
-    setNewInspection({ propertyId: properties[0]?.id || "", unitId: "", type: "routine", scheduledDate: "", inspector: "" });
+    setNewInspection({ unitId: "", type: "routine", scheduledDate: "", inspector: "" });
   }
 
   const filtered = allInspections.filter((i) => {
@@ -316,28 +308,24 @@ export default function InspectionsPage() {
         <div className="bg-card rounded-xl border border-border p-5 space-y-4">
           <h2 className="font-semibold">Schedule Inspection</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Property</label>
-              <select
-                value={newInspection.propertyId}
-                onChange={(e) => setNewInspection({ ...newInspection, propertyId: e.target.value, unitId: "" })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
+            <div className="md:col-span-2">
               <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
+              <input
+                type="text"
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                placeholder="Search units..."
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card mb-1"
+              />
               <select
                 value={newInspection.unitId}
                 onChange={(e) => setNewInspection({ ...newInspection, unitId: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                size={5}
               >
                 <option value="">Select unit...</option>
-                {propertyUnits.map((u) => (
-                  <option key={u.id} value={u.id}>#{u.number} — {u.tenant || "Vacant"}</option>
+                {filteredUnits.map((u) => (
+                  <option key={u.id} value={u.id}>{u.unitName} — {u.tenant || "Vacant"}</option>
                 ))}
               </select>
             </div>

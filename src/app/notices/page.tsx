@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Property, Unit } from "@/lib/types";
+import type { Unit } from "@/lib/types";
 
 type NoticeType = "violation" | "rent_reminder" | "building_announcement" | "lease_renewal" | "maintenance_notice";
 type NoticeStatus = "draft" | "sent" | "delivered" | "acknowledged";
@@ -14,10 +14,8 @@ type Notice = {
   status: NoticeStatus;
   subject: string;
   body: string;
-  recipientType: "individual" | "property" | "all";
-  propertyId: string;
-  propertyName: string;
-  unitNumber: string;
+  recipientType: "individual" | "all";
+  unitName: string;
   tenantName: string;
   deliveryMethod: DeliveryMethod;
   createdAt: string;
@@ -33,35 +31,26 @@ const NOTICE_TYPES: { value: NoticeType; label: string }[] = [
 ];
 
 export default function NoticesPage() {
-  const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [selected, setSelected] = useState<Notice | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filterType, setFilterType] = useState<string>("all");
+  const [unitSearch, setUnitSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [newNotice, setNewNotice] = useState({
     type: "building_announcement" as NoticeType,
     subject: "",
     body: "",
-    propertyId: "",
-    unitNumber: "",
+    unitId: "",
     deliveryMethod: "email" as DeliveryMethod,
   });
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/appfolio/properties").then((r) => r.json()),
-      fetch("/api/appfolio/units").then((r) => r.json()),
-    ])
-      .then(([propData, unitData]) => {
-        setProperties(propData.properties || []);
-        setUnits(unitData.units || []);
-        if (propData.properties?.length > 0) {
-          setNewNotice((n) => ({ ...n, propertyId: propData.properties[0].id }));
-        }
-      })
+    fetch("/api/appfolio/units")
+      .then((r) => r.json())
+      .then((data) => setUnits(data.units || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -71,12 +60,14 @@ export default function NoticesPage() {
     return true;
   });
 
-  const propertyUnits = units.filter((u) => u.propertyId === newNotice.propertyId && u.status === "current");
+  const occupiedUnits = units.filter((u) => u.status === "current");
+  const searchedUnits = unitSearch
+    ? occupiedUnits.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
+    : occupiedUnits;
 
   function createNotice() {
     if (!newNotice.subject.trim()) return;
-    const property = properties.find((p) => p.id === newNotice.propertyId);
-    const unit = propertyUnits.find((u) => u.number === newNotice.unitNumber);
+    const unit = units.find((u) => u.id === newNotice.unitId);
 
     const notice: Notice = {
       id: `notice-${Date.now()}`,
@@ -84,10 +75,8 @@ export default function NoticesPage() {
       status: "draft",
       subject: newNotice.subject,
       body: newNotice.body,
-      recipientType: newNotice.unitNumber ? "individual" : "property",
-      propertyId: newNotice.propertyId,
-      propertyName: property?.name || "",
-      unitNumber: newNotice.unitNumber,
+      recipientType: newNotice.unitId ? "individual" : "all",
+      unitName: unit?.unitName || "All Units",
       tenantName: unit?.tenant || "",
       deliveryMethod: newNotice.deliveryMethod,
       createdAt: new Date().toISOString(),
@@ -95,7 +84,7 @@ export default function NoticesPage() {
     };
     setNotices((prev) => [notice, ...prev]);
     setShowCreateForm(false);
-    setNewNotice({ type: "building_announcement", subject: "", body: "", propertyId: properties[0]?.id || "", unitNumber: "", deliveryMethod: "email" });
+    setNewNotice({ type: "building_announcement", subject: "", body: "", unitId: "", deliveryMethod: "email" });
   }
 
   function sendNotice(id: string) {
@@ -120,8 +109,7 @@ export default function NoticesPage() {
           <div>
             <h1 className="text-2xl font-bold">{selected.subject}</h1>
             <p className="text-muted-foreground mt-1 capitalize">
-              {NOTICE_TYPES.find((t) => t.value === selected.type)?.label} &middot; {selected.propertyName}
-              {selected.unitNumber && ` #${selected.unitNumber}`}
+              {NOTICE_TYPES.find((t) => t.value === selected.type)?.label} &middot; {selected.unitName}
             </p>
           </div>
           <StatusBadge value={selected.status} />
@@ -131,7 +119,8 @@ export default function NoticesPage() {
           <div className="bg-card rounded-xl border border-border p-5">
             <h2 className="font-semibold mb-3">Details</h2>
             <div className="space-y-2 text-sm">
-              <p><span className="text-muted-foreground">Recipient:</span> {selected.tenantName || `All tenants at ${selected.propertyName}`}</p>
+              <p><span className="text-muted-foreground">Recipient:</span> {selected.tenantName || "All tenants"}</p>
+              <p><span className="text-muted-foreground">Unit:</span> {selected.unitName}</p>
               <p><span className="text-muted-foreground">Delivery:</span> <span className="capitalize">{selected.deliveryMethod}</span></p>
               <p><span className="text-muted-foreground">Created:</span> {new Date(selected.createdAt).toLocaleString()}</p>
               {selected.sentAt && <p><span className="text-muted-foreground">Sent:</span> {new Date(selected.sentAt).toLocaleString()}</p>}
@@ -161,9 +150,7 @@ export default function NoticesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Tenant Notices</h1>
-          <p className="text-muted-foreground mt-1">
-            Draft and send violations, reminders, and announcements
-          </p>
+          <p className="text-muted-foreground mt-1">Draft and send violations, reminders, and announcements</p>
         </div>
         <button
           onClick={() => setShowCreateForm(!showCreateForm)}
@@ -190,31 +177,6 @@ export default function NoticesPage() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Property</label>
-              <select
-                value={newNotice.propertyId}
-                onChange={(e) => setNewNotice({ ...newNotice, propertyId: e.target.value, unitNumber: "" })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Unit (optional — leave blank for all)</label>
-              <select
-                value={newNotice.unitNumber}
-                onChange={(e) => setNewNotice({ ...newNotice, unitNumber: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                <option value="">All Units</option>
-                {propertyUnits.map((u) => (
-                  <option key={u.id} value={u.number}>#{u.number} — {u.tenant || "Vacant"}</option>
-                ))}
-              </select>
-            </div>
-            <div>
               <label className="text-xs text-muted-foreground block mb-1">Delivery</label>
               <select
                 value={newNotice.deliveryMethod}
@@ -225,6 +187,27 @@ export default function NoticesPage() {
                 <option value="sms">SMS</option>
                 <option value="portal">Portal</option>
                 <option value="mail">Physical Mail</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs text-muted-foreground block mb-1">Unit (leave blank for all tenants)</label>
+              <input
+                type="text"
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                placeholder="Search units..."
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card mb-1"
+              />
+              <select
+                value={newNotice.unitId}
+                onChange={(e) => setNewNotice({ ...newNotice, unitId: e.target.value })}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                size={4}
+              >
+                <option value="">All Units</option>
+                {searchedUnits.map((u) => (
+                  <option key={u.id} value={u.id}>{u.unitName} — {u.tenant || "Vacant"}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -256,7 +239,6 @@ export default function NoticesPage() {
             <button
               onClick={() => {
                 createNotice();
-                // Send immediately after creating
                 setTimeout(() => {
                   setNotices((prev) => {
                     if (prev.length > 0 && prev[0].status === "draft") {
@@ -300,15 +282,12 @@ export default function NoticesPage() {
                   <div>
                     <p className="text-sm font-medium">{n.subject}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {NOTICE_TYPES.find((t) => t.value === n.type)?.label} · {n.propertyName}
-                      {n.unitNumber && ` #${n.unitNumber}`}
+                      {NOTICE_TYPES.find((t) => t.value === n.type)?.label} · {n.unitName}
                       {n.tenantName && ` · ${n.tenantName}`}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(n.createdAt).toLocaleDateString()}
-                    </span>
+                    <span className="text-xs text-muted-foreground">{new Date(n.createdAt).toLocaleDateString()}</span>
                     <StatusBadge value={n.status} />
                   </div>
                 </div>

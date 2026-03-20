@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Property, Unit } from "@/lib/types";
+import type { Unit } from "@/lib/types";
 
 type UtilityType = "water" | "gas" | "electric" | "trash";
 type SplitMethod = "sqft" | "occupancy" | "equal";
@@ -36,7 +36,6 @@ const UTILITY_TYPES: { value: UtilityType; label: string }[] = [
 ];
 
 export default function RubsPage() {
-  const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [periods, setPeriods] = useState<RubsPeriod[]>([]);
   const [selected, setSelected] = useState<RubsPeriod | null>(null);
@@ -45,48 +44,42 @@ export default function RubsPage() {
 
   const [newPeriod, setNewPeriod] = useState({
     month: "2026-03",
-    propertyId: "",
+    propertyName: "",
     utilityType: "water" as UtilityType,
     totalBill: 0,
     splitMethod: "sqft" as SplitMethod,
   });
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/appfolio/properties").then((r) => r.json()),
-      fetch("/api/appfolio/units").then((r) => r.json()),
-    ])
-      .then(([propData, unitData]) => {
-        setProperties(propData.properties || []);
-        setUnits(unitData.units || []);
-        if (propData.properties?.length > 0) {
-          setNewPeriod((p) => ({ ...p, propertyId: propData.properties[0].id }));
-        }
-      })
+    fetch("/api/appfolio/units")
+      .then((r) => r.json())
+      .then((data) => setUnits(data.units || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  function calculateAllocations(propertyId: string, splitMethod: SplitMethod, totalBill: number): RubsAllocation[] {
-    const propertyUnits = units.filter((u) => u.propertyId === propertyId && u.status === "current");
-    if (propertyUnits.length === 0) return [];
+  const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
 
-    const totalSqft = propertyUnits.reduce((sum, u) => sum + (u.sqft || 0), 0);
-    const totalOccupants = propertyUnits.length; // Default 1 per unit
+  function calculateAllocations(propertyName: string, splitMethod: SplitMethod, totalBill: number): RubsAllocation[] {
+    const propUnits = units.filter((u) => u.propertyName === propertyName && u.status === "current");
+    if (propUnits.length === 0) return [];
 
-    return propertyUnits.map((u) => {
+    const totalSqft = propUnits.reduce((sum, u) => sum + (u.sqft || 0), 0);
+    const totalOccupants = propUnits.length;
+
+    return propUnits.map((u) => {
       let share = 0;
       if (splitMethod === "sqft" && totalSqft > 0) {
         share = (u.sqft || 0) / totalSqft;
       } else if (splitMethod === "occupancy" && totalOccupants > 0) {
         share = 1 / totalOccupants;
       } else {
-        share = 1 / propertyUnits.length;
+        share = 1 / propUnits.length;
       }
 
       return {
         unitId: u.id,
-        unitNumber: u.number,
+        unitNumber: u.unitName,
         tenant: u.tenant || "Vacant",
         sqft: u.sqft || 0,
         occupants: 1,
@@ -97,16 +90,14 @@ export default function RubsPage() {
   }
 
   function createPeriod() {
-    if (!newPeriod.propertyId || newPeriod.totalBill <= 0) return;
-    const property = properties.find((p) => p.id === newPeriod.propertyId);
-    if (!property) return;
+    if (!newPeriod.propertyName || newPeriod.totalBill <= 0) return;
 
-    const allocations = calculateAllocations(newPeriod.propertyId, newPeriod.splitMethod, newPeriod.totalBill);
+    const allocations = calculateAllocations(newPeriod.propertyName, newPeriod.splitMethod, newPeriod.totalBill);
     const period: RubsPeriod = {
       id: `rubs-${Date.now()}`,
       month: newPeriod.month,
-      propertyId: newPeriod.propertyId,
-      propertyName: property.name,
+      propertyId: "",
+      propertyName: newPeriod.propertyName,
       utilityType: newPeriod.utilityType,
       totalBill: newPeriod.totalBill,
       splitMethod: newPeriod.splitMethod,
@@ -189,7 +180,7 @@ export default function RubsPage() {
                 <tbody>
                   {selected.allocations.map((a) => (
                     <tr key={a.unitId} className="border-b border-border last:border-0">
-                      <td className="px-4 py-3 font-medium">#{a.unitNumber}</td>
+                      <td className="px-4 py-3 font-medium">{a.unitNumber}</td>
                       <td className="px-4 py-3 text-muted-foreground">{a.tenant}</td>
                       <td className="px-4 py-3 text-right text-muted-foreground">{a.sqft.toLocaleString()}</td>
                       <td className="px-4 py-3 text-right text-muted-foreground">{(a.share * 100).toFixed(1)}%</td>
@@ -263,12 +254,13 @@ export default function RubsPage() {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Property</label>
               <select
-                value={newPeriod.propertyId}
-                onChange={(e) => setNewPeriod({ ...newPeriod, propertyId: e.target.value })}
+                value={newPeriod.propertyName}
+                onChange={(e) => setNewPeriod({ ...newPeriod, propertyName: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                <option value="">Select property...</option>
+                {propertyNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
                 ))}
               </select>
             </div>

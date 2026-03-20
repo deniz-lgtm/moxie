@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { UnitTurn, TurnTask, TurnTaskStatus, Property, Unit } from "@/lib/types";
+import type { UnitTurn, TurnTask, TurnTaskStatus, Unit } from "@/lib/types";
 
 const TASK_CATEGORIES = [
   { value: "cleaning", label: "Cleaning" },
@@ -27,11 +27,10 @@ const DEFAULT_TASKS: { name: string; category: string }[] = [
 export default function UnitTurnsPage() {
   const [allTurns, setAllTurns] = useState<UnitTurn[]>([]);
   const [selected, setSelected] = useState<UnitTurn | null>(null);
-  const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [unitSearch, setUnitSearch] = useState("");
   const [newTurn, setNewTurn] = useState({
-    propertyId: "",
     unitId: "",
     moveOutDate: "",
     targetReadyDate: "",
@@ -39,27 +38,20 @@ export default function UnitTurnsPage() {
   });
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/appfolio/properties").then((r) => r.json()),
-      fetch("/api/appfolio/units").then((r) => r.json()),
-    ])
-      .then(([propData, unitData]) => {
-        setProperties(propData.properties || []);
-        setUnits(unitData.units || []);
-        if (propData.properties?.length > 0) {
-          setNewTurn((n) => ({ ...n, propertyId: propData.properties[0].id }));
-        }
-      })
+    fetch("/api/appfolio/units")
+      .then((r) => r.json())
+      .then((data) => setUnits(data.units || []))
       .catch(() => {});
   }, []);
 
-  const propertyUnits = units.filter((u) => u.propertyId === newTurn.propertyId);
+  const filteredUnits = unitSearch
+    ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
+    : units;
 
   function createTurn() {
     if (!newTurn.unitId || !newTurn.moveOutDate || !newTurn.targetReadyDate) return;
     const unit = units.find((u) => u.id === newTurn.unitId);
-    const property = properties.find((p) => p.id === newTurn.propertyId);
-    if (!unit || !property) return;
+    if (!unit) return;
 
     const now = new Date().toISOString();
     const tasks: TurnTask[] = DEFAULT_TASKS.map((t, i) => ({
@@ -74,9 +66,9 @@ export default function UnitTurnsPage() {
     const turn: UnitTurn = {
       id: `turn-${Date.now()}`,
       unitId: unit.id,
-      propertyId: property.id,
-      unitNumber: unit.number,
-      propertyName: property.name,
+      propertyId: unit.propertyId,
+      unitNumber: unit.unitName,
+      propertyName: unit.propertyName,
       moveOutDate: newTurn.moveOutDate,
       targetReadyDate: newTurn.targetReadyDate,
       status: "pending",
@@ -90,7 +82,7 @@ export default function UnitTurnsPage() {
     setAllTurns((prev) => [turn, ...prev]);
     setShowCreateForm(false);
     setSelected(turn);
-    setNewTurn({ propertyId: properties[0]?.id || "", unitId: "", moveOutDate: "", targetReadyDate: "", totalBudget: 0 });
+    setNewTurn({ unitId: "", moveOutDate: "", targetReadyDate: "", totalBudget: 0 });
   }
 
   function updateTaskStatus(taskId: string, status: TurnTaskStatus) {
@@ -108,16 +100,9 @@ export default function UnitTurnsPage() {
       ),
       updatedAt: new Date().toISOString(),
     };
-    // Recalculate totalSpent
-    updated.totalSpent = updated.tasks.reduce(
-      (sum, t) => sum + (t.actualCost || 0),
-      0
-    );
-    // Auto-update turn status
+    updated.totalSpent = updated.tasks.reduce((sum, t) => sum + (t.actualCost || 0), 0);
     const allDone = updated.tasks.every((t) => t.status === "completed");
-    const anyInProgress = updated.tasks.some(
-      (t) => t.status === "in_progress" || t.status === "completed"
-    );
+    const anyInProgress = updated.tasks.some((t) => t.status === "in_progress" || t.status === "completed");
     if (allDone) updated.status = "completed";
     else if (anyInProgress) updated.status = "in_progress";
 
@@ -129,15 +114,10 @@ export default function UnitTurnsPage() {
     if (!selected) return;
     const updated: UnitTurn = {
       ...selected,
-      tasks: selected.tasks.map((t) =>
-        t.id === taskId ? { ...t, actualCost } : t
-      ),
+      tasks: selected.tasks.map((t) => (t.id === taskId ? { ...t, actualCost } : t)),
       updatedAt: new Date().toISOString(),
     };
-    updated.totalSpent = updated.tasks.reduce(
-      (sum, t) => sum + (t.actualCost || 0),
-      0
-    );
+    updated.totalSpent = updated.tasks.reduce((sum, t) => sum + (t.actualCost || 0), 0);
     setSelected(updated);
     setAllTurns((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
   }
@@ -145,24 +125,17 @@ export default function UnitTurnsPage() {
   if (selected) {
     const completedTasks = selected.tasks.filter((t) => t.status === "completed").length;
     const pct = Math.round((completedTasks / selected.tasks.length) * 100);
-    const budgetPct = selected.totalBudget
-      ? Math.round((selected.totalSpent / selected.totalBudget) * 100)
-      : 0;
+    const budgetPct = selected.totalBudget ? Math.round((selected.totalSpent / selected.totalBudget) * 100) : 0;
 
     return (
       <div className="space-y-6">
-        <button
-          onClick={() => setSelected(null)}
-          className="text-sm text-accent hover:underline"
-        >
+        <button onClick={() => setSelected(null)} className="text-sm text-accent hover:underline">
           &larr; Back to Unit Turns
         </button>
 
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold">
-              {selected.propertyName} #{selected.unitNumber}
-            </h1>
+            <h1 className="text-2xl font-bold">{selected.unitNumber}</h1>
             <p className="text-muted-foreground mt-1">
               Unit Turn &middot; Move-out: {selected.moveOutDate} &middot; Target: {selected.targetReadyDate}
             </p>
@@ -181,15 +154,11 @@ export default function UnitTurnsPage() {
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-sm text-muted-foreground">Tasks</p>
-            <p className="text-2xl font-bold mt-1">
-              {completedTasks}/{selected.tasks.length}
-            </p>
+            <p className="text-2xl font-bold mt-1">{completedTasks}/{selected.tasks.length}</p>
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-sm text-muted-foreground">Budget</p>
-            <p className="text-2xl font-bold mt-1">
-              ${selected.totalBudget?.toLocaleString() || "—"}
-            </p>
+            <p className="text-2xl font-bold mt-1">${selected.totalBudget?.toLocaleString() || "—"}</p>
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-sm text-muted-foreground">Spent</p>
@@ -224,9 +193,7 @@ export default function UnitTurnsPage() {
               <div key={task.id} className="p-4 flex items-center gap-4">
                 <select
                   value={task.status}
-                  onChange={(e) =>
-                    updateTaskStatus(task.id, e.target.value as TurnTaskStatus)
-                  }
+                  onChange={(e) => updateTaskStatus(task.id, e.target.value as TurnTaskStatus)}
                   className="text-xs border border-border rounded-md px-2 py-1.5 bg-card min-w-[120px]"
                 >
                   <option value="not_started">Not Started</option>
@@ -243,9 +210,7 @@ export default function UnitTurnsPage() {
                     {task.vendor && <span>&middot; {task.vendor}</span>}
                     {task.dueDate && <span>&middot; Due: {task.dueDate}</span>}
                   </div>
-                  {task.notes && (
-                    <p className="text-xs text-muted-foreground mt-1">{task.notes}</p>
-                  )}
+                  {task.notes && <p className="text-xs text-muted-foreground mt-1">{task.notes}</p>}
                 </div>
                 <div className="text-right shrink-0">
                   <div className="flex items-center gap-2">
@@ -254,16 +219,12 @@ export default function UnitTurnsPage() {
                       type="number"
                       value={task.actualCost ?? ""}
                       placeholder={task.estimatedCost?.toString() || "0"}
-                      onChange={(e) =>
-                        updateTaskCost(task.id, parseFloat(e.target.value) || 0)
-                      }
+                      onChange={(e) => updateTaskCost(task.id, parseFloat(e.target.value) || 0)}
                       className="w-20 text-sm text-right border border-border rounded-md px-2 py-1 bg-card"
                     />
                   </div>
                   {task.estimatedCost !== undefined && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Est: ${task.estimatedCost}
-                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Est: ${task.estimatedCost}</p>
                   )}
                 </div>
               </div>
@@ -279,9 +240,7 @@ export default function UnitTurnsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Unit Turns</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage move-out to move-in workflows
-          </p>
+          <p className="text-muted-foreground mt-1">Manage move-out to move-in workflows</p>
         </div>
         <button
           onClick={() => setShowCreateForm(!showCreateForm)}
@@ -295,28 +254,24 @@ export default function UnitTurnsPage() {
         <div className="bg-card rounded-xl border border-border p-5 space-y-4">
           <h2 className="font-semibold">Start Unit Turn</h2>
           <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Property</label>
-              <select
-                value={newTurn.propertyId}
-                onChange={(e) => setNewTurn({ ...newTurn, propertyId: e.target.value, unitId: "" })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
+            <div className="md:col-span-2">
               <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
+              <input
+                type="text"
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                placeholder="Search units..."
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card mb-1"
+              />
               <select
                 value={newTurn.unitId}
                 onChange={(e) => setNewTurn({ ...newTurn, unitId: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                size={5}
               >
                 <option value="">Select unit...</option>
-                {propertyUnits.map((u) => (
-                  <option key={u.id} value={u.id}>#{u.number} — {u.tenant || "Vacant"}</option>
+                {filteredUnits.map((u) => (
+                  <option key={u.id} value={u.id}>{u.unitName} — {u.tenant || "Vacant"}</option>
                 ))}
               </select>
             </div>
@@ -379,9 +334,7 @@ export default function UnitTurnsPage() {
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="font-semibold">
-                    {turn.propertyName} #{turn.unitNumber}
-                  </h3>
+                  <h3 className="font-semibold">{turn.unitNumber}</h3>
                   <p className="text-sm text-muted-foreground mt-1">
                     Move-out: {turn.moveOutDate} &middot; Target: {turn.targetReadyDate}
                   </p>
@@ -389,7 +342,6 @@ export default function UnitTurnsPage() {
                 <StatusBadge value={turn.status} />
               </div>
 
-              {/* Progress bar */}
               <div className="mt-4">
                 <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
                   <span>{completed}/{turn.tasks.length} tasks</span>
