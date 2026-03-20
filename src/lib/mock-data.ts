@@ -87,7 +87,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Operations",
     categoryColor: "blue",
     roles: ["property_manager", "maintenance_tech", "leasing_agent"],
-    isBuilt: false,
+    isBuilt: true,
   },
   {
     id: "vendors",
@@ -99,7 +99,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Operations",
     categoryColor: "blue",
     roles: ["property_manager", "maintenance_tech"],
-    isBuilt: false,
+    isBuilt: true,
   },
   // --- Leasing ---
   {
@@ -136,7 +136,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Leasing",
     categoryColor: "purple",
     roles: ["property_manager", "leasing_agent", "asset_manager", "owner"],
-    isBuilt: false,
+    isBuilt: true,
   },
   // --- Finance ---
   {
@@ -149,7 +149,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Finance",
     categoryColor: "emerald",
     roles: ["property_manager", "asset_manager", "owner"],
-    isBuilt: false,
+    isBuilt: true,
   },
   {
     id: "reports",
@@ -161,7 +161,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Finance",
     categoryColor: "emerald",
     roles: ["property_manager", "asset_manager", "owner"],
-    isBuilt: false,
+    isBuilt: true,
   },
   // --- Asset Management ---
   {
@@ -174,7 +174,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Asset Management",
     categoryColor: "amber",
     roles: ["property_manager", "asset_manager", "owner"],
-    isBuilt: false,
+    isBuilt: true,
   },
   {
     id: "capital-projects",
@@ -186,7 +186,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Asset Management",
     categoryColor: "amber",
     roles: ["property_manager", "asset_manager"],
-    isBuilt: false,
+    isBuilt: true,
   },
   // --- Communications ---
   {
@@ -199,7 +199,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Communications",
     categoryColor: "rose",
     roles: ["property_manager", "leasing_agent"],
-    isBuilt: false,
+    isBuilt: true,
   },
   {
     id: "resident-pulse",
@@ -211,7 +211,7 @@ export const apps: AppConfig[] = [
     categoryLabel: "Communications",
     categoryColor: "rose",
     roles: ["property_manager", "leasing_agent", "asset_manager"],
-    isBuilt: false,
+    isBuilt: true,
   },
 ];
 

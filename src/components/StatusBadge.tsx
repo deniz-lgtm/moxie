@@ -60,6 +60,21 @@ const colorMap: Record<string, string> = {
   primary: "bg-indigo-100 text-indigo-800",
   co_applicant: "bg-blue-100 text-blue-800",
   guarantor: "bg-amber-100 text-amber-800",
+  // Move in/out
+  move_in: "bg-green-100 text-green-800",
+  move_out: "bg-orange-100 text-orange-800",
+  upcoming: "bg-blue-100 text-blue-800",
+  // Vendors
+  active: "bg-green-100 text-green-800",
+  inactive: "bg-slate-100 text-slate-600",
+  // Severity
+  critical: "bg-red-100 text-red-800",
+  // Projects
+  planning: "bg-blue-100 text-blue-800",
+  on_hold: "bg-orange-100 text-orange-800",
+  // Notices
+  draft: "bg-slate-100 text-slate-600",
+  acknowledged: "bg-green-100 text-green-800",
 };
 
 function formatLabel(value: string): string {
