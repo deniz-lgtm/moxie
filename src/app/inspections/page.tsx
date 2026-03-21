@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem, Unit } from "@/lib/types";
 
 const AREAS = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Hallway", "Closet", "Patio/Balcony"];
@@ -23,7 +24,7 @@ const INSPECTION_TYPES: { value: InspectionType; label: string }[] = [
 ];
 
 export default function InspectionsPage() {
-  const [allInspections, setAllInspections] = useState<Inspection[]>([]);
+  const [allInspections, setAllInspections] = useState<Inspection[]>(() => loadFromStorage<Inspection[]>("inspections", []));
   const [selected, setSelected] = useState<Inspection | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
@@ -43,6 +44,10 @@ export default function InspectionsPage() {
       .then((data) => setUnits(data.units || []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    saveToStorage("inspections", allInspections);
+  }, [allInspections]);
 
   const filteredUnits = unitSearch
     ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))

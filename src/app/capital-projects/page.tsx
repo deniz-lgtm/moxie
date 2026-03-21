@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import type { Unit } from "@/lib/types";
 
 type ProjectStatus = "planning" | "in_progress" | "on_hold" | "completed";
@@ -43,7 +44,7 @@ const CATEGORIES: { value: ProjectCategory; label: string }[] = [
 
 export default function CapitalProjectsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
-  const [projects, setProjects] = useState<CapitalProject[]>([]);
+  const [projects, setProjects] = useState<CapitalProject[]>(() => loadFromStorage<CapitalProject[]>("capital_projects", []));
   const [selected, setSelected] = useState<CapitalProject | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -65,6 +66,10 @@ export default function CapitalProjectsPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    saveToStorage("capital_projects", projects);
+  }, [projects]);
 
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
 

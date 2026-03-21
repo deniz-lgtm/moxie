@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import type { TourSlot, TourRegistrationStatus, Unit } from "@/lib/types";
 
 export default function ToursPage() {
-  const [allTours, setAllTours] = useState<TourSlot[]>([]);
+  const [allTours, setAllTours] = useState<TourSlot[]>(() => loadFromStorage<TourSlot[]>("tours", []));
   const [units, setUnits] = useState<Unit[]>([]);
   const [selected, setSelected] = useState<TourSlot | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -27,6 +28,11 @@ export default function ToursPage() {
       })
       .catch(() => {});
   }, []);
+
+  // Persist tours to localStorage whenever they change
+  useEffect(() => {
+    saveToStorage("tours", allTours);
+  }, [allTours]);
 
   // Get unique property names from units for location options
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];

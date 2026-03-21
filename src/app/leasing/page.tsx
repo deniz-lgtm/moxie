@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { fetchApplications } from "@/lib/data";
+import { TourStats, TourStatsFooter } from "@/components/TourStats";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +33,6 @@ export default async function LeasingPage() {
       return aPct - bPct;
     });
 
-  // Tours not yet connected to AppFolio
-  const upcomingTours: any[] = [];
-  const totalRegistrations = 0;
-
   return (
     <div className="space-y-8">
       <div>
@@ -54,11 +51,7 @@ export default async function LeasingPage() {
             {incompleteApps.length} incomplete · {reviewApps.length} in review
           </p>
         </div>
-        <div className="bg-card rounded-xl border border-border p-5">
-          <p className="text-sm text-muted-foreground">Upcoming Tours</p>
-          <p className="text-3xl font-bold mt-1">{upcomingTours.length}</p>
-          <p className="text-xs text-muted-foreground mt-1">{totalRegistrations} prospects registered</p>
-        </div>
+        <TourStats />
         <div className="bg-card rounded-xl border border-border p-5">
           <p className="text-sm text-muted-foreground">Needs Attention</p>
           <p className="text-3xl font-bold mt-1 text-red-600">
@@ -113,9 +106,7 @@ export default async function LeasingPage() {
               <span className="text-2xl">🏠</span>
             </div>
             <div className="mt-4 pt-4 border-t border-border">
-              <span className="text-sm font-medium text-accent">
-                {upcomingTours.length} upcoming &middot; {totalRegistrations} registered
-              </span>
+              <TourStatsFooter />
             </div>
           </div>
         </Link>

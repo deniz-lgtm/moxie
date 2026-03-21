@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import type { Unit } from "@/lib/types";
 
 type NoticeType = "violation" | "rent_reminder" | "building_announcement" | "lease_renewal" | "maintenance_notice";
@@ -32,7 +33,7 @@ const NOTICE_TYPES: { value: NoticeType; label: string }[] = [
 
 export default function NoticesPage() {
   const [units, setUnits] = useState<Unit[]>([]);
-  const [notices, setNotices] = useState<Notice[]>([]);
+  const [notices, setNotices] = useState<Notice[]>(() => loadFromStorage<Notice[]>("notices", []));
   const [selected, setSelected] = useState<Notice | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filterType, setFilterType] = useState<string>("all");
@@ -54,6 +55,10 @@ export default function NoticesPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    saveToStorage("notices", notices);
+  }, [notices]);
 
   const filtered = notices.filter((n) => {
     if (filterType !== "all" && n.type !== filterType) return false;

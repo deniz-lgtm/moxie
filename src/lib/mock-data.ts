@@ -203,8 +203,8 @@ export const apps: AppConfig[] = [
   },
   {
     id: "resident-pulse",
-    name: "Resident Pulse",
-    description: "Spot recurring issues from maintenance tickets, inspections, and reviews — surfaces the top problems each month",
+    name: "Maintenance Analytics",
+    description: "Recurring issues, trends, and resolution times from maintenance tickets — filtered by time period and property",
     href: "/resident-pulse",
     icon: "MessageSquare",
     category: "communications",

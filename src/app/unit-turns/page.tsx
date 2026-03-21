@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import type { UnitTurn, TurnTask, TurnTaskStatus, Unit } from "@/lib/types";
 
 const TASK_CATEGORIES = [
@@ -25,7 +26,7 @@ const DEFAULT_TASKS: { name: string; category: string }[] = [
 ];
 
 export default function UnitTurnsPage() {
-  const [allTurns, setAllTurns] = useState<UnitTurn[]>([]);
+  const [allTurns, setAllTurns] = useState<UnitTurn[]>(() => loadFromStorage<UnitTurn[]>("unit_turns", []));
   const [selected, setSelected] = useState<UnitTurn | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -43,6 +44,10 @@ export default function UnitTurnsPage() {
       .then((data) => setUnits(data.units || []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    saveToStorage("unit_turns", allTurns);
+  }, [allTurns]);
 
   const filteredUnits = unitSearch
     ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))

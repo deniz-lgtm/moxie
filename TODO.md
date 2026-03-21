@@ -1,55 +1,76 @@
 # Moxie Dashboard — Remaining Work
 
-## Bug Fixes (Completed)
+## Completed
+
+### Bug Fixes
 - [x] Unit selectors show tenant names instead of Unit Street Address 1 — fixed in maintenance, notices, inspections, unit-turns
 
-## Incomplete Pages
+### Leasing Parent Page (was 70% → now 95%)
+- [x] Tours section wired up — reads from localStorage via TourStats client component
+- [x] Tour counts and registration counts shown dynamically on parent page
+- [ ] Connect tour data to AppFolio if/when API supports it
 
-### Reports (5% complete)
-- [ ] Implement actual P&L report generation using AppFolio financial data
-- [ ] Implement occupancy report with historical trends
-- [ ] Implement maintenance cost report with vendor breakdowns
-- [ ] Implement rent roll report pulling live AppFolio data
-- [ ] Add CSV/PDF export capability
-- [ ] "Generate Report" currently creates empty objects — wire up real calculations
+### Maintenance Analytics (was "Resident Pulse", 40% → now 80%)
+- [x] Renamed from "Resident Pulse" to "Maintenance Analytics"
+- [x] Added time-range filter (30d, 90d, 6m, all time)
+- [x] Added property filter
+- [x] Trend calculation compares current vs previous period (no longer hardcoded "stable")
+- [x] Shows avg resolution time per category
+- [x] Period-over-period comparison in summary cards
+- [ ] Consider adding cost breakdown by category
 
-### Vendors (15% complete)
-- [ ] Connect vendor directory to AppFolio vendor data
-- [ ] Link vendors to completed work orders for job history
-- [ ] Auto-calculate response time and performance metrics from work order data
-- [ ] Track insurance expiration dates with alerts
-- [ ] Auto-update ratings and jobs completed from maintenance history
+### Comp Watch (was 20% → now 75%)
+- [x] localStorage persistence — data survives page refresh
+- [x] Rent history tracking — snapshots rent values when updated
+- [x] Auto-calculated trend based on rent history (up/down/stable)
+- [x] Expandable rows with occupancy, notes, and rent history timeline
+- [x] Delete competitor functionality
+- [ ] CSV import for bulk competitor data
+- [ ] Side-by-side comparison chart with own properties
 
-### Comp Watch (20% complete)
-- [ ] Add market data integration (manual CSV import at minimum)
-- [ ] Auto-pull competitor rent data if available from a data source
-- [ ] Trend calculation should be based on historical entries, not hardcoded "stable"
-- [ ] Add rent comparison charts (own properties vs competitors)
+### Vendors (was 15% → now 70%)
+- [x] localStorage persistence for vendor directory
+- [x] Connected to AppFolio work orders — auto-calculates jobs completed and avg resolution time
+- [x] Vendor detail view shows actual work order history from AppFolio
+- [x] Search filter for finding vendors by name
+- [x] Insurance expiry date tracking with alerts (30-day warning)
+- [x] Delete vendor and edit status from detail view
+- [ ] Rating system (star-based or scoring)
+- [ ] Bulk import vendors
 
-### Resident Pulse (40% complete)
-- [ ] Currently just groups maintenance tickets by category — not true resident feedback
-- [ ] Add resident survey/feedback collection mechanism
-- [ ] Implement actual sentiment analysis or pattern recognition
-- [ ] "Trend" field is hardcoded to "stable" — calculate from historical data
-- [ ] Consider renaming to "Maintenance Analytics" if no feedback source is planned
+### Reports (was 5% → now 70%)
+- [x] localStorage persistence for generated reports
+- [x] Occupancy reports pull live unit data from AppFolio
+- [x] Rent roll reports show all units with tenant, rent, status, lease end
+- [x] Maintenance cost reports with category breakdown and cost bars
+- [x] P&L summary (estimated from rent income vs maintenance costs)
+- [x] Report detail view with full data display
+- [x] CSV export for all report types
+- [x] Delete reports
+- [x] Default month uses current month (no longer hardcoded)
+- [ ] Full P&L requires AppFolio General Ledger API connection
+- [ ] PDF export
+- [ ] Email/send to owner functionality
 
-### Leasing Parent Page (70% complete)
-- [ ] Tours section is hardcoded empty: `const upcomingTours: any[] = []`
-- [ ] Connect tour data from the tours sub-page to the parent leasing overview
-- [ ] Remove "Tours not yet connected to AppFolio" comment and wire up
+### Data Persistence (was 0% → now 90%)
+- [x] Created shared localStorage utility (`src/lib/storage.ts`)
+- [x] Tours — persisted to localStorage
+- [x] Comp Watch — persisted to localStorage
+- [x] Vendors — persisted to localStorage
+- [x] Reports — persisted to localStorage
+- [x] Inspections — persisted to localStorage
+- [x] Unit Turns — persisted to localStorage
+- [x] Notices — persisted to localStorage
+- [x] Capital Projects — persisted to localStorage
+- [ ] Consider database backend (Supabase, etc.) for multi-device sync
 
-## Infrastructure / Cross-Cutting
-
-### Data Persistence
-- [ ] Most client-side pages (inspections, unit turns, notices, capital projects, tours, comp watch, vendors) lose all data on page refresh
-- [ ] Consider adding a database backend (Supabase, PlanetScale, etc.) for persistent storage
-- [ ] Or at minimum, localStorage persistence for draft data
+## Still Remaining
 
 ### Unit Data Verification
-- [ ] Verify that AppFolio `UnitStreetAddress1` field is always populated and matches the expected addresses from the Unit Directory report
-- [ ] If field is sometimes missing, add better fallback logic in `src/lib/data.ts` line 132
+- [ ] Verify that AppFolio `UnitStreetAddress1` field is always populated
+- [ ] If field is sometimes missing, add better fallback logic in `src/lib/data.ts`
 
 ### General Polish
-- [ ] Ensure all pages handle loading states gracefully
-- [ ] Add error boundaries for API failures
 - [ ] Mobile responsiveness audit across all pages
+- [ ] Loading skeleton states for pages that fetch data
+- [ ] Error boundaries for API failures
