@@ -46,17 +46,32 @@ export interface Unit {
 }
 
 // --- Inspections ---
-export type InspectionType = "move_in" | "move_out" | "routine" | "quarterly";
-export type InspectionStatus = "scheduled" | "in_progress" | "completed" | "needs_review";
+export type InspectionType = "move_in" | "move_out" | "onboarding" | "quarterly" | "punch_list";
+export type InspectionStatus = "draft" | "walking" | "ai_review" | "team_review" | "completed";
 export type ConditionRating = "excellent" | "good" | "fair" | "poor" | "damaged";
+
+export interface InspectionPhoto {
+  id: string;
+  url: string; // data URL or storage URL
+  aiAnalysis: string | null;
+  createdAt: string;
+}
 
 export interface InspectionItem {
   id: string;
   area: string;
   item: string;
-  condition: ConditionRating;
+  condition: ConditionRating | "";
   notes: string;
-  photos: string[];
+  photos: InspectionPhoto[];
+  costEstimate: number;
+  isDeduction: boolean;
+}
+
+export interface InspectionRoom {
+  id: string;
+  name: string;
+  items: InspectionItem[];
 }
 
 export interface Inspection {
@@ -70,8 +85,14 @@ export interface Inspection {
   scheduledDate: string;
   completedDate?: string;
   inspector: string;
-  items: InspectionItem[];
+  rooms: InspectionRoom[];
+  floorPlanUrl: string | null;
   overallNotes: string;
+  invoiceUrl: string | null;
+  invoiceTotal: number | null;
+  tenantName: string | null;
+  tenantEmail: string | null;
+  depositAmount: number | null;
   createdAt: string;
   updatedAt: string;
 }

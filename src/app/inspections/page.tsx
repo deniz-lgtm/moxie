@@ -1,441 +1,156 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
-import type { Inspection, InspectionType, InspectionStatus, ConditionRating, InspectionItem, Unit } from "@/lib/types";
+import { loadFromStorage } from "@/lib/storage";
+import type { Inspection, InspectionType } from "@/lib/types";
 
-const AREAS = ["Kitchen", "Bathroom", "Living Room", "Bedroom", "Hallway", "Closet", "Patio/Balcony"];
-const ITEMS_BY_AREA: Record<string, string[]> = {
-  Kitchen: ["Countertops", "Cabinets", "Appliances", "Sink/Faucet", "Flooring", "Walls", "Lighting"],
-  Bathroom: ["Fixtures", "Toilet", "Shower/Tub", "Vanity", "Mirror", "Flooring", "Plumbing"],
-  "Living Room": ["Flooring", "Walls", "Windows", "Ceiling", "Lighting", "Outlets"],
-  Bedroom: ["Flooring", "Walls", "Windows", "Closet Door", "Ceiling", "Lighting"],
-  Hallway: ["Flooring", "Walls", "Lighting", "Smoke Detector"],
-  Closet: ["Shelving", "Door", "Rod", "Flooring"],
-  "Patio/Balcony": ["Surface", "Railing", "Lighting", "Door"],
-};
-const CONDITIONS: ConditionRating[] = ["excellent", "good", "fair", "poor", "damaged"];
-const INSPECTION_TYPES: { value: InspectionType; label: string }[] = [
-  { value: "move_in", label: "Move In" },
-  { value: "move_out", label: "Move Out" },
-  { value: "quarterly", label: "Quarterly" },
-  { value: "routine", label: "Routine" },
+const INSPECTION_TYPES: {
+  type: InspectionType;
+  label: string;
+  description: string;
+  color: string;
+  borderColor: string;
+  href: string;
+}[] = [
+  {
+    type: "move_out",
+    label: "Move-Out Inspection",
+    description:
+      "Full unit walk with floor plan, photos, AI damage analysis, and LA-law-compliant deposit deduction invoice generation.",
+    color: "bg-red-50",
+    borderColor: "border-l-red-500",
+    href: "/inspections/move-out",
+  },
+  {
+    type: "move_in",
+    label: "Move-In Inspection",
+    description:
+      "Tenant-facing photo walkthrough. Send a link for tenants to document unit condition at move-in with timestamped photos.",
+    color: "bg-green-50",
+    borderColor: "border-l-green-500",
+    href: "/inspections/move-in",
+  },
+  {
+    type: "onboarding",
+    label: "Onboarding Inspection",
+    description:
+      "Property-level inspection for newly acquired properties. Document baseline conditions across all units and common areas.",
+    color: "bg-blue-50",
+    borderColor: "border-l-blue-500",
+    href: "/inspections/onboarding",
+  },
+  {
+    type: "quarterly",
+    label: "Quarterly Inspection",
+    description:
+      "Scheduled maintenance walkthrough. Document deferred maintenance items with timelines and priority levels.",
+    color: "bg-amber-50",
+    borderColor: "border-l-amber-500",
+    href: "/inspections/quarterly",
+  },
+  {
+    type: "punch_list",
+    label: "Punch List",
+    description:
+      "Construction and renovation tracking. Document items needing completion or correction with photos and contractor assignments.",
+    color: "bg-purple-50",
+    borderColor: "border-l-purple-500",
+    href: "/inspections/punch-list",
+  },
 ];
 
-export default function InspectionsPage() {
-  const [allInspections, setAllInspections] = useState<Inspection[]>(() => loadFromStorage<Inspection[]>("inspections", []));
-  const [selected, setSelected] = useState<Inspection | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterType, setFilterType] = useState<string>("all");
-  const [units, setUnits] = useState<Unit[]>([]);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [unitSearch, setUnitSearch] = useState("");
-  const [newInspection, setNewInspection] = useState({
-    unitId: "",
-    type: "routine" as InspectionType,
-    scheduledDate: "",
-    inspector: "",
-  });
+export default function InspectionsHub() {
+  const [inspections, setInspections] = useState<Inspection[]>([]);
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
-      .then((r) => r.json())
-      .then((data) => setUnits(data.units || []))
-      .catch(() => {});
+    setInspections(loadFromStorage<Inspection[]>("inspections_v2", []));
   }, []);
 
-  useEffect(() => {
-    saveToStorage("inspections", allInspections);
-  }, [allInspections]);
-
-  const filteredUnits = unitSearch
-    ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
-    : units;
-
-  function createInspection() {
-    if (!newInspection.unitId || !newInspection.scheduledDate) return;
-    const unit = units.find((u) => u.id === newInspection.unitId);
-    if (!unit) return;
-
-    const inspection: Inspection = {
-      id: `insp-${Date.now()}`,
-      unitId: unit.id,
-      propertyId: unit.propertyId,
-      unitNumber: unit.unitName,
-      propertyName: unit.propertyName,
-      type: newInspection.type,
-      status: "scheduled",
-      scheduledDate: newInspection.scheduledDate,
-      inspector: newInspection.inspector || "Unassigned",
-      items: [],
-      overallNotes: "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setAllInspections((prev) => [inspection, ...prev]);
-    setShowCreateForm(false);
-    setSelected(inspection);
-    setNewInspection({ unitId: "", type: "routine", scheduledDate: "", inspector: "" });
+  function countByType(type: InspectionType) {
+    return inspections.filter((i) => i.type === type).length;
   }
 
-  const filtered = allInspections.filter((i) => {
-    if (filterStatus !== "all" && i.status !== filterStatus) return false;
-    if (filterType !== "all" && i.type !== filterType) return false;
-    return true;
-  });
-
-  // Add item to inspection
-  function addItem(area: string, item: string) {
-    if (!selected) return;
-    const newItem: InspectionItem = {
-      id: `item-${Date.now()}`,
-      area,
-      item,
-      condition: "good",
-      notes: "",
-      photos: [],
-    };
-    const updated = {
-      ...selected,
-      items: [...selected.items, newItem],
-      updatedAt: new Date().toISOString(),
-    };
-    setSelected(updated);
-    setAllInspections((prev) =>
-      prev.map((i) => (i.id === updated.id ? updated : i))
-    );
+  function countActiveByType(type: InspectionType) {
+    return inspections.filter(
+      (i) => i.type === type && i.status !== "completed"
+    ).length;
   }
 
-  function updateItem(itemId: string, updates: Partial<InspectionItem>) {
-    if (!selected) return;
-    const updated = {
-      ...selected,
-      items: selected.items.map((it) =>
-        it.id === itemId ? { ...it, ...updates } : it
-      ),
-      updatedAt: new Date().toISOString(),
-    };
-    setSelected(updated);
-    setAllInspections((prev) =>
-      prev.map((i) => (i.id === updated.id ? updated : i))
-    );
-  }
-
-  function updateInspectionStatus(status: InspectionStatus) {
-    if (!selected) return;
-    const updated = {
-      ...selected,
-      status,
-      completedDate: status === "completed" ? new Date().toISOString().split("T")[0] : selected.completedDate,
-      updatedAt: new Date().toISOString(),
-    };
-    setSelected(updated);
-    setAllInspections((prev) =>
-      prev.map((i) => (i.id === updated.id ? updated : i))
-    );
-  }
-
-  if (selected) {
-    return (
-      <div className="space-y-6">
-        {/* Back + Header */}
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setSelected(null)}
-            className="text-sm text-accent hover:underline"
-          >
-            &larr; Back to Inspections
-          </button>
-        </div>
-
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">
-              {selected.propertyName} #{selected.unitNumber}
-            </h1>
-            <p className="text-muted-foreground mt-1 capitalize">
-              {selected.type.replace("_", " ")} Inspection &middot; {selected.scheduledDate}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <StatusBadge value={selected.status} />
-            <select
-              value={selected.status}
-              onChange={(e) => updateInspectionStatus(e.target.value as InspectionStatus)}
-              className="text-sm border border-border rounded-lg px-3 py-1.5 bg-card"
-            >
-              <option value="scheduled">Scheduled</option>
-              <option value="in_progress">In Progress</option>
-              <option value="completed">Completed</option>
-              <option value="needs_review">Needs Review</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Inspector info */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <p className="text-sm">
-            <span className="text-muted-foreground">Inspector:</span>{" "}
-            <span className="font-medium">{selected.inspector}</span>
-          </p>
-        </div>
-
-        {/* Add items */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <h2 className="font-semibold mb-4">Add Inspection Items</h2>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {AREAS.map((area) => (
-              <div key={area}>
-                <h3 className="text-sm font-medium text-muted-foreground mb-2">{area}</h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {ITEMS_BY_AREA[area].map((item) => {
-                    const exists = selected.items.some(
-                      (i) => i.area === area && i.item === item
-                    );
-                    return (
-                      <button
-                        key={item}
-                        onClick={() => !exists && addItem(area, item)}
-                        disabled={exists}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                          exists
-                            ? "bg-green-50 border-green-200 text-green-700 cursor-default"
-                            : "border-border hover:bg-accent-light hover:border-accent text-foreground cursor-pointer"
-                        }`}
-                      >
-                        {exists ? "✓ " : ""}{item}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Inspection items table */}
-        {selected.items.length > 0 && (
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <div className="p-5 border-b border-border">
-              <h2 className="font-semibold">
-                Inspection Items ({selected.items.length})
-              </h2>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted">
-                    <th className="text-left px-4 py-3 font-medium">Area</th>
-                    <th className="text-left px-4 py-3 font-medium">Item</th>
-                    <th className="text-left px-4 py-3 font-medium">Condition</th>
-                    <th className="text-left px-4 py-3 font-medium">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selected.items.map((item) => (
-                    <tr key={item.id} className="border-b border-border last:border-0">
-                      <td className="px-4 py-3 text-muted-foreground">{item.area}</td>
-                      <td className="px-4 py-3 font-medium">{item.item}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={item.condition}
-                          onChange={(e) =>
-                            updateItem(item.id, { condition: e.target.value as ConditionRating })
-                          }
-                          className="text-xs border border-border rounded-md px-2 py-1 bg-card"
-                        >
-                          {CONDITIONS.map((c) => (
-                            <option key={c} value={c}>
-                              {c.charAt(0).toUpperCase() + c.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <input
-                          type="text"
-                          value={item.notes}
-                          onChange={(e) =>
-                            updateItem(item.id, { notes: e.target.value })
-                          }
-                          placeholder="Add notes..."
-                          className="w-full text-sm border border-border rounded-md px-2 py-1 bg-card placeholder:text-muted-foreground"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Overall notes */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <h2 className="font-semibold mb-3">Overall Notes</h2>
-          <textarea
-            value={selected.overallNotes}
-            onChange={(e) => {
-              const updated = { ...selected, overallNotes: e.target.value };
-              setSelected(updated);
-              setAllInspections((prev) =>
-                prev.map((i) => (i.id === updated.id ? updated : i))
-              );
-            }}
-            placeholder="Add overall inspection notes..."
-            rows={4}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card placeholder:text-muted-foreground resize-none"
-          />
-        </div>
-      </div>
-    );
-  }
+  const recent = [...inspections]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 8);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Inspections</h1>
-          <p className="text-muted-foreground mt-1">
-            Move-in, move-out, and quarterly inspections
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
-        >
-          {showCreateForm ? "Cancel" : "+ New Inspection"}
-        </button>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold">Inspections</h1>
+        <p className="text-muted-foreground mt-1">
+          Five inspection types for every stage — move-out, move-in, onboarding,
+          quarterly maintenance, and punch lists
+        </p>
       </div>
 
-      {showCreateForm && (
-        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-          <h2 className="font-semibold">Schedule Inspection</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <label className="text-xs text-muted-foreground block mb-1">Unit *</label>
-              <input
-                type="text"
-                value={unitSearch}
-                onChange={(e) => setUnitSearch(e.target.value)}
-                placeholder="Search units..."
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card mb-1"
-              />
-              <select
-                value={newInspection.unitId}
-                onChange={(e) => setNewInspection({ ...newInspection, unitId: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-                size={5}
-              >
-                <option value="">Select unit...</option>
-                {filteredUnits.map((u) => (
-                  <option key={u.id} value={u.id}>{u.unitName}</option>
-                ))}
-              </select>
+      {/* Quick stats */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        {INSPECTION_TYPES.map((t) => {
+          const active = countActiveByType(t.type);
+          const total = countByType(t.type);
+          return (
+            <div key={t.type} className="bg-card rounded-xl border border-border p-4">
+              <p className="text-xs text-muted-foreground">{t.label}</p>
+              <p className="text-2xl font-bold mt-1">{total}</p>
+              {active > 0 && (
+                <p className="text-xs text-amber-600 mt-1">{active} in progress</p>
+              )}
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Type</label>
-              <select
-                value={newInspection.type}
-                onChange={(e) => setNewInspection({ ...newInspection, type: e.target.value as InspectionType })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                {INSPECTION_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Scheduled Date *</label>
-              <input
-                type="date"
-                value={newInspection.scheduledDate}
-                onChange={(e) => setNewInspection({ ...newInspection, scheduledDate: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Inspector</label>
-              <input
-                type="text"
-                value={newInspection.inspector}
-                onChange={(e) => setNewInspection({ ...newInspection, inspector: e.target.value })}
-                placeholder="Inspector name"
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              />
-            </div>
-          </div>
-          <button
-            onClick={createInspection}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
-          >
-            Create Inspection
-          </button>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex gap-3">
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
-        >
-          <option value="all">All Statuses</option>
-          <option value="scheduled">Scheduled</option>
-          <option value="in_progress">In Progress</option>
-          <option value="completed">Completed</option>
-          <option value="needs_review">Needs Review</option>
-        </select>
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
-        >
-          <option value="all">All Types</option>
-          <option value="move_in">Move In</option>
-          <option value="move_out">Move Out</option>
-          <option value="quarterly">Quarterly</option>
-          <option value="routine">Routine</option>
-        </select>
+          );
+        })}
       </div>
 
-      {/* Inspection Cards */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((insp) => (
-          <button
-            key={insp.id}
-            onClick={() => setSelected(insp)}
-            className="text-left bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow cursor-pointer"
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="font-semibold">
-                  {insp.propertyName} #{insp.unitNumber}
-                </h3>
-                <p className="text-sm text-muted-foreground capitalize mt-1">
-                  {insp.type.replace("_", " ")} Inspection
-                </p>
+      {/* Inspection type cards */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {INSPECTION_TYPES.map((t) => (
+          <Link key={t.type} href={t.href}>
+            <div className={`${t.color} rounded-xl border border-border border-l-4 ${t.borderColor} p-6 hover:shadow-lg transition-shadow cursor-pointer h-full`}>
+              <div className="flex items-start justify-between">
+                <h2 className="text-lg font-semibold">{t.label}</h2>
+                {countActiveByType(t.type) > 0 && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                    {countActiveByType(t.type)} active
+                  </span>
+                )}
               </div>
-              <StatusBadge value={insp.status} />
+              <p className="text-sm text-muted-foreground mt-2">{t.description}</p>
+              <div className="mt-4 pt-3 border-t border-border/50">
+                <span className="text-sm font-medium text-accent">
+                  {countByType(t.type)} total &middot; Open {t.label.toLowerCase()} &rarr;
+                </span>
+              </div>
             </div>
-            <div className="mt-4 pt-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-              <span>{insp.scheduledDate}</span>
-              <span>{insp.inspector}</span>
-            </div>
-            {insp.items.length > 0 && (
-              <p className="text-xs text-muted-foreground mt-2">
-                {insp.items.length} items inspected
-              </p>
-            )}
-          </button>
+          </Link>
         ))}
       </div>
 
-      {filtered.length === 0 && (
-        <div className="text-center py-12 text-muted-foreground">
-          No inspections match the current filters.
+      {/* Recent inspections */}
+      {recent.length > 0 && (
+        <div className="bg-card rounded-xl border border-border p-5">
+          <h2 className="font-semibold mb-4">Recent Inspections</h2>
+          <div className="space-y-3">
+            {recent.map((insp) => (
+              <div key={insp.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                <div>
+                  <p className="text-sm font-medium">{insp.unitNumber}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {INSPECTION_TYPES.find((t) => t.type === insp.type)?.label} &middot;{" "}
+                    {insp.inspector || "Unassigned"} &middot; {insp.scheduledDate}
+                  </p>
+                </div>
+                <StatusBadge value={insp.status} />
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

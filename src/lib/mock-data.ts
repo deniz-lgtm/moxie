@@ -44,7 +44,7 @@ export const apps: AppConfig[] = [
   {
     id: "inspections",
     name: "Inspections",
-    description: "Move-in, move-out, and quarterly inspections with condition tracking and photos",
+    description: "5 inspection types: move-out with AI analysis & deposit invoicing, move-in photo walks, onboarding, quarterly, and punch lists",
     href: "/inspections",
     icon: "ClipboardCheck",
     category: "operations",

@@ -75,6 +75,10 @@ const colorMap: Record<string, string> = {
   // Notices
   draft: "bg-slate-100 text-slate-600",
   acknowledged: "bg-green-100 text-green-800",
+  // Inspection statuses
+  walking: "bg-blue-100 text-blue-800",
+  ai_review: "bg-purple-100 text-purple-800",
+  team_review: "bg-amber-100 text-amber-800",
 };
 
 function formatLabel(value: string): string {
