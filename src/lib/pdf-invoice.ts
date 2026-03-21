@@ -18,6 +18,7 @@ type InvoiceData = {
   companyAddress: string;
   companyPhone: string;
   companyEmail: string;
+  tenants?: { name: string; email: string }[];
 };
 
 /**
@@ -75,7 +76,7 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
   // ── Tenant & Property Info ────────────────────────
 
   const infoFields = [
-    ["Tenant Name:", inspection.tenant_name || "—"],
+    ["Tenant Name:", data.tenants?.length ? data.tenants.map((t) => t.name).join(", ") : inspection.tenant_name || "—"],
     ["Unit Address:", inspection.unit_name],
     ["Property:", inspection.property_name],
     ["Move-Out Date:", inspection.completed_date || inspection.scheduled_date || "—"],
@@ -311,14 +312,25 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
   addText(today.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }), margin, 10);
   y += 10;
 
-  // Recipient
+  // Recipient — use tenants array if provided, otherwise fall back to single tenant
+  const tenantList = data.tenants?.length
+    ? data.tenants
+    : inspection.tenant_name
+      ? [{ name: inspection.tenant_name, email: inspection.tenant_email || "" }]
+      : [{ name: "Tenant", email: "" }];
+
+  const tenantNames = tenantList.map((t) => t.name);
+  const tenantEmails = tenantList.map((t) => t.email).filter(Boolean);
+
   addText("SENT VIA FIRST-CLASS MAIL AND EMAIL", margin, 9, "bold");
   y += 8;
-  addText(inspection.tenant_name || "Tenant", margin, 10);
-  y += 5;
-  if (inspection.tenant_email) {
-    addText(inspection.tenant_email, margin, 9);
+  for (const t of tenantList) {
+    addText(t.name, margin, 10);
     y += 5;
+    if (t.email) {
+      addText(t.email, margin, 9);
+      y += 5;
+    }
   }
   addText(inspection.unit_name, margin, 9);
   y += 5;
@@ -334,8 +346,11 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
   addText(`Move-Out Date: ${moveOutDate}`, margin, 10);
   y += 10;
 
-  // Body
-  addText(`Dear ${inspection.tenant_name || "Tenant"},`, margin, 10);
+  // Body — salutation with all tenant names
+  const salutation = tenantNames.length > 2
+    ? `${tenantNames.slice(0, -1).join(", ")}, and ${tenantNames[tenantNames.length - 1]}`
+    : tenantNames.join(" and ");
+  addText(`Dear ${salutation},`, margin, 10);
   y += 8;
 
   const contentWidth = pageWidth - margin * 2;

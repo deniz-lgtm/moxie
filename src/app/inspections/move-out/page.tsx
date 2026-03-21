@@ -44,7 +44,7 @@ export default function MoveOutInspectionPage() {
   const [inspections, setInspections] = useState<Inspection[]>(() =>
     loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_out")
   );
-  const [units, setUnits] = useState<(Unit & { tenants?: string[]; tenantEmails?: string[] })[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [activeInspection, setActiveInspection] = useState<Inspection | null>(null);
   const [step, setStep] = useState<WizardStep>("select_unit");
   const [showList, setShowList] = useState(true);
@@ -56,23 +56,42 @@ export default function MoveOutInspectionPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
-  // New inspection form
+  // New inspection form (tenant info is resolved at send time, not creation)
   const [newForm, setNewForm] = useState({
     unitId: "",
     inspector: "",
     scheduledDate: "",
-    tenantName: "",
-    tenantEmail: "",
-    tenantEmails: [] as string[],
     depositAmount: 0,
   });
 
+  // Tenant picker state for completed step
+  const [unitTenants, setUnitTenants] = useState<{ name: string; email: string }[]>([]);
+  const [selectedTenants, setSelectedTenants] = useState<Set<number>>(new Set());
+  const [loadingTenants, setLoadingTenants] = useState(false);
+
   useEffect(() => {
-    fetch("/api/appfolio/units?withTenants=1")
+    fetch("/api/appfolio/units")
       .then((r) => r.json())
       .then((d) => setUnits(d.units || []))
       .catch(() => {});
   }, []);
+
+  // Fetch tenants when entering the completed step
+  useEffect(() => {
+    if (step !== "completed" || !activeInspection) return;
+    setLoadingTenants(true);
+    const unitAddress = activeInspection.unitNumber;
+    fetch(`/api/appfolio/units?tenants_for=${encodeURIComponent(unitAddress)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.tenants?.length > 0) {
+          setUnitTenants(data.tenants);
+          setSelectedTenants(new Set(data.tenants.map((_: any, i: number) => i)));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingTenants(false));
+  }, [step, activeInspection]);
 
   // Persist all move-out inspections
   const persist = useCallback(
@@ -112,8 +131,8 @@ export default function MoveOutInspectionPage() {
       overallNotes: "",
       invoiceUrl: null,
       invoiceTotal: null,
-      tenantName: newForm.tenantName || unit.tenant,
-      tenantEmail: newForm.tenantEmail || null,
+      tenantName: null,
+      tenantEmail: null,
       depositAmount: newForm.depositAmount || null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -431,7 +450,14 @@ export default function MoveOutInspectionPage() {
   }
 
   // Build PDF data structure from inspection
-  function buildPdfData(insp: Inspection) {
+  function buildPdfData(insp: Inspection): {
+    inspection: any;
+    companyName: string;
+    companyAddress: string;
+    companyPhone: string;
+    companyEmail: string;
+    tenants?: { name: string; email: string }[];
+  } {
     return {
       inspection: {
         ...insp as any,
@@ -557,8 +583,6 @@ export default function MoveOutInspectionPage() {
   // ─── Step: Select Unit ────────────────────────────
 
   if (step === "select_unit") {
-    const selectedUnit = units.find((u) => u.id === newForm.unitId);
-
     return (
       <div className="space-y-6">
         <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
@@ -574,54 +598,17 @@ export default function MoveOutInspectionPage() {
               <label className="text-xs text-muted-foreground block mb-1">Select Unit *</label>
               <select
                 value={newForm.unitId}
-                onChange={(e) => {
-                  const unit = units.find((u) => u.id === e.target.value);
-                  if (unit) {
-                    const allTenants = unit.tenants?.join(", ") || unit.tenant || "";
-                    const allEmails = unit.tenantEmails?.join(", ") || "";
-                    setNewForm({
-                      ...newForm,
-                      unitId: unit.id,
-                      tenantName: allTenants,
-                      tenantEmail: allEmails,
-                      tenantEmails: unit.tenantEmails || [],
-                    });
-                  } else {
-                    setNewForm({ ...newForm, unitId: "" });
-                  }
-                }}
+                onChange={(e) => setNewForm({ ...newForm, unitId: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               >
                 <option value="">Select a unit...</option>
                 {units.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.unitName} — {u.tenants?.length ? u.tenants.join(", ") : u.tenant || "Vacant"} ({u.status})
+                    {u.unitName || u.displayName}
                   </option>
                 ))}
               </select>
             </div>
-
-            {/* Show tenant details when unit is selected */}
-            {selectedUnit && (selectedUnit.tenants?.length || 0) > 1 && (
-              <div className="md:col-span-2 bg-blue-50 rounded-lg border border-blue-200 p-3">
-                <p className="text-xs font-medium text-blue-800 mb-1">
-                  {selectedUnit.tenants!.length} tenants on this unit
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {selectedUnit.tenants!.map((t, i) => (
-                    <span key={i} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                      {t}
-                      {selectedUnit.tenantEmails?.[i] && (
-                        <span className="text-blue-500 ml-1">({selectedUnit.tenantEmails[i]})</span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-                <p className="text-[10px] text-blue-600 mt-1">
-                  Disposition letter will be addressed to all tenants
-                </p>
-              </div>
-            )}
 
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Inspector *</label>
@@ -642,33 +629,6 @@ export default function MoveOutInspectionPage() {
                 onChange={(e) => setNewForm({ ...newForm, scheduledDate: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
-            </div>
-
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Tenant Name(s)</label>
-              <input
-                type="text"
-                value={newForm.tenantName}
-                onChange={(e) => setNewForm({ ...newForm, tenantName: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-                placeholder="Auto-populated from unit selection"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Tenant Email(s)</label>
-              <input
-                type="text"
-                placeholder="For sending disposition letter"
-                value={newForm.tenantEmail}
-                onChange={(e) => setNewForm({ ...newForm, tenantEmail: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              />
-              {newForm.tenantEmails.length > 1 && (
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Multiple emails — all will receive the disposition letter
-                </p>
-              )}
             </div>
 
             <div>
@@ -1021,9 +981,12 @@ export default function MoveOutInspectionPage() {
   // ─── Step: Completed ──────────────────────────────
 
   if (step === "completed" && activeInspection) {
+    const selectedTenantList = unitTenants.filter((_, i) => selectedTenants.has(i));
+    const selectedEmails = selectedTenantList.map((t) => t.email).filter(Boolean);
+
     return (
       <div className="space-y-6">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="text-sm text-accent hover:underline">
           &larr; Back to list
         </button>
 
@@ -1058,19 +1021,79 @@ export default function MoveOutInspectionPage() {
           </div>
         </div>
 
+        {/* Tenant Selection */}
+        <div className="bg-card rounded-xl border border-border p-5 space-y-3">
+          <h2 className="font-semibold">Send To Tenants</h2>
+          {loadingTenants ? (
+            <p className="text-sm text-muted-foreground">Loading tenants from AppFolio...</p>
+          ) : unitTenants.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No tenants found for this unit in AppFolio.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 mb-2">
+                <button
+                  onClick={() => setSelectedTenants(new Set(unitTenants.map((_, i) => i)))}
+                  className="text-xs text-accent hover:underline"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={() => setSelectedTenants(new Set())}
+                  className="text-xs text-accent hover:underline"
+                >
+                  Deselect All
+                </button>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {selectedTenants.size} of {unitTenants.length} selected
+                </span>
+              </div>
+              <div className="space-y-2">
+                {unitTenants.map((t, i) => (
+                  <label key={i} className="flex items-center gap-3 px-3 py-2 border border-border rounded-lg hover:bg-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedTenants.has(i)}
+                      onChange={() => {
+                        const next = new Set(selectedTenants);
+                        if (next.has(i)) next.delete(i);
+                        else next.add(i);
+                        setSelectedTenants(next);
+                      }}
+                      className="rounded"
+                    />
+                    <div>
+                      <span className="text-sm font-medium">{t.name}</span>
+                      {t.email && <span className="text-xs text-muted-foreground ml-2">{t.email}</span>}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Documents */}
         <div className="bg-card rounded-xl border border-border p-5 space-y-3">
           <h2 className="font-semibold">Documents</h2>
           <button
             onClick={async () => {
               const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const pdfData = buildPdfData(activeInspection);
+              if (selectedTenantList.length > 0) {
+                pdfData.tenants = selectedTenantList;
+              }
               const letterPdf = generateDispositionLetterPDF(pdfData);
               downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
             }}
-            className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
+            disabled={unitTenants.length > 0 && selectedTenants.size === 0}
+            className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm disabled:opacity-50"
           >
-            <span className="font-medium">Download Disposition Letter</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">CA Civil Code 1950.5 — formal cover letter for tenant</span>
+            <span className="font-medium">Generate & Download Disposition Letter</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">
+              {selectedTenantList.length > 0
+                ? `Addressed to: ${selectedTenantList.map((t) => t.name).join(", ")}`
+                : "CA Civil Code 1950.5 — formal cover letter for tenant"}
+            </span>
           </button>
           {activeInspection.invoiceUrl && (
             <button
@@ -1087,13 +1110,15 @@ export default function MoveOutInspectionPage() {
               <span className="block text-xs text-muted-foreground mt-0.5">Detailed breakdown of all deductions with costs</span>
             </button>
           )}
-          {activeInspection.tenantEmail && (
+          {selectedEmails.length > 0 && (
             <a
-              href={`mailto:${activeInspection.tenantEmail}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${activeInspection.tenantName || "Tenant"},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
+              href={`mailto:${selectedEmails.join(",")}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${selectedTenantList.map((t) => t.name).join(", ")},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
               className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
             >
-              <span className="font-medium">Email to {activeInspection.tenantName || activeInspection.tenantEmail}</span>
-              <span className="block text-xs text-muted-foreground mt-0.5">Send disposition letter and statement via email</span>
+              <span className="font-medium">Send via Email</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">
+                To: {selectedEmails.join(", ")}
+              </span>
             </a>
           )}
         </div>

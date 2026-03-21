@@ -274,6 +274,41 @@ export async function fetchUnitsWithTenants(): Promise<{
   return { data: units, source: "appfolio" };
 }
 
+/**
+ * Fetch all tenants for a specific unit by matching UnitStreetAddress1.
+ * More reliable than name-based matching since it uses the address directly.
+ */
+export async function fetchTenantsForUnit(
+  unitAddress: string
+): Promise<{ name: string; email: string }[]> {
+  try {
+    const tenantRows = await afGetTenants();
+    if (!Array.isArray(tenantRows) || tenantRows.length === 0) return [];
+
+    const moxieTenants = filterToMoxie(tenantRows);
+    const normalizedAddress = unitAddress.trim().toLowerCase();
+
+    const matched: { name: string; email: string }[] = [];
+    for (const t of moxieTenants) {
+      const addr = String(
+        t.UnitStreetAddress1 || t["Unit Street Address 1"] || ""
+      ).trim().toLowerCase();
+      if (!addr || addr !== normalizedAddress) continue;
+
+      const name = String(t.TenantName || t.tenant_name || t.Name || "").trim();
+      const email = String(t.Email || t.TenantEmail || t.email || "").trim();
+      if (name && name !== "null") {
+        matched.push({ name, email: email && email !== "null" ? email : "" });
+      }
+    }
+
+    return matched;
+  } catch (err) {
+    console.error("[fetchTenantsForUnit] Error:", err);
+    return [];
+  }
+}
+
 // --- Leasing Stats ---
 export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   total: number;
