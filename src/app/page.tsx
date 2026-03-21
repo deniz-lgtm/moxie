@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import Link from "next/link";
 import {
   appCategories,
@@ -46,6 +44,7 @@ const iconMap: Record<string, LucideIcon> = {
 };
 
 const colorMap: Record<string, { border: string; bg: string; text: string; dot: string }> = {
+  red: { border: "border-t-red-500", bg: "bg-red-50", text: "text-red-600", dot: "bg-red-500" },
   blue: { border: "border-t-blue-500", bg: "bg-blue-50", text: "text-blue-600", dot: "bg-blue-500" },
   purple: { border: "border-t-purple-500", bg: "bg-purple-50", text: "text-purple-600", dot: "bg-purple-500" },
   emerald: { border: "border-t-emerald-500", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500" },
@@ -55,10 +54,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string; dot: 
 
 function applyLiveStats(appList: AppConfig[], stats: DashboardStats): AppConfig[] {
   const statMap: Record<string, string> = {
-    inspections: `${stats.activeInspections} active`,
-    "unit-turns": `${stats.upcomingTurns} in progress`,
     maintenance: `${stats.openMaintenanceRequests} open`,
-    "move-in-out": `${stats.upcomingMoveOuts} upcoming`,
     vendors: `${stats.vendorCount} vendors`,
     applications: `${stats.activeApplications} active`,
     tours: `${stats.upcomingTours} upcoming`,
@@ -146,11 +142,22 @@ function CategorySection({
   );
 }
 
+const DASHBOARD_TIMEOUT_MS = 5000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Dashboard stats timeout")), ms)
+    ),
+  ]);
+}
+
 export default async function Dashboard() {
   let stats: DashboardStats;
   let source: string = "mock";
   try {
-    const result = await fetchDashboardStats();
+    const result = await withTimeout(fetchDashboardStats(), DASHBOARD_TIMEOUT_MS);
     stats = result.data;
     source = result.source;
   } catch (e) {

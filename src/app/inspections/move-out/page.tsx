@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
+import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import type {
   Inspection,
@@ -51,6 +52,7 @@ export default function MoveOutInspectionPage() {
   const [selectedRoomIdx, setSelectedRoomIdx] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -260,6 +262,48 @@ export default function MoveOutInspectionPage() {
       saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
     };
     reader.readAsDataURL(file);
+  }
+
+  // Camera walk helpers
+  function toCameraRooms(rooms: InspectionRoom[]): CameraRoom[] {
+    return rooms.map((r) => ({
+      id: r.id,
+      name: r.name,
+      photos: r.items.flatMap((item) =>
+        item.photos.map((p) => ({ id: p.id, url: p.url, timestamp: p.createdAt }))
+      ),
+      notes: "",
+    }));
+  }
+
+  function handleCameraRoomsChange(cameraRooms: CameraRoom[]) {
+    if (!activeInspection) return;
+    // Merge camera photos back into rooms. Each room's photos go into a general "Photos" item.
+    const rooms = activeInspection.rooms.map((room, idx) => {
+      const cRoom = cameraRooms[idx];
+      if (!cRoom) return room;
+      // Collect existing photo IDs
+      const existingPhotoIds = new Set(room.items.flatMap((item) => item.photos.map((p) => p.id)));
+      // Find new photos from camera
+      const newPhotos = cRoom.photos.filter((p) => !existingPhotoIds.has(p.id));
+      if (newPhotos.length === 0) return room;
+      // Add new photos to first item (general photos bucket)
+      const items = [...room.items];
+      const firstItem = { ...items[0], photos: [...items[0].photos, ...newPhotos.map((p) => ({
+        id: p.id,
+        url: p.url,
+        aiAnalysis: null,
+        createdAt: p.timestamp,
+      }))] };
+      items[0] = firstItem;
+      return { ...room, items };
+    });
+    saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
+  }
+
+  function handleCameraComplete(cameraRooms: CameraRoom[]) {
+    handleCameraRoomsChange(cameraRooms);
+    setShowCamera(false);
   }
 
   async function endWalkAndAnalyze() {
@@ -657,6 +701,15 @@ export default function MoveOutInspectionPage() {
 
     return (
       <div className="space-y-6">
+        {showCamera && step === "walking" && (
+          <InspectionCamera
+            rooms={toCameraRooms(activeInspection.rooms)}
+            onRoomsChange={handleCameraRoomsChange}
+            onComplete={handleCameraComplete}
+            onCancel={() => setShowCamera(false)}
+            title={`Move-Out — ${activeInspection.unitNumber}`}
+          />
+        )}
         <div className="flex items-center justify-between">
           <div>
             <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
@@ -672,13 +725,21 @@ export default function MoveOutInspectionPage() {
           <div className="flex items-center gap-2">
             <StatusBadge value={activeInspection.status} />
             {step === "walking" && (
-              <button
-                onClick={endWalkAndAnalyze}
-                disabled={analyzing}
-                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 disabled:opacity-50"
-              >
-                {analyzing ? "Analyzing..." : "End Walk & Analyze"}
-              </button>
+              <>
+                <button
+                  onClick={() => setShowCamera(true)}
+                  className="px-4 py-2 bg-[#9d1535] text-white text-sm rounded-lg hover:bg-[#b91c42] flex items-center gap-1.5"
+                >
+                  📷 Camera Walk
+                </button>
+                <button
+                  onClick={endWalkAndAnalyze}
+                  disabled={analyzing}
+                  className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 disabled:opacity-50"
+                >
+                  {analyzing ? "Analyzing..." : "End Walk & Analyze"}
+                </button>
+              </>
             )}
             {step === "ai_review" && (
               <button
