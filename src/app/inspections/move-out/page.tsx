@@ -44,7 +44,7 @@ export default function MoveOutInspectionPage() {
   const [inspections, setInspections] = useState<Inspection[]>(() =>
     loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_out")
   );
-  const [units, setUnits] = useState<Unit[]>([]);
+  const [units, setUnits] = useState<(Unit & { tenants?: string[]; tenantEmails?: string[] })[]>([]);
   const [activeInspection, setActiveInspection] = useState<Inspection | null>(null);
   const [step, setStep] = useState<WizardStep>("select_unit");
   const [showList, setShowList] = useState(true);
@@ -63,11 +63,12 @@ export default function MoveOutInspectionPage() {
     scheduledDate: "",
     tenantName: "",
     tenantEmail: "",
+    tenantEmails: [] as string[],
     depositAmount: 0,
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch("/api/appfolio/units?withTenants=1")
       .then((r) => r.json())
       .then((d) => setUnits(d.units || []))
       .catch(() => {});
@@ -278,24 +279,48 @@ export default function MoveOutInspectionPage() {
 
   function handleCameraRoomsChange(cameraRooms: CameraRoom[]) {
     if (!activeInspection) return;
-    // Merge camera photos back into rooms. Each room's photos go into a general "Photos" item.
     const rooms = activeInspection.rooms.map((room, idx) => {
       const cRoom = cameraRooms[idx];
       if (!cRoom) return room;
-      // Collect existing photo IDs
       const existingPhotoIds = new Set(room.items.flatMap((item) => item.photos.map((p) => p.id)));
-      // Find new photos from camera
       const newPhotos = cRoom.photos.filter((p) => !existingPhotoIds.has(p.id));
       if (newPhotos.length === 0) return room;
-      // Add new photos to first item (general photos bucket)
+
       const items = [...room.items];
-      const firstItem = { ...items[0], photos: [...items[0].photos, ...newPhotos.map((p) => ({
-        id: p.id,
-        url: p.url,
-        aiAnalysis: null,
-        createdAt: p.timestamp,
-      }))] };
-      items[0] = firstItem;
+
+      // If photos have AI analysis, create new checklist items per detected issue
+      for (const photo of newPhotos) {
+        const ai = photo.aiAnalysis;
+        if (ai && ai.item) {
+          // Create a new checklist item from AI detection
+          const newItem: InspectionItem = {
+            id: newId(),
+            area: room.name,
+            item: ai.item,
+            condition: ai.condition as ConditionRating || "fair",
+            notes: ai.description,
+            photos: [{
+              id: photo.id,
+              url: photo.url,
+              aiAnalysis: ai.description,
+              createdAt: photo.timestamp,
+            }],
+            costEstimate: ai.estimatedCost || 0,
+            isDeduction: (ai.estimatedCost || 0) > 0,
+          };
+          items.push(newItem);
+        } else {
+          // No AI analysis — add photo to first item
+          const firstItem = { ...items[0], photos: [...items[0].photos, {
+            id: photo.id,
+            url: photo.url,
+            aiAnalysis: null,
+            createdAt: photo.timestamp,
+          }] };
+          items[0] = firstItem;
+        }
+      }
+
       return { ...room, items };
     });
     saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
@@ -373,49 +398,20 @@ export default function MoveOutInspectionPage() {
     setGeneratingPDF(true);
 
     try {
-      const { generateDepositDeductionPDF, downloadPDF } = await import("@/lib/pdf-invoice");
+      const { generateDepositDeductionPDF, generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
 
-      const pdfDataUri = generateDepositDeductionPDF({
-        inspection: {
-          ...activeInspection as any,
-          rooms: activeInspection.rooms.map((r) => ({
-            id: r.id,
-            name: r.name,
-            items: r.items.map((item) => ({
-              id: item.id,
-              name: item.item,
-              condition: item.condition || "fair",
-              notes: item.notes,
-              photos: item.photos.map((p) => ({
-                id: p.id,
-                url: p.url,
-                ai_analysis: p.aiAnalysis,
-                created_at: p.createdAt,
-              })),
-              cost_estimate: item.costEstimate,
-              is_deduction: item.isDeduction,
-            })),
-          })),
-          tenant_name: activeInspection.tenantName,
-          tenant_email: activeInspection.tenantEmail,
-          deposit_amount: activeInspection.depositAmount,
-          invoice_total: totalDeductions,
-        },
-        companyName: "Moxie Management",
-        companyAddress: "Los Angeles, CA",
-        companyPhone: "",
-        companyEmail: "",
-      });
+      const pdfData = buildPdfData(activeInspection);
+      const pdfDataUri = generateDepositDeductionPDF(pdfData);
 
       const totalDed = activeInspection.rooms
         .flatMap((r) => r.items)
         .filter((item) => item.isDeduction)
         .reduce((sum, item) => sum + item.costEstimate, 0);
 
-      downloadPDF(
-        pdfDataUri,
-        `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`
-      );
+      // Download both the deduction statement and disposition letter
+      downloadPDF(pdfDataUri, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+      const letterPdf = generateDispositionLetterPDF(pdfData);
+      downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
 
       saveInspection({
         ...activeInspection,
@@ -432,6 +428,45 @@ export default function MoveOutInspectionPage() {
     }
 
     setGeneratingPDF(false);
+  }
+
+  // Build PDF data structure from inspection
+  function buildPdfData(insp: Inspection) {
+    return {
+      inspection: {
+        ...insp as any,
+        unit_name: insp.unitNumber,
+        property_name: insp.propertyName,
+        rooms: insp.rooms.map((r) => ({
+          id: r.id,
+          name: r.name,
+          items: r.items.map((item) => ({
+            id: item.id,
+            name: item.item,
+            condition: item.condition || "fair",
+            notes: item.notes,
+            photos: item.photos.map((p) => ({
+              id: p.id,
+              url: p.url,
+              ai_analysis: p.aiAnalysis,
+              created_at: p.createdAt,
+            })),
+            cost_estimate: item.costEstimate,
+            is_deduction: item.isDeduction,
+          })),
+        })),
+        tenant_name: insp.tenantName,
+        tenant_email: insp.tenantEmail,
+        deposit_amount: insp.depositAmount,
+        scheduled_date: insp.scheduledDate,
+        completed_date: insp.completedDate,
+        inspector: insp.inspector,
+      },
+      companyName: "Moxie Management",
+      companyAddress: "Los Angeles, CA",
+      companyPhone: "",
+      companyEmail: "",
+    };
   }
 
   // Calculate totals
@@ -522,6 +557,8 @@ export default function MoveOutInspectionPage() {
   // ─── Step: Select Unit ────────────────────────────
 
   if (step === "select_unit") {
+    const selectedUnit = units.find((u) => u.id === newForm.unitId);
+
     return (
       <div className="space-y-6">
         <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
@@ -533,34 +570,58 @@ export default function MoveOutInspectionPage() {
           <h2 className="font-semibold">Step 1: Select Unit & Details</h2>
 
           <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Search Unit *</label>
-              <input
-                type="text"
-                placeholder="Type unit address..."
-                value={unitSearch}
-                onChange={(e) => setUnitSearch(e.target.value)}
+            <div className="md:col-span-2">
+              <label className="text-xs text-muted-foreground block mb-1">Select Unit *</label>
+              <select
+                value={newForm.unitId}
+                onChange={(e) => {
+                  const unit = units.find((u) => u.id === e.target.value);
+                  if (unit) {
+                    const allTenants = unit.tenants?.join(", ") || unit.tenant || "";
+                    const allEmails = unit.tenantEmails?.join(", ") || "";
+                    setNewForm({
+                      ...newForm,
+                      unitId: unit.id,
+                      tenantName: allTenants,
+                      tenantEmail: allEmails,
+                      tenantEmails: unit.tenantEmails || [],
+                    });
+                  } else {
+                    setNewForm({ ...newForm, unitId: "" });
+                  }
+                }}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              />
-              {unitSearch && filteredUnits.length > 0 && (
-                <div className="border border-border rounded-lg mt-1 max-h-48 overflow-y-auto bg-card">
-                  {filteredUnits.slice(0, 20).map((u) => (
-                    <button
-                      key={u.id}
-                      onClick={() => {
-                        setNewForm({ ...newForm, unitId: u.id, tenantName: u.tenant || "" });
-                        setUnitSearch(u.unitName);
-                      }}
-                      className={`w-full text-left px-3 py-2 text-sm hover:bg-muted border-b border-border last:border-0 ${
-                        newForm.unitId === u.id ? "bg-accent/10 font-medium" : ""
-                      }`}
-                    >
-                      {u.unitName} <span className="text-muted-foreground">— {u.tenant || "Vacant"}</span>
-                    </button>
+              >
+                <option value="">Select a unit...</option>
+                {units.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.unitName} — {u.tenants?.length ? u.tenants.join(", ") : u.tenant || "Vacant"} ({u.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Show tenant details when unit is selected */}
+            {selectedUnit && (selectedUnit.tenants?.length || 0) > 1 && (
+              <div className="md:col-span-2 bg-blue-50 rounded-lg border border-blue-200 p-3">
+                <p className="text-xs font-medium text-blue-800 mb-1">
+                  {selectedUnit.tenants!.length} tenants on this unit
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedUnit.tenants!.map((t, i) => (
+                    <span key={i} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                      {t}
+                      {selectedUnit.tenantEmails?.[i] && (
+                        <span className="text-blue-500 ml-1">({selectedUnit.tenantEmails[i]})</span>
+                      )}
+                    </span>
                   ))}
                 </div>
-              )}
-            </div>
+                <p className="text-[10px] text-blue-600 mt-1">
+                  Disposition letter will be addressed to all tenants
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Inspector *</label>
@@ -584,24 +645,30 @@ export default function MoveOutInspectionPage() {
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Tenant Name</label>
+              <label className="text-xs text-muted-foreground block mb-1">Tenant Name(s)</label>
               <input
                 type="text"
                 value={newForm.tenantName}
                 onChange={(e) => setNewForm({ ...newForm, tenantName: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                placeholder="Auto-populated from unit selection"
               />
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Tenant Email</label>
+              <label className="text-xs text-muted-foreground block mb-1">Tenant Email(s)</label>
               <input
-                type="email"
-                placeholder="For sending invoice"
+                type="text"
+                placeholder="For sending disposition letter"
                 value={newForm.tenantEmail}
                 onChange={(e) => setNewForm({ ...newForm, tenantEmail: e.target.value })}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
+              {newForm.tenantEmails.length > 1 && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Multiple emails — all will receive the disposition letter
+                </p>
+              )}
             </div>
 
             <div>
@@ -708,6 +775,7 @@ export default function MoveOutInspectionPage() {
             onComplete={handleCameraComplete}
             onCancel={() => setShowCamera(false)}
             title={`Move-Out — ${activeInspection.unitNumber}`}
+            enableAiAnalysis={true}
           />
         )}
         <div className="flex items-center justify-between">
@@ -991,7 +1059,19 @@ export default function MoveOutInspectionPage() {
         </div>
 
         <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-          <h2 className="font-semibold">Actions</h2>
+          <h2 className="font-semibold">Documents</h2>
+          <button
+            onClick={async () => {
+              const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
+              const pdfData = buildPdfData(activeInspection);
+              const letterPdf = generateDispositionLetterPDF(pdfData);
+              downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+            }}
+            className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
+          >
+            <span className="font-medium">Download Disposition Letter</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">CA Civil Code 1950.5 — formal cover letter for tenant</span>
+          </button>
           {activeInspection.invoiceUrl && (
             <button
               onClick={async () => {
@@ -1003,15 +1083,17 @@ export default function MoveOutInspectionPage() {
               }}
               className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
             >
-              Download PDF Invoice
+              <span className="font-medium">Download Itemized Deduction Statement</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Detailed breakdown of all deductions with costs</span>
             </button>
           )}
           {activeInspection.tenantEmail && (
             <a
-              href={`mailto:${activeInspection.tenantEmail}?subject=Move-Out Inspection - ${activeInspection.unitNumber}&body=Please find your itemized deposit deduction statement attached.`}
+              href={`mailto:${activeInspection.tenantEmail}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${activeInspection.tenantName || "Tenant"},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
               className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
             >
-              Email to {activeInspection.tenantName || activeInspection.tenantEmail}
+              <span className="font-medium">Email to {activeInspection.tenantName || activeInspection.tenantEmail}</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Send disposition letter and statement via email</span>
             </a>
           )}
         </div>

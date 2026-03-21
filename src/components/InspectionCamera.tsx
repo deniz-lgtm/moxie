@@ -1,12 +1,18 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw } from "lucide-react";
+import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2 } from "lucide-react";
 
 export interface CameraPhoto {
   id: string;
   url: string;
   timestamp: string;
+  aiAnalysis?: {
+    item: string;
+    condition: string;
+    description: string;
+    estimatedCost: number;
+  } | null;
 }
 
 export interface CameraRoom {
@@ -24,6 +30,7 @@ interface InspectionCameraProps {
   title?: string;
   allowAddRoom?: boolean;
   showNotes?: boolean;
+  enableAiAnalysis?: boolean;
 }
 
 function newId() {
@@ -43,20 +50,32 @@ export function InspectionCamera({
   title = "Inspection Walk",
   allowAddRoom = true,
   showNotes = true,
+  enableAiAnalysis = false,
 }: InspectionCameraProps) {
   const [currentRoomIdx, setCurrentRoomIdx] = useState(0);
   const [isCapturing, setIsCapturing] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [showAddRoom, setShowAddRoom] = useState(false);
+  const [analyzingCount, setAnalyzingCount] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Track pending stream so we can assign it after video element renders
+  const pendingStreamRef = useRef<MediaStream | null>(null);
 
   const currentRoom = rooms[currentRoomIdx];
   const isLastRoom = currentRoomIdx === rooms.length - 1;
   const isFirstRoom = currentRoomIdx === 0;
   const totalPhotos = rooms.reduce((sum, r) => sum + r.photos.length, 0);
+
+  // When isCapturing becomes true and we have a pending stream, assign it to the video element
+  useEffect(() => {
+    if (isCapturing && pendingStreamRef.current && videoRef.current) {
+      videoRef.current.srcObject = pendingStreamRef.current;
+      pendingStreamRef.current = null;
+    }
+  }, [isCapturing]);
 
   // Start camera
   const startCamera = useCallback(async () => {
@@ -65,9 +84,8 @@ export function InspectionCamera({
         video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      // Store stream and set capturing — the useEffect above will assign srcObject after render
+      pendingStreamRef.current = stream;
       setIsCapturing(true);
     } catch {
       // Camera not available — fall back to file upload
@@ -81,6 +99,7 @@ export function InspectionCamera({
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    pendingStreamRef.current = null;
     setIsCapturing(false);
   }, []);
 
@@ -92,6 +111,30 @@ export function InspectionCamera({
       }
     };
   }, []);
+
+  // AI analysis for a photo
+  async function analyzePhotoWithAI(photoUrl: string, roomName: string): Promise<CameraPhoto["aiAnalysis"]> {
+    try {
+      const res = await fetch("/api/inspections/analyze-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoBase64: photoUrl, roomName, itemName: "auto-detect" }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.condition) {
+        return {
+          item: data.detected_item || `${roomName} - Detected Issue`,
+          condition: data.condition,
+          description: data.description || "",
+          estimatedCost: data.total_estimated_cost || 0,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
 
   // Capture photo from camera
   function capturePhoto() {
@@ -107,7 +150,7 @@ export function InspectionCamera({
     addPhotoToRoom(dataUrl);
   }
 
-  // Handle file upload
+  // Handle file upload (gallery picker, no camera)
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length || !currentRoom) return;
     Array.from(e.target.files).forEach((file) => {
@@ -121,15 +164,38 @@ export function InspectionCamera({
   }
 
   function addPhotoToRoom(url: string) {
+    const photoId = newId();
     const photo: CameraPhoto = {
-      id: newId(),
+      id: photoId,
       url,
       timestamp: new Date().toISOString(),
+      aiAnalysis: null,
     };
     const updated = rooms.map((r, i) =>
       i === currentRoomIdx ? { ...r, photos: [...r.photos, photo] } : r
     );
     onRoomsChange(updated);
+
+    // Run AI analysis in background if enabled
+    if (enableAiAnalysis && currentRoom) {
+      setAnalyzingCount((c) => c + 1);
+      analyzePhotoWithAI(url, currentRoom.name).then((analysis) => {
+        setAnalyzingCount((c) => c - 1);
+        if (analysis) {
+          // Update the photo with AI analysis — use functional update pattern via onRoomsChange
+          onRoomsChange(
+            rooms.map((r, i) =>
+              i === currentRoomIdx
+                ? {
+                    ...r,
+                    photos: [...r.photos.filter((p) => p.id !== photoId), { ...photo, aiAnalysis: analysis }],
+                  }
+                : r
+            )
+          );
+        }
+      });
+    }
   }
 
   function removePhoto(photoId: string) {
@@ -173,7 +239,7 @@ export function InspectionCamera({
     onRoomsChange([...rooms, newRoom]);
     setNewRoomName("");
     setShowAddRoom(false);
-    setCurrentRoomIdx(rooms.length); // navigate to the new room
+    setCurrentRoomIdx(rooms.length);
   }
 
   if (!currentRoom) return null;
@@ -182,11 +248,11 @@ export function InspectionCamera({
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       {/* Hidden elements */}
       <canvas ref={canvasRef} className="hidden" />
+      {/* File input WITHOUT capture attribute — opens gallery/file picker */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         multiple
         onChange={handleFileUpload}
         className="hidden"
@@ -204,6 +270,12 @@ export function InspectionCamera({
           <p className="text-xs text-white/60 uppercase tracking-wider">{title}</p>
           <p className="text-xs text-white/40">
             Room {currentRoomIdx + 1} of {rooms.length} &middot; {totalPhotos} total photos
+            {analyzingCount > 0 && (
+              <span className="ml-2 text-yellow-400">
+                <Loader2 size={10} className="inline animate-spin mr-1" />
+                Analyzing {analyzingCount}...
+              </span>
+            )}
           </p>
         </div>
         <button
@@ -225,13 +297,41 @@ export function InspectionCamera({
       {/* Camera viewfinder / Photo area */}
       <div className="flex-1 relative overflow-hidden">
         {isCapturing ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            {/* Capture button overlay */}
+            <div className="absolute bottom-6 left-0 right-0 flex items-center justify-center gap-6">
+              {/* Photo count badge */}
+              {currentRoom.photos.length > 0 && (
+                <button
+                  onClick={stopCamera}
+                  className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-white text-sm font-bold border border-white/30"
+                >
+                  {currentRoom.photos.length}
+                </button>
+              )}
+              {/* Shutter button */}
+              <button
+                onClick={capturePhoto}
+                className="w-20 h-20 rounded-full border-4 border-white bg-white/20 hover:bg-white/30 active:scale-95 transition-all flex items-center justify-center"
+              >
+                <div className="w-14 h-14 rounded-full bg-white" />
+              </button>
+              {/* Flip to gallery */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center border border-white/30"
+              >
+                <Image size={18} className="text-white" />
+              </button>
+            </div>
+          </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 gap-4 px-6">
             {/* Photo thumbnails grid */}
@@ -247,9 +347,17 @@ export function InspectionCamera({
                       >
                         <X size={12} className="text-white" />
                       </button>
-                      <span className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">
-                        {new Date(photo.timestamp).toLocaleTimeString()}
-                      </span>
+                      {photo.aiAnalysis && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-white text-[10px] px-1.5 py-1">
+                          <p className="font-medium truncate">{photo.aiAnalysis.item}</p>
+                          <p className="text-yellow-300">{photo.aiAnalysis.condition} {photo.aiAnalysis.estimatedCost > 0 ? `· $${photo.aiAnalysis.estimatedCost}` : ""}</p>
+                        </div>
+                      )}
+                      {!photo.aiAnalysis && (
+                        <span className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">
+                          {new Date(photo.timestamp).toLocaleTimeString()}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -263,22 +371,10 @@ export function InspectionCamera({
             )}
           </div>
         )}
-
-        {/* Camera capture button overlay (when camera is active) */}
-        {isCapturing && (
-          <div className="absolute bottom-6 left-0 right-0 flex justify-center">
-            <button
-              onClick={capturePhoto}
-              className="w-20 h-20 rounded-full border-4 border-white bg-white/20 hover:bg-white/30 active:scale-95 transition-all flex items-center justify-center"
-            >
-              <div className="w-14 h-14 rounded-full bg-white" />
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Notes area */}
-      {showNotes && (
+      {showNotes && !isCapturing && (
         <div className="bg-gray-900 px-4 py-2 border-t border-white/10">
           <input
             type="text"
@@ -292,32 +388,23 @@ export function InspectionCamera({
 
       {/* Bottom controls */}
       <div className="bg-black/90 backdrop-blur-sm px-4 py-4 space-y-3">
-        {/* Camera / Upload buttons */}
-        <div className="flex items-center justify-center gap-4">
-          {isCapturing ? (
+        {/* Camera / Upload buttons — only show when not capturing */}
+        {!isCapturing && (
+          <div className="flex items-center justify-center gap-4">
             <button
-              onClick={stopCamera}
-              className="flex items-center gap-2 px-4 py-2 bg-white/10 text-white rounded-lg text-sm hover:bg-white/20"
+              onClick={startCamera}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#9d1535] text-white rounded-lg text-sm font-medium hover:bg-[#b91c42] transition-colors"
             >
-              <RotateCcw size={16} /> View Photos
+              <Camera size={18} /> Open Camera
             </button>
-          ) : (
-            <>
-              <button
-                onClick={startCamera}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#9d1535] text-white rounded-lg text-sm font-medium hover:bg-[#b91c42] transition-colors"
-              >
-                <Camera size={18} /> Open Camera
-              </button>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-white/10 text-white rounded-lg text-sm hover:bg-white/20"
-              >
-                <Image size={18} /> Upload
-              </button>
-            </>
-          )}
-        </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white/10 text-white rounded-lg text-sm hover:bg-white/20"
+            >
+              <Image size={18} /> Upload Photos
+            </button>
+          </div>
+        )}
 
         {/* Navigation */}
         <div className="flex items-center justify-between">
@@ -329,7 +416,7 @@ export function InspectionCamera({
             <ChevronLeft size={18} /> Previous Room
           </button>
 
-          {allowAddRoom && (
+          {allowAddRoom && !isCapturing && (
             <div className="flex items-center">
               {showAddRoom ? (
                 <div className="flex items-center gap-1">

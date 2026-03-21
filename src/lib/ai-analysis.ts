@@ -16,6 +16,7 @@ export type PhotoAnalysisResult = {
   condition: "excellent" | "good" | "fair" | "poor" | "damaged";
   damage_items: { item: string; estimated_cost: number; description: string }[];
   total_estimated_cost: number;
+  detected_item?: string;
 };
 
 /**
@@ -60,7 +61,30 @@ export async function analyzePhoto(
             },
             {
               type: "text",
-              text: `You are inspecting a rental unit for move-out. This photo is from the "${roomName}" area, specifically the "${itemName}" item.
+              text: itemName === "auto-detect"
+                ? `You are inspecting a rental property. This photo is from the "${roomName}" area.
+
+Auto-detect what this photo shows. Identify the main item/feature visible (e.g., "Wall condition", "Flooring", "Kitchen appliances", "Bathroom fixtures", "Ceiling", "Window", "Door", "HVAC unit", "Water heater", "Fire extinguisher", "Electrical panel", etc.).
+
+Analyze and provide:
+1. What the photo shows (detected_item)
+2. A brief description of condition
+3. Condition rating: excellent, good, fair, poor, or damaged
+4. Any damage or issues that need repair, with estimated costs in USD (Los Angeles market rates)
+
+Respond in this exact JSON format:
+{
+  "detected_item": "Wall condition",
+  "description": "Brief description of what you see",
+  "condition": "good",
+  "damage_items": [
+    {"item": "Wall hole repair", "estimated_cost": 75, "description": "Small hole in drywall near door"}
+  ],
+  "total_estimated_cost": 75
+}
+
+If no damage, return empty damage_items array and 0 total. Be fair — only flag genuine damage beyond normal wear and tear per California Civil Code 1950.5.`
+                : `You are inspecting a rental unit for move-out. This photo is from the "${roomName}" area, specifically the "${itemName}" item.
 
 Analyze this photo and provide:
 1. A brief description of what you see
@@ -69,6 +93,7 @@ Analyze this photo and provide:
 
 Respond in this exact JSON format:
 {
+  "detected_item": "${itemName}",
   "description": "Brief description",
   "condition": "good",
   "damage_items": [

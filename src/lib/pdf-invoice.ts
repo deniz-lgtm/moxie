@@ -254,6 +254,217 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
 }
 
 /**
+ * Generate a California Security Deposit Disposition Letter.
+ * This is the formal cover letter required by CA Civil Code 1950.5
+ * that accompanies the itemized statement of deductions.
+ * Must be sent within 21 calendar days of tenant vacating.
+ */
+export function generateDispositionLetterPDF(data: InvoiceData): string {
+  const { inspection } = data;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  let y = 25;
+
+  const depositAmount = inspection.deposit_amount || 0;
+  const allRooms: DbRoom[] = inspection.rooms || [];
+  let totalDeductions = 0;
+  for (const room of allRooms) {
+    for (const item of room.items) {
+      if (item.is_deduction && item.cost_estimate > 0) {
+        totalDeductions += item.cost_estimate;
+      }
+    }
+  }
+  const refundAmount = Math.max(0, depositAmount - totalDeductions);
+  const amountOwed = Math.max(0, totalDeductions - depositAmount);
+
+  function addText(text: string, x: number, fontSize: number, style: "normal" | "bold" = "normal") {
+    doc.setFontSize(fontSize);
+    doc.setFont("helvetica", style);
+    doc.text(text, x, y);
+  }
+
+  function addWrapped(text: string, x: number, fontSize: number, maxWidth: number) {
+    doc.setFontSize(fontSize);
+    doc.setFont("helvetica", "normal");
+    const lines = doc.splitTextToSize(text, maxWidth);
+    for (const line of lines) {
+      doc.text(line, x, y);
+      y += fontSize * 0.5;
+    }
+  }
+
+  // Company letterhead
+  addText(data.companyName, margin, 16, "bold");
+  y += 6;
+  addText(data.companyAddress, margin, 9);
+  y += 4;
+  if (data.companyPhone || data.companyEmail) {
+    addText([data.companyPhone, data.companyEmail].filter(Boolean).join("  |  "), margin, 9);
+    y += 4;
+  }
+  y += 8;
+
+  // Date
+  const today = new Date();
+  addText(today.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }), margin, 10);
+  y += 10;
+
+  // Recipient
+  addText("SENT VIA FIRST-CLASS MAIL AND EMAIL", margin, 9, "bold");
+  y += 8;
+  addText(inspection.tenant_name || "Tenant", margin, 10);
+  y += 5;
+  if (inspection.tenant_email) {
+    addText(inspection.tenant_email, margin, 9);
+    y += 5;
+  }
+  addText(inspection.unit_name, margin, 9);
+  y += 5;
+  addText(inspection.property_name, margin, 9);
+  y += 10;
+
+  // Subject line
+  addText("RE: SECURITY DEPOSIT DISPOSITION", margin, 12, "bold");
+  y += 5;
+  addText(`Unit: ${inspection.unit_name}`, margin, 10);
+  y += 5;
+  const moveOutDate = inspection.completed_date || inspection.scheduled_date || "N/A";
+  addText(`Move-Out Date: ${moveOutDate}`, margin, 10);
+  y += 10;
+
+  // Body
+  addText(`Dear ${inspection.tenant_name || "Tenant"},`, margin, 10);
+  y += 8;
+
+  const contentWidth = pageWidth - margin * 2;
+
+  addWrapped(
+    `This letter serves as your Security Deposit Disposition Statement pursuant to California Civil Code Section 1950.5. ` +
+    `This statement is being provided within 21 calendar days of your vacating the premises at ${inspection.unit_name}.`,
+    margin, 10, contentWidth
+  );
+  y += 4;
+
+  addWrapped(
+    `Your security deposit of $${depositAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been applied as follows:`,
+    margin, 10, contentWidth
+  );
+  y += 6;
+
+  // Summary box
+  doc.setDrawColor(180, 180, 180);
+  doc.setFillColor(248, 248, 248);
+  doc.rect(margin, y - 3, contentWidth, 32, "FD");
+
+  y += 4;
+  addText("Security Deposit Held:", margin + 5, 10);
+  addText(`$${depositAmount.toFixed(2)}`, pageWidth - margin - 5, 10, "bold");
+  doc.text(`$${depositAmount.toFixed(2)}`, pageWidth - margin - 5, y, { align: "right" });
+  y += 7;
+  addText("Total Itemized Deductions:", margin + 5, 10);
+  doc.setFont("helvetica", "bold");
+  doc.text(`($${totalDeductions.toFixed(2)})`, pageWidth - margin - 5, y, { align: "right" });
+  y += 7;
+
+  doc.setDrawColor(100, 100, 100);
+  doc.line(margin + 5, y - 3, pageWidth - margin - 5, y - 3);
+
+  if (refundAmount > 0) {
+    addText("REFUND DUE TO TENANT:", margin + 5, 11, "bold");
+    doc.text(`$${refundAmount.toFixed(2)}`, pageWidth - margin - 5, y, { align: "right" });
+  } else if (amountOwed > 0) {
+    addText("BALANCE DUE FROM TENANT:", margin + 5, 11, "bold");
+    doc.text(`$${amountOwed.toFixed(2)}`, pageWidth - margin - 5, y, { align: "right" });
+  } else {
+    addText("DEPOSIT FULLY APPLIED:", margin + 5, 11, "bold");
+    doc.text("$0.00", pageWidth - margin - 5, y, { align: "right" });
+  }
+  y += 14;
+
+  // Refund/balance paragraph
+  if (refundAmount > 0) {
+    addWrapped(
+      `A refund check in the amount of $${refundAmount.toFixed(2)} is enclosed with this letter. ` +
+      `Please deposit or cash this check within 180 days.`,
+      margin, 10, contentWidth
+    );
+  } else if (amountOwed > 0) {
+    addWrapped(
+      `The deductions exceed your security deposit by $${amountOwed.toFixed(2)}. ` +
+      `Please remit payment for this balance within 30 days to avoid further action.`,
+      margin, 10, contentWidth
+    );
+  }
+  y += 4;
+
+  addWrapped(
+    `An itemized statement of deductions with detailed descriptions is attached. ` +
+    `Photographs documenting the condition of the unit at move-out are available upon request.`,
+    margin, 10, contentWidth
+  );
+  y += 4;
+
+  // Legal rights
+  addText("YOUR RIGHTS UNDER CALIFORNIA LAW:", margin, 10, "bold");
+  y += 6;
+
+  const rights = [
+    "You have the right to request copies of receipts for any deduction exceeding $125.00.",
+    "If any deductions are based on estimated costs, you will receive an amended statement with actual costs and receipts within 14 calendar days of the completion of repairs.",
+    "You have the right to dispute any deductions you believe are incorrect or constitute normal wear and tear.",
+    "If you believe your deposit has been wrongfully withheld, you may pursue remedies under California Civil Code Section 1950.5, which may include recovery of up to twice the amount of the security deposit in addition to actual damages.",
+  ];
+
+  for (const right of rights) {
+    addWrapped(`• ${right}`, margin + 5, 9, contentWidth - 10);
+    y += 2;
+  }
+
+  y += 6;
+
+  addWrapped(
+    `If you have any questions regarding this disposition, please contact our office at the information listed above.`,
+    margin, 10, contentWidth
+  );
+  y += 8;
+
+  addText("Sincerely,", margin, 10);
+  y += 15;
+  addText("____________________________", margin, 10);
+  y += 5;
+  addText(data.companyName, margin, 10);
+  y += 5;
+  addText(`Inspector: ${inspection.inspector || ""}`, margin, 9);
+  y += 10;
+
+  // Enclosure note
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text("Enclosures:", margin, y);
+  y += 4;
+  doc.text("1. Itemized Statement of Security Deposit Deductions", margin + 5, y);
+  y += 4;
+  if (refundAmount > 0) {
+    doc.text(`2. Refund check in the amount of $${refundAmount.toFixed(2)}`, margin + 5, y);
+  }
+
+  // Footer
+  doc.setFontSize(7);
+  doc.setTextColor(150, 150, 150);
+  doc.text(
+    `${data.companyName} — Security Deposit Disposition Letter — CA Civil Code §1950.5`,
+    pageWidth / 2,
+    doc.internal.pageSize.getHeight() - 10,
+    { align: "center" }
+  );
+  doc.setTextColor(0, 0, 0);
+
+  return doc.output("datauristring");
+}
+
+/**
  * Trigger PDF download in the browser.
  */
 export function downloadPDF(dataUri: string, filename: string) {

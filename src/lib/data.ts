@@ -187,6 +187,93 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
   return { data: units, source: "appfolio" };
 }
 
+/**
+ * Fetch units with all tenants grouped per unit.
+ * The rent roll may have multiple rows per unit (one per tenant on the lease).
+ * This function deduplicates by UnitId/UnitStreetAddress1 and groups all tenants.
+ */
+export async function fetchUnitsWithTenants(): Promise<{
+  data: (Unit & { tenants: string[]; tenantEmails: string[] })[];
+  source: "appfolio";
+}> {
+  const rentRollRows = await afGetRentRoll();
+  if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
+    return { data: [], source: "appfolio" };
+  }
+
+  const filtered = filterToMoxie(rentRollRows);
+
+  // Group rows by unit key (UnitId or UnitStreetAddress1)
+  const unitMap = new Map<string, { unit: any; tenants: string[] }>();
+
+  for (const r of filtered) {
+    const unitKey = String(r.UnitId || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.Unit || "");
+    const tenant = String(r.Tenant || "").trim();
+
+    if (!unitMap.has(unitKey)) {
+      unitMap.set(unitKey, { unit: r, tenants: [] });
+    }
+    if (tenant && tenant !== "null" && tenant !== "undefined") {
+      unitMap.get(unitKey)!.tenants.push(tenant);
+    }
+  }
+
+  // Also fetch tenant directory for emails
+  let tenantEmailMap = new Map<string, string>();
+  try {
+    const tenantRows = await afGetTenants();
+    const moxieTenants = filterToMoxie(tenantRows || []);
+    for (const t of moxieTenants) {
+      const name = String(t.TenantName || t.tenant_name || t.Name || "").trim();
+      const email = String(t.Email || t.TenantEmail || t.email || "").trim();
+      if (name && email && email !== "null") {
+        tenantEmailMap.set(name.toLowerCase(), email);
+      }
+    }
+  } catch {
+    // Tenant email lookup is best-effort
+  }
+
+  const units: (Unit & { tenants: string[]; tenantEmails: string[] })[] = [];
+
+  for (const [, { unit: r, tenants }] of unitMap) {
+    const unitName = String(r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.UnitAddress || r.Unit || "");
+    const unitNum = String(r.Unit || r.UnitName || "");
+    const propName = String(r.PropertyName || "");
+    const { bed, bath } = parseBdBa(r.BdBa);
+    const rawStatus = String(r.Status || "").toLowerCase();
+    const status = (["current", "vacant", "notice", "future"].includes(rawStatus)
+      ? rawStatus
+      : "vacant") as Unit["status"];
+
+    const tenantEmails = tenants
+      .map((t) => tenantEmailMap.get(t.toLowerCase()) || "")
+      .filter(Boolean);
+
+    units.push({
+      id: String(r.UnitId || ""),
+      propertyId: String(r.PropertyId || ""),
+      propertyName: propName,
+      number: unitNum,
+      unitName,
+      displayName: unitName || `${propName} #${unitNum}`,
+      bedrooms: bed,
+      bathrooms: bath,
+      sqft: parseSqft(r.SquareFt),
+      rent: r.Rent || null,
+      status,
+      tenant: tenants.length > 0 ? tenants.join(", ") : null,
+      tenants,
+      tenantEmails,
+      leaseFrom: r.LeaseFrom || null,
+      leaseTo: r.LeaseTo || null,
+      appfolioId: r.UnitId ? String(r.UnitId) : undefined,
+    });
+  }
+
+  return { data: units, source: "appfolio" };
+}
+
 // --- Leasing Stats ---
 export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   total: number;
