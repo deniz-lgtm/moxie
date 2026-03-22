@@ -1,3 +1,6 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   appCategories,
@@ -5,8 +8,8 @@ import {
   getAppsForRole,
   getAppsByCategory,
 } from "@/lib/mock-data";
-import { fetchDashboardStats } from "@/lib/data";
-import type { AppConfig, DashboardStats } from "@/lib/types";
+import { AcademicYearSelector } from "@/components/AcademicYearSelector";
+import type { AppConfig, DashboardStats, AcademicYear } from "@/lib/types";
 import {
   ClipboardCheck,
   RefreshCw,
@@ -52,6 +55,27 @@ const colorMap: Record<string, { border: string; bg: string; text: string; dot: 
   rose: { border: "border-l-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500", iconBg: "bg-rose-100" },
 };
 
+const defaultStats: DashboardStats = {
+  totalUnits: 0,
+  occupiedUnits: 0,
+  vacantUnits: 0,
+  turningUnits: 0,
+  preLeasedUnits: 0,
+  openMaintenanceRequests: 0,
+  activeInspections: 0,
+  upcomingTurns: 0,
+  activeApplications: 0,
+  upcomingTours: 0,
+  upcomingMoveOuts: 0,
+  vendorCount: 0,
+  pendingRubs: "—",
+  reportsDue: 0,
+  activeCapitalProjects: 0,
+  pendingNotices: 0,
+  trackedComps: 0,
+  recurringIssues: 0,
+};
+
 function applyLiveStats(appList: AppConfig[], stats: DashboardStats): AppConfig[] {
   const statMap: Record<string, string> = {
     maintenance: `${stats.openMaintenanceRequests} open`,
@@ -85,7 +109,6 @@ function AppCard({ app }: { app: AppConfig }) {
       }`}
       style={{ boxShadow: "var(--shadow-sm)" }}
     >
-      {/* Subtle accent line at top */}
       <div className={`absolute top-0 left-0 right-0 h-0.5 ${colors.dot} opacity-60`} />
 
       <div className="flex items-start justify-between">
@@ -149,47 +172,38 @@ function CategorySection({
   );
 }
 
-const DASHBOARD_TIMEOUT_MS = 5000;
+export default function Dashboard() {
+  const [academicYear, setAcademicYear] = useState<AcademicYear>("2026-2027");
+  const [stats, setStats] = useState<DashboardStats>(defaultStats);
+  const [source, setSource] = useState<string>("mock");
+  const [loading, setLoading] = useState(true);
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Dashboard stats timeout")), ms)
-    ),
-  ]);
-}
+  useEffect(() => {
+    setLoading(true);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
 
-export default async function Dashboard() {
-  let stats: DashboardStats;
-  let source: string = "mock";
-  try {
-    const result = await withTimeout(fetchDashboardStats(), DASHBOARD_TIMEOUT_MS);
-    stats = result.data;
-    source = result.source;
-  } catch (e) {
-    console.error("Dashboard stats fetch failed, using defaults:", e);
-    stats = {
-      totalUnits: 0,
-      occupiedUnits: 0,
-      vacantUnits: 0,
-      turningUnits: 0,
-      preLeasedUnits: 0,
-      openMaintenanceRequests: 0,
-      activeInspections: 0,
-      upcomingTurns: 0,
-      activeApplications: 0,
-      upcomingTours: 0,
-      upcomingMoveOuts: 0,
-      vendorCount: 0,
-      pendingRubs: "—",
-      reportsDue: 0,
-      activeCapitalProjects: 0,
-      pendingNotices: 0,
-      trackedComps: 0,
-      recurringIssues: 0,
+    fetch(`/api/appfolio/dashboard?academicYear=${academicYear}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.stats) {
+          setStats(d.stats);
+          setSource(d.source || "appfolio");
+        }
+      })
+      .catch(() => {
+        // Keep previous stats or defaults
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        setLoading(false);
+      });
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
     };
-  }
+  }, [academicYear]);
 
   const rawApps = getAppsForRole(currentUserRole);
   const visibleApps = applyLiveStats(rawApps, stats);
@@ -205,22 +219,30 @@ export default async function Dashboard() {
     ? Math.round((stats.occupiedUnits / stats.totalUnits) * 100)
     : 0;
 
+  const yearLabel = `${academicYear.split("-")[0]}–${academicYear.split("-")[1].slice(2)}`;
+
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-          {source === "appfolio" && (
-            <span className="inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full bg-green-50 text-green-700 font-semibold border border-green-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse-dot" />
-              Live
-            </span>
-          )}
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+            {source === "appfolio" && !loading && (
+              <span className="inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full bg-green-50 text-green-700 font-semibold border border-green-100">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse-dot" />
+                Live
+              </span>
+            )}
+            {loading && (
+              <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            {yearLabel} Lease Year &middot; Leases starting Aug 15
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground mt-1">
-          Your property management command center
-        </p>
+        <AcademicYearSelector value={academicYear} onChange={setAcademicYear} />
       </div>
 
       {/* Stats Cards */}
@@ -238,7 +260,7 @@ export default async function Dashboard() {
         <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Unleased</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-amber-600">{stats.vacantUnits}</p>
-          <p className="text-xs text-muted-foreground mt-1">2026–27 lease year</p>
+          <p className="text-xs text-muted-foreground mt-1">{yearLabel} lease year</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Maintenance</p>
