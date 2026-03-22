@@ -2,83 +2,83 @@
 
 const colorMap: Record<string, string> = {
   // Inspection statuses
-  scheduled: "bg-blue-100 text-blue-800",
-  in_progress: "bg-yellow-100 text-yellow-800",
-  completed: "bg-green-100 text-green-800",
-  needs_review: "bg-orange-100 text-orange-800",
+  scheduled: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  in_progress: "bg-yellow-50 text-yellow-700 ring-yellow-600/10",
+  completed: "bg-green-50 text-green-700 ring-green-600/10",
+  needs_review: "bg-orange-50 text-orange-700 ring-orange-600/10",
   // Turn statuses
-  pending: "bg-slate-100 text-slate-700",
+  pending: "bg-slate-50 text-slate-600 ring-slate-500/10",
   // Maintenance statuses
-  submitted: "bg-blue-100 text-blue-800",
-  assigned: "bg-purple-100 text-purple-800",
-  awaiting_parts: "bg-orange-100 text-orange-800",
-  closed: "bg-slate-100 text-slate-600",
+  submitted: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  assigned: "bg-purple-50 text-purple-700 ring-purple-600/10",
+  awaiting_parts: "bg-orange-50 text-orange-700 ring-orange-600/10",
+  closed: "bg-slate-50 text-slate-500 ring-slate-500/10",
   // Priority
-  emergency: "bg-red-100 text-red-800",
-  high: "bg-orange-100 text-orange-800",
-  medium: "bg-yellow-100 text-yellow-800",
-  low: "bg-slate-100 text-slate-600",
+  emergency: "bg-red-50 text-red-700 ring-red-600/10",
+  high: "bg-orange-50 text-orange-700 ring-orange-600/10",
+  medium: "bg-yellow-50 text-yellow-700 ring-yellow-600/10",
+  low: "bg-slate-50 text-slate-500 ring-slate-500/10",
   // Condition
-  excellent: "bg-green-100 text-green-800",
-  good: "bg-emerald-100 text-emerald-700",
-  fair: "bg-yellow-100 text-yellow-800",
-  poor: "bg-orange-100 text-orange-800",
-  damaged: "bg-red-100 text-red-800",
+  excellent: "bg-green-50 text-green-700 ring-green-600/10",
+  good: "bg-emerald-50 text-emerald-700 ring-emerald-600/10",
+  fair: "bg-yellow-50 text-yellow-700 ring-yellow-600/10",
+  poor: "bg-orange-50 text-orange-700 ring-orange-600/10",
+  damaged: "bg-red-50 text-red-700 ring-red-600/10",
   // Task statuses
-  not_started: "bg-slate-100 text-slate-600",
-  blocked: "bg-red-100 text-red-800",
+  not_started: "bg-slate-50 text-slate-500 ring-slate-500/10",
+  blocked: "bg-red-50 text-red-700 ring-red-600/10",
   // Unit statuses
-  occupied: "bg-green-100 text-green-800",
-  vacant: "bg-blue-100 text-blue-800",
-  turning: "bg-yellow-100 text-yellow-800",
-  ready: "bg-emerald-100 text-emerald-800",
+  occupied: "bg-green-50 text-green-700 ring-green-600/10",
+  vacant: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  turning: "bg-yellow-50 text-yellow-700 ring-yellow-600/10",
+  ready: "bg-emerald-50 text-emerald-700 ring-emerald-600/10",
   // Application statuses
-  incomplete: "bg-yellow-100 text-yellow-800",
-  under_review: "bg-purple-100 text-purple-800",
-  approved: "bg-green-100 text-green-800",
-  denied: "bg-red-100 text-red-800",
-  // Applicant statuses (not_started already defined above)
-  complete: "bg-green-100 text-green-800",
-  in_review: "bg-purple-100 text-purple-800",
-  rejected: "bg-red-100 text-red-800",
+  incomplete: "bg-yellow-50 text-yellow-700 ring-yellow-600/10",
+  under_review: "bg-purple-50 text-purple-700 ring-purple-600/10",
+  approved: "bg-green-50 text-green-700 ring-green-600/10",
+  denied: "bg-red-50 text-red-700 ring-red-600/10",
+  // Applicant statuses
+  complete: "bg-green-50 text-green-700 ring-green-600/10",
+  in_review: "bg-purple-50 text-purple-700 ring-purple-600/10",
+  rejected: "bg-red-50 text-red-700 ring-red-600/10",
   // Document statuses
-  missing: "bg-red-50 text-red-700",
-  uploaded: "bg-blue-100 text-blue-800",
-  verified: "bg-green-100 text-green-800",
+  missing: "bg-red-50 text-red-600 ring-red-600/10",
+  uploaded: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  verified: "bg-green-50 text-green-700 ring-green-600/10",
   // Nudge statuses
-  sent: "bg-blue-100 text-blue-800",
-  delivered: "bg-emerald-100 text-emerald-700",
-  opened: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
+  sent: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  delivered: "bg-emerald-50 text-emerald-700 ring-emerald-600/10",
+  opened: "bg-green-50 text-green-700 ring-green-600/10",
+  failed: "bg-red-50 text-red-700 ring-red-600/10",
   // Tour registration
-  confirmed: "bg-green-100 text-green-800",
-  attended: "bg-emerald-100 text-emerald-700",
-  no_show: "bg-red-100 text-red-800",
-  rescheduled: "bg-orange-100 text-orange-800",
-  cancelled: "bg-slate-100 text-slate-600",
+  confirmed: "bg-green-50 text-green-700 ring-green-600/10",
+  attended: "bg-emerald-50 text-emerald-700 ring-emerald-600/10",
+  no_show: "bg-red-50 text-red-700 ring-red-600/10",
+  rescheduled: "bg-orange-50 text-orange-700 ring-orange-600/10",
+  cancelled: "bg-slate-50 text-slate-500 ring-slate-500/10",
   // Roles
-  primary: "bg-indigo-100 text-indigo-800",
-  co_applicant: "bg-blue-100 text-blue-800",
-  guarantor: "bg-amber-100 text-amber-800",
+  primary: "bg-indigo-50 text-indigo-700 ring-indigo-600/10",
+  co_applicant: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  guarantor: "bg-amber-50 text-amber-700 ring-amber-600/10",
   // Move in/out
-  move_in: "bg-green-100 text-green-800",
-  move_out: "bg-orange-100 text-orange-800",
-  upcoming: "bg-blue-100 text-blue-800",
+  move_in: "bg-green-50 text-green-700 ring-green-600/10",
+  move_out: "bg-orange-50 text-orange-700 ring-orange-600/10",
+  upcoming: "bg-blue-50 text-blue-700 ring-blue-600/10",
   // Vendors
-  active: "bg-green-100 text-green-800",
-  inactive: "bg-slate-100 text-slate-600",
+  active: "bg-green-50 text-green-700 ring-green-600/10",
+  inactive: "bg-slate-50 text-slate-500 ring-slate-500/10",
   // Severity
-  critical: "bg-red-100 text-red-800",
+  critical: "bg-red-50 text-red-700 ring-red-600/10",
   // Projects
-  planning: "bg-blue-100 text-blue-800",
-  on_hold: "bg-orange-100 text-orange-800",
+  planning: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  on_hold: "bg-orange-50 text-orange-700 ring-orange-600/10",
   // Notices
-  draft: "bg-slate-100 text-slate-600",
-  acknowledged: "bg-green-100 text-green-800",
+  draft: "bg-slate-50 text-slate-500 ring-slate-500/10",
+  acknowledged: "bg-green-50 text-green-700 ring-green-600/10",
   // Inspection statuses
-  walking: "bg-blue-100 text-blue-800",
-  ai_review: "bg-purple-100 text-purple-800",
-  team_review: "bg-amber-100 text-amber-800",
+  walking: "bg-blue-50 text-blue-700 ring-blue-600/10",
+  ai_review: "bg-purple-50 text-purple-700 ring-purple-600/10",
+  team_review: "bg-amber-50 text-amber-700 ring-amber-600/10",
 };
 
 function formatLabel(value: string): string {
@@ -88,10 +88,10 @@ function formatLabel(value: string): string {
 }
 
 export function StatusBadge({ value }: { value: string }) {
-  const colors = colorMap[value] || "bg-slate-100 text-slate-700";
+  const colors = colorMap[value] || "bg-slate-50 text-slate-600 ring-slate-500/10";
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ring-1 ring-inset ${colors}`}
     >
       {formatLabel(value)}
     </span>

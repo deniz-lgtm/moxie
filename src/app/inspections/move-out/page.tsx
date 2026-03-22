@@ -514,33 +514,32 @@ export default function MoveOutInspectionPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <Link href="/inspections" className="text-sm text-accent hover:underline">
+            <Link href="/inspections" className="text-xs font-medium text-accent hover:underline">
               &larr; All Inspections
             </Link>
-            <h1 className="text-2xl font-bold mt-1">Move-Out Inspections</h1>
-            <p className="text-muted-foreground mt-1">
+            <h1 className="text-2xl font-bold tracking-tight mt-1">Move-Out Inspections</h1>
+            <p className="text-sm text-muted-foreground mt-1">
               Full walk with floor plan, photos, AI analysis, and deposit deduction invoice
             </p>
           </div>
           <button
             onClick={() => { setShowList(false); setStep("select_unit"); }}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90"
+            className="px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
           >
             + Start Inspection
           </button>
         </div>
 
         {inspections.length > 0 ? (
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <div className="bg-card rounded-2xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted">
-                  <th className="text-left px-4 py-3 font-medium">Unit</th>
-                  <th className="text-left px-4 py-3 font-medium">Tenant</th>
-                  <th className="text-left px-4 py-3 font-medium">Date</th>
-                  <th className="text-left px-4 py-3 font-medium">Inspector</th>
-                  <th className="text-left px-4 py-3 font-medium">Status</th>
-                  <th className="text-left px-4 py-3 font-medium">Deductions</th>
+                <tr className="border-b border-border bg-muted/50">
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unit</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspector</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deductions</th>
                 </tr>
               </thead>
               <tbody>
@@ -557,14 +556,13 @@ export default function MoveOutInspectionPage() {
                         setShowList(false);
                         setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
                       }}
-                      className="border-b border-border last:border-0 hover:bg-muted/50 cursor-pointer"
+                      className="border-b border-border/50 last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
                     >
-                      <td className="px-4 py-3 font-medium">{insp.unitNumber}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{insp.tenantName || "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{insp.scheduledDate}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{insp.inspector}</td>
-                      <td className="px-4 py-3"><StatusBadge value={insp.status} /></td>
-                      <td className="px-4 py-3 text-muted-foreground">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
+                      <td className="px-4 py-3.5 font-medium">{insp.unitNumber}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground">{insp.scheduledDate}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground">{insp.inspector}</td>
+                      <td className="px-4 py-3.5"><StatusBadge value={insp.status} /></td>
+                      <td className="px-4 py-3.5 font-medium">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
                     </tr>
                   );
                 })}
@@ -572,8 +570,12 @@ export default function MoveOutInspectionPage() {
             </table>
           </div>
         ) : (
-          <div className="text-center py-12 text-muted-foreground">
-            No move-out inspections yet. Click &quot;+ Start Inspection&quot; to begin.
+          <div className="text-center py-16 bg-card rounded-2xl border border-border" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <div className="w-14 h-14 bg-muted rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <span className="text-2xl text-muted-foreground">+</span>
+            </div>
+            <p className="text-sm font-medium">No move-out inspections yet</p>
+            <p className="text-xs text-muted-foreground mt-1">Click &quot;+ Start Inspection&quot; to begin your first walk</p>
           </div>
         )}
       </div>
@@ -584,22 +586,30 @@ export default function MoveOutInspectionPage() {
 
   if (step === "select_unit") {
     return (
-      <div className="space-y-6">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
+      <div className="space-y-6 max-w-2xl">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-xs font-medium text-accent hover:underline">
           &larr; Back to list
         </button>
-        <h1 className="text-2xl font-bold">Start Move-Out Inspection</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Start Move-Out Inspection</h1>
+          <p className="text-sm text-muted-foreground mt-1">Select a unit and fill in the details to begin</p>
+        </div>
 
-        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-          <h2 className="font-semibold">Step 1: Select Unit & Details</h2>
+        <div className="bg-card rounded-2xl border border-border p-6 space-y-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-accent/10 flex items-center justify-center">
+              <span className="text-accent font-bold text-xs">1</span>
+            </div>
+            <h2 className="text-sm font-semibold">Unit & Details</h2>
+          </div>
 
           <div className="grid md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
-              <label className="text-xs text-muted-foreground block mb-1">Select Unit *</label>
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Unit *</label>
               <select
                 value={newForm.unitId}
                 onChange={(e) => setNewForm({ ...newForm, unitId: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
               >
                 <option value="">Select a unit...</option>
                 {units.map((u) => (
@@ -611,34 +621,34 @@ export default function MoveOutInspectionPage() {
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Inspector *</label>
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Inspector *</label>
               <input
                 type="text"
                 placeholder="Inspector name"
                 value={newForm.inspector}
                 onChange={(e) => setNewForm({ ...newForm, inspector: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
               />
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Scheduled Date</label>
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Scheduled Date</label>
               <input
                 type="date"
                 value={newForm.scheduledDate}
                 onChange={(e) => setNewForm({ ...newForm, scheduledDate: e.target.value })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
               />
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Security Deposit ($)</label>
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Security Deposit ($)</label>
               <input
                 type="number"
                 placeholder="0"
                 value={newForm.depositAmount || ""}
                 onChange={(e) => setNewForm({ ...newForm, depositAmount: parseFloat(e.target.value) || 0 })}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
               />
             </div>
           </div>
@@ -646,7 +656,7 @@ export default function MoveOutInspectionPage() {
           <button
             onClick={startNewInspection}
             disabled={!newForm.unitId || !newForm.inspector}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 disabled:opacity-50"
+            className="px-5 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors disabled:opacity-40 shadow-sm"
           >
             Continue to Floor Plan &rarr;
           </button>
@@ -986,60 +996,69 @@ export default function MoveOutInspectionPage() {
 
     return (
       <div className="space-y-6">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="text-sm text-accent hover:underline">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="text-xs font-medium text-accent hover:underline">
           &larr; Back to list
         </button>
 
-        <div className="text-center py-8">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="text-center py-10">
+          <div className="w-16 h-16 bg-green-50 rounded-2xl flex items-center justify-center mx-auto mb-4 ring-4 ring-green-100">
             <span className="text-3xl text-green-600">&#10003;</span>
           </div>
-          <h1 className="text-2xl font-bold">Inspection Complete</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-2xl font-bold tracking-tight">Inspection Complete</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             {activeInspection.unitNumber} — Move-Out Inspection
           </p>
         </div>
 
         <div className="grid md:grid-cols-3 gap-4">
-          <div className="bg-card rounded-xl border border-border p-5 text-center">
-            <p className="text-sm text-muted-foreground">Total Deductions</p>
-            <p className="text-2xl font-bold mt-1 text-red-600">
+          <div className="bg-card rounded-2xl border border-border p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Total Deductions</p>
+            <p className="text-2xl font-bold mt-2 tracking-tight text-red-600">
               ${(activeInspection.invoiceTotal || totalDeductions).toLocaleString()}
             </p>
           </div>
-          <div className="bg-card rounded-xl border border-border p-5 text-center">
-            <p className="text-sm text-muted-foreground">Deposit Held</p>
-            <p className="text-2xl font-bold mt-1">
+          <div className="bg-card rounded-2xl border border-border p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Deposit Held</p>
+            <p className="text-2xl font-bold mt-2 tracking-tight">
               ${(activeInspection.depositAmount || 0).toLocaleString()}
             </p>
           </div>
-          <div className="bg-card rounded-xl border border-border p-5 text-center">
-            <p className="text-sm text-muted-foreground">Refund Due</p>
-            <p className="text-2xl font-bold mt-1 text-green-600">
+          <div className="bg-card rounded-2xl border border-border p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Refund Due</p>
+            <p className="text-2xl font-bold mt-2 tracking-tight text-green-600">
               ${Math.max(0, (activeInspection.depositAmount || 0) - (activeInspection.invoiceTotal || totalDeductions)).toLocaleString()}
             </p>
           </div>
         </div>
 
         {/* Tenant Selection */}
-        <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-          <h2 className="font-semibold">Send To Tenants</h2>
+        <div className="bg-card rounded-2xl border border-border p-6 space-y-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
+              <span className="text-blue-600 font-bold text-xs">@</span>
+            </div>
+            <h2 className="text-sm font-semibold">Send To Tenants</h2>
+          </div>
           {loadingTenants ? (
-            <p className="text-sm text-muted-foreground">Loading tenants from AppFolio...</p>
+            <div className="flex items-center gap-2 py-4">
+              <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              <p className="text-sm text-muted-foreground">Loading tenants from AppFolio...</p>
+            </div>
           ) : unitTenants.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No tenants found for this unit in AppFolio.</p>
+            <p className="text-sm text-muted-foreground py-2">No tenants found for this unit in AppFolio.</p>
           ) : (
             <>
-              <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSelectedTenants(new Set(unitTenants.map((_, i) => i)))}
-                  className="text-xs text-accent hover:underline"
+                  className="text-xs font-medium text-accent hover:underline"
                 >
                   Select All
                 </button>
+                <span className="text-muted-foreground text-xs">&middot;</span>
                 <button
                   onClick={() => setSelectedTenants(new Set())}
-                  className="text-xs text-accent hover:underline"
+                  className="text-xs font-medium text-accent hover:underline"
                 >
                   Deselect All
                 </button>
@@ -1049,7 +1068,7 @@ export default function MoveOutInspectionPage() {
               </div>
               <div className="space-y-2">
                 {unitTenants.map((t, i) => (
-                  <label key={i} className="flex items-center gap-3 px-3 py-2 border border-border rounded-lg hover:bg-muted cursor-pointer">
+                  <label key={i} className={`flex items-center gap-3 px-4 py-3 border rounded-xl cursor-pointer transition-all ${selectedTenants.has(i) ? "border-accent/30 bg-accent-light" : "border-border hover:bg-muted/50"}`}>
                     <input
                       type="checkbox"
                       checked={selectedTenants.has(i)}
@@ -1059,11 +1078,11 @@ export default function MoveOutInspectionPage() {
                         else next.add(i);
                         setSelectedTenants(next);
                       }}
-                      className="rounded"
+                      className="rounded accent-accent"
                     />
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium">{t.name}</span>
-                      {t.email && <span className="text-xs text-muted-foreground ml-2">{t.email}</span>}
+                      {t.email && <span className="text-xs text-muted-foreground ml-2 truncate">{t.email}</span>}
                     </div>
                   </label>
                 ))}
@@ -1073,8 +1092,13 @@ export default function MoveOutInspectionPage() {
         </div>
 
         {/* Documents */}
-        <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-          <h2 className="font-semibold">Documents</h2>
+        <div className="bg-card rounded-2xl border border-border p-6 space-y-3" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <div className="flex items-center gap-2.5 mb-1">
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center">
+              <span className="text-emerald-600 font-bold text-xs">&#8595;</span>
+            </div>
+            <h2 className="text-sm font-semibold">Documents</h2>
+          </div>
           <button
             onClick={async () => {
               const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
@@ -1086,9 +1110,9 @@ export default function MoveOutInspectionPage() {
               downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
             }}
             disabled={unitTenants.length > 0 && selectedTenants.size === 0}
-            className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm disabled:opacity-50"
+            className="group block w-full text-left px-4 py-3.5 border border-border rounded-xl hover:bg-muted/50 text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium">Generate & Download Disposition Letter</span>
+            <span className="font-medium group-hover:text-accent transition-colors">Generate & Download Disposition Letter</span>
             <span className="block text-xs text-muted-foreground mt-0.5">
               {selectedTenantList.length > 0
                 ? `Addressed to: ${selectedTenantList.map((t) => t.name).join(", ")}`
@@ -1104,18 +1128,18 @@ export default function MoveOutInspectionPage() {
                   `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`
                 );
               }}
-              className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
+              className="group block w-full text-left px-4 py-3.5 border border-border rounded-xl hover:bg-muted/50 text-sm transition-colors"
             >
-              <span className="font-medium">Download Itemized Deduction Statement</span>
+              <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
               <span className="block text-xs text-muted-foreground mt-0.5">Detailed breakdown of all deductions with costs</span>
             </button>
           )}
           {selectedEmails.length > 0 && (
             <a
               href={`mailto:${selectedEmails.join(",")}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${selectedTenantList.map((t) => t.name).join(", ")},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
-              className="block w-full text-left px-4 py-3 border border-border rounded-lg hover:bg-muted text-sm"
+              className="group block w-full text-left px-4 py-3.5 border border-accent/20 bg-accent-light rounded-xl hover:bg-accent/10 text-sm transition-colors"
             >
-              <span className="font-medium">Send via Email</span>
+              <span className="font-medium text-accent">Send via Email</span>
               <span className="block text-xs text-muted-foreground mt-0.5">
                 To: {selectedEmails.join(", ")}
               </span>
@@ -1123,7 +1147,7 @@ export default function MoveOutInspectionPage() {
           )}
         </div>
 
-        <p className="text-xs text-muted-foreground text-center">
+        <p className="text-[11px] text-muted-foreground text-center">
           Per California Civil Code 1950.5, the itemized statement and remaining deposit must be
           returned to the tenant within 21 calendar days of move-out.
         </p>

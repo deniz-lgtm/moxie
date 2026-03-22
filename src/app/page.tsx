@@ -4,7 +4,6 @@ import {
   currentUserRole,
   getAppsForRole,
   getAppsByCategory,
-  apps,
 } from "@/lib/mock-data";
 import { fetchDashboardStats } from "@/lib/data";
 import type { AppConfig, DashboardStats } from "@/lib/types";
@@ -23,6 +22,7 @@ import {
   Bell,
   TrendingUp,
   MessageSquare,
+  ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,13 +43,13 @@ const iconMap: Record<string, LucideIcon> = {
   MessageSquare,
 };
 
-const colorMap: Record<string, { border: string; bg: string; text: string; dot: string }> = {
-  red: { border: "border-t-red-500", bg: "bg-red-50", text: "text-red-600", dot: "bg-red-500" },
-  blue: { border: "border-t-blue-500", bg: "bg-blue-50", text: "text-blue-600", dot: "bg-blue-500" },
-  purple: { border: "border-t-purple-500", bg: "bg-purple-50", text: "text-purple-600", dot: "bg-purple-500" },
-  emerald: { border: "border-t-emerald-500", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500" },
-  amber: { border: "border-t-amber-500", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500" },
-  rose: { border: "border-t-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500" },
+const colorMap: Record<string, { border: string; bg: string; text: string; dot: string; iconBg: string }> = {
+  red: { border: "border-l-red-500", bg: "bg-red-50", text: "text-red-600", dot: "bg-red-500", iconBg: "bg-red-100" },
+  blue: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-600", dot: "bg-blue-500", iconBg: "bg-blue-100" },
+  purple: { border: "border-l-purple-500", bg: "bg-purple-50", text: "text-purple-600", dot: "bg-purple-500", iconBg: "bg-purple-100" },
+  emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500", iconBg: "bg-emerald-100" },
+  amber: { border: "border-l-amber-500", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500", iconBg: "bg-amber-100" },
+  rose: { border: "border-l-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500", iconBg: "bg-rose-100" },
 };
 
 function applyLiveStats(appList: AppConfig[], stats: DashboardStats): AppConfig[] {
@@ -78,29 +78,35 @@ function AppCard({ app }: { app: AppConfig }) {
 
   const card = (
     <div
-      className={`bg-card rounded-2xl border border-border border-t-4 ${colors.border} p-6 h-full ${
+      className={`group bg-card rounded-2xl border border-border p-5 h-full relative overflow-hidden ${
         app.isBuilt
-          ? "hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 cursor-pointer"
-          : "opacity-60 cursor-not-allowed"
+          ? "card-hover cursor-pointer"
+          : "opacity-50 cursor-not-allowed"
       }`}
+      style={{ boxShadow: "var(--shadow-sm)" }}
     >
+      {/* Subtle accent line at top */}
+      <div className={`absolute top-0 left-0 right-0 h-0.5 ${colors.dot} opacity-60`} />
+
       <div className="flex items-start justify-between">
-        <div className={`w-12 h-12 rounded-xl ${colors.bg} flex items-center justify-center`}>
-          {Icon && <Icon size={28} className={colors.text} />}
+        <div className={`w-10 h-10 rounded-xl ${colors.iconBg} flex items-center justify-center`}>
+          {Icon && <Icon size={20} className={colors.text} />}
         </div>
-        {!app.isBuilt && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+        {!app.isBuilt ? (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
             Coming Soon
           </span>
+        ) : (
+          <ArrowUpRight size={16} className="text-muted-foreground/0 group-hover:text-muted-foreground transition-all duration-200" />
         )}
       </div>
-      <h3 className="text-base font-semibold mt-4">{app.name}</h3>
-      <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+      <h3 className="text-sm font-semibold mt-3">{app.name}</h3>
+      <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
         {app.description}
       </p>
       {app.statLabel && (
-        <div className="mt-4 pt-3 border-t border-border">
-          <span className={`text-sm font-medium ${colors.text}`}>
+        <div className="mt-3 pt-2.5 border-t border-border">
+          <span className={`text-xs font-semibold ${colors.text}`}>
             {app.statLabel}
           </span>
         </div>
@@ -129,11 +135,12 @@ function CategorySection({
   const colors = colorMap[color] || colorMap.blue;
   return (
     <section>
-      <div className="flex items-center gap-2 mb-5">
-        <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
-        <h2 className="text-lg font-semibold">{label}</h2>
+      <div className="flex items-center gap-2.5 mb-4">
+        <div className={`w-1.5 h-5 rounded-full ${colors.dot}`} />
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{label}</h2>
+        <span className="text-xs text-muted-foreground/50 font-medium">{categoryApps.length}</span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {categoryApps.map((app) => (
           <AppCard key={app.id} app={app} />
         ))}
@@ -199,57 +206,49 @@ export default async function Dashboard() {
     : 0;
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       {/* Header */}
       <div>
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
           {source === "appfolio" && (
-            <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
-              Live from AppFolio
+            <span className="inline-flex items-center gap-1.5 text-[10px] px-2.5 py-1 rounded-full bg-green-50 text-green-700 font-semibold border border-green-100">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse-dot" />
+              Live
             </span>
           )}
         </div>
-        <p className="text-muted-foreground mt-1">
-          Choose a tool to get started
+        <p className="text-sm text-muted-foreground mt-1">
+          Your property management command center
         </p>
       </div>
 
-      {/* Leasing Stats Strip — Upcoming Year (Aug 2026 – Jul 2027) */}
-      <div className="bg-card rounded-xl border border-border px-6 py-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            2026–2027 Lease Year
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {currentOccPct}% currently occupied
-          </span>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Units</p>
+          <p className="text-3xl font-bold mt-2 tracking-tight">{stats.totalUnits}</p>
+          <p className="text-xs text-muted-foreground mt-1">{currentOccPct}% occupied</p>
         </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-          <div>
-            <span className="font-semibold text-foreground">{stats.totalUnits}</span>{" "}
-            <span className="text-muted-foreground">total units</span>
-          </div>
-          <div className="text-border">|</div>
-          <div>
-            <span className="font-semibold text-green-600">{preLeasedPct}%</span>{" "}
-            <span className="text-muted-foreground">pre-leased</span>
-          </div>
-          <div className="text-border">|</div>
-          <div>
-            <span className="font-semibold text-green-600">{stats.preLeasedUnits}</span>{" "}
-            <span className="text-muted-foreground">leased</span>
-          </div>
-          <div className="text-border">|</div>
-          <div>
-            <span className="font-semibold text-amber-600">{stats.vacantUnits}</span>{" "}
-            <span className="text-muted-foreground">unleased</span>
-          </div>
+        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pre-Leased</p>
+          <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{preLeasedPct}%</p>
+          <p className="text-xs text-muted-foreground mt-1">{stats.preLeasedUnits} of {stats.totalUnits} units</p>
+        </div>
+        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Unleased</p>
+          <p className="text-3xl font-bold mt-2 tracking-tight text-amber-600">{stats.vacantUnits}</p>
+          <p className="text-xs text-muted-foreground mt-1">2026–27 lease year</p>
+        </div>
+        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Maintenance</p>
+          <p className="text-3xl font-bold mt-2 tracking-tight text-blue-600">{stats.openMaintenanceRequests}</p>
+          <p className="text-xs text-muted-foreground mt-1">open work orders</p>
         </div>
       </div>
 
       {/* App Grid by Category */}
-      <div className="space-y-10">
+      <div className="space-y-8">
         {sortedCategories.map((cat) => (
           <CategorySection
             key={cat.id}
