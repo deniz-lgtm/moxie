@@ -1,30 +1,18 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
 :root {
-  --background: #f8f9fb;
+  --background: #f8fafc;
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
   --muted: #f1f5f9;
   --muted-foreground: #64748b;
-  --border: #e5e7eb;
+  --border: #e2e8f0;
   --accent: #9d1535;
   --accent-light: #fef2f2;
-  --accent-hover: #b91c42;
   --success: #16a34a;
   --warning: #f59e0b;
   --danger: #dc2626;
-  --sidebar: #111827;
-  --sidebar-hover: #1f2937;
-  --sidebar-active: rgba(157, 21, 53, 0.3);
-  --sidebar-text: #9ca3af;
-  --sidebar-text-active: #ffffff;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 3px 0 rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.06), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
 }
 
 @theme inline {
@@ -37,16 +25,10 @@
   --color-border: var(--border);
   --color-accent: var(--accent);
   --color-accent-light: var(--accent-light);
-  --color-accent-hover: var(--accent-hover);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-hover: var(--sidebar-hover);
-  --color-sidebar-active: var(--sidebar-active);
-  --color-sidebar-text: var(--sidebar-text);
-  --color-sidebar-text-active: var(--sidebar-text-active);
-  --font-sans: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 }
 
@@ -54,72 +36,4 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
-
-/* Better focus rings */
-*:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
-
-/* Card hover lift */
-.card-hover {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-xl);
-}
-
-/* Gradient text utility */
-.text-gradient {
-  background: linear-gradient(135deg, #9d1535 0%, #c4254d 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* Subtle animated gradient background for hero sections */
-.hero-gradient {
-  background: linear-gradient(135deg, #9d1535 0%, #7c1029 50%, #5c0b1e 100%);
-}
-
-/* Glass effect for cards */
-.glass {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-/* Pulse animation for live indicators */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-.animate-pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
 }

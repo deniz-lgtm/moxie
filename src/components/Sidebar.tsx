@@ -19,6 +19,9 @@ import {
   Calendar,
   ChevronDown,
   Megaphone,
+  DollarSign,
+  Settings,
+  Link as LinkIcon,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -27,14 +30,25 @@ type NavItem = {
   href: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
   children?: { label: string; href: string }[];
+  category?: string;
 };
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
+  // Leasing & Operations
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, category: "Leasing & Operations" },
+  { label: "Applications", href: "/leasing/applications", icon: FileText, category: "Leasing & Operations" },
+  { label: "Leasing", href: "/leasing", icon: FileText, category: "Leasing & Operations" },
+  { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations" },
+  
+  // Property Management
+  { label: "Maintenance", href: "/maintenance", icon: Wrench, category: "Property Management" },
+  { label: "Buildings", href: "/portfolio", icon: Building2, category: "Property Management" },
+  { label: "Units/Spaces", href: "/units", icon: Building2, category: "Property Management" },
   {
     label: "Inspections",
     href: "/inspections",
     icon: ClipboardCheck,
+    category: "Property Management",
     children: [
       { label: "Move-Out", href: "/inspections/move-out" },
       { label: "Move-In", href: "/inspections/move-in" },
@@ -43,29 +57,34 @@ const navItems: NavItem[] = [
       { label: "Punch List", href: "/inspections/punch-list" },
     ],
   },
-  { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw },
-  { label: "Maintenance", href: "/maintenance", icon: Wrench },
-  {
-    label: "Leasing",
-    href: "/leasing",
-    icon: FileText,
-    children: [
-      { label: "Applications", href: "/leasing/applications" },
-      { label: "Tours", href: "/leasing/tours" },
-      { label: "Comp Watch", href: "/comp-watch" },
-    ],
-  },
-  { label: "Vendors", href: "/vendors", icon: Users },
-  { label: "RUBs", href: "/rubs", icon: Zap },
-  { label: "Reports", href: "/reports", icon: BarChart3 },
-  { label: "Portfolio", href: "/portfolio", icon: Building2 },
-  { label: "Capital Projects", href: "/capital-projects", icon: HardHat },
-  { label: "Notices", href: "/notices", icon: Bell },
-  { label: "Analytics", href: "/resident-pulse", icon: MessageSquare },
+  
+  // Revenue & Finance
+  { label: "Revenue", href: "/revenue", icon: DollarSign, category: "Revenue & Finance" },
+  { label: "Financials", href: "/financials", icon: BarChart3, category: "Revenue & Finance" },
+  { label: "Analytics", href: "/resident-pulse", icon: MessageSquare, category: "Revenue & Finance" },
+  
+  // Asset Management
+  { label: "Assets", href: "/assets", icon: HardHat, category: "Asset Management" },
+  { label: "Depreciation", href: "/depreciation", icon: TrendingUp, category: "Asset Management" },
+  { label: "Maintenance Log", href: "/maintenance-log", icon: Wrench, category: "Asset Management" },
+  { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management" },
+  
+  // Admin
+  { label: "Team", href: "/team", icon: Users, category: "Admin" },
+  { label: "Settings", href: "/settings", icon: Settings, category: "Admin" },
+  { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin" },
+  
+  // Legacy items (to be reviewed)
+  { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw, category: "Property Management" },
+  { label: "Vendors", href: "/vendors", icon: Users, category: "Property Management" },
+  { label: "RUBs", href: "/rubs", icon: Zap, category: "Revenue & Finance" },
+  { label: "Capital Projects", href: "/capital-projects", icon: HardHat, category: "Asset Management" },
+  { label: "Notices", href: "/notices", icon: Bell, category: "Leasing & Operations" },
   {
     label: "Marketing",
     href: "/marketing",
     icon: Megaphone,
+    category: "Leasing & Operations",
     children: [
       { label: "Dashboard", href: "/marketing" },
       { label: "Create Content", href: "/marketing/create" },
@@ -74,11 +93,28 @@ const navItems: NavItem[] = [
   },
 ];
 
+// Group items by category
+const categoryOrder = [
+  "Leasing & Operations",
+  "Property Management", 
+  "Revenue & Finance",
+  "Asset Management",
+  "Admin"
+];
+
+const groupedItems = navItems.reduce((acc, item) => {
+  const category = item.category || "Other";
+  if (!acc[category]) {
+    acc[category] = [];
+  }
+  acc[category].push(item);
+  return acc;
+}, {} as Record<string, NavItem[]>);
+
 export function Sidebar() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     Inspections: pathname.startsWith("/inspections"),
-    Leasing: pathname.startsWith("/leasing") || pathname.startsWith("/comp-watch"),
     Marketing: pathname.startsWith("/marketing"),
   });
 
@@ -111,68 +147,87 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {navItems.map((item) => {
-          const active = isActive(item.href);
-          const Icon = item.icon;
-          const isExpanded = expanded[item.label];
-          const hasChildren = item.children && item.children.length > 0;
-
+      <nav className="flex-1 overflow-y-auto py-4 px-3">
+        {categoryOrder.map((category) => {
+          const items = groupedItems[category];
+          if (!items || items.length === 0) return null;
+          
           return (
-            <div key={item.href}>
-              {/* Main nav item */}
-              <div className="flex items-center">
-                <Link
-                  href={item.href}
-                  className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                    active
-                      ? "bg-sidebar-active text-sidebar-text-active"
-                      : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
-                  }`}
-                >
-                  <Icon
-                    size={18}
-                    className={active ? "text-accent" : "text-sidebar-text"}
-                  />
-                  <span className="flex-1">{item.label}</span>
-                  {active && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
-                  )}
-                </Link>
-                {hasChildren && (
-                  <button
-                    onClick={() => toggleExpand(item.label)}
-                    className="p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors"
-                  >
-                    <ChevronDown
-                      size={14}
-                      className={`transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
-                    />
-                  </button>
-                )}
+            <div key={category} className="mb-4">
+              {/* Category header */}
+              <div className="px-3 mb-2">
+                <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
+                  {category}
+                </h3>
               </div>
+              
+              {/* Category items */}
+              <div className="space-y-0.5">
+                {items.map((item) => {
+                  const active = isActive(item.href);
+                  const Icon = item.icon;
+                  const isExpanded = expanded[item.label];
+                  const hasChildren = item.children && item.children.length > 0;
 
-              {/* Sub-navigation */}
-              {hasChildren && isExpanded && (
-                <div className="ml-5 pl-4 border-l border-white/5 mt-1 mb-1 space-y-0.5">
-                  {item.children!.map((child) => {
-                    const childActive = pathname === child.href;
-                    return (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                          childActive
-                            ? "text-sidebar-text-active font-medium bg-sidebar-hover"
-                            : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
-                        }`}
-                      >
-                        {child.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
+                  return (
+                    <div key={item.href}>
+                      {/* Main nav item */}
+                      <div className="flex items-center">
+                        <Link
+                          href={item.href}
+                          className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                            active
+                              ? "bg-sidebar-active text-sidebar-text-active"
+                              : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
+                          }`}
+                        >
+                          <Icon
+                            size={18}
+                            className={active ? "text-accent" : "text-sidebar-text"}
+                          />
+                          <span className="flex-1">{item.label}</span>
+                          {active && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
+                          )}
+                        </Link>
+                        {hasChildren && (
+                          <button
+                            onClick={() => toggleExpand(item.label)}
+                            className="p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors"
+                          >
+                            <ChevronDown
+                              size={14}
+                              className={`transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                            />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Sub-navigation */}
+                      {hasChildren && isExpanded && (
+                        <div className="ml-5 pl-4 border-l border-white/5 mt-1 mb-1 space-y-0.5">
+                          {item.children!.map((child) => {
+                            const childActive = pathname === child.href;
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                className={`block px-3 py-2 rounded-md text-sm transition-colors ${
+                                  childActive
+                                    ? "text-sidebar-text-active font-medium bg-sidebar-hover"
+                                    : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
+                                }`}
+                              >
+                                {child.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
