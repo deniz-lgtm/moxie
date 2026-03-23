@@ -37,3 +37,50 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Smooth transitions */
+* {
+  @apply transition-colors duration-150;
+}
+
+/* Category color themes */
+.category-inspections {
+  @apply border-t-4 border-red-500;
+}
+
+.category-operations {
+  @apply border-t-4 border-blue-500;
+}
+
+.category-leasing {
+  @apply border-t-4 border-purple-500;
+}
+
+.category-finance {
+  @apply border-t-4 border-green-500;
+}
+
+.category-assets {
+  @apply border-t-4 border-amber-500;
+}
+
+.category-communications {
+  @apply border-t-4 border-pink-500;
+}
+
+/* Card hover effects */
+.tool-card {
+  @apply bg-white rounded-xl border border-border p-6 hover:shadow-lg hover:border-accent/20 transition-all duration-200 cursor-pointer;
+}
+
+.tool-card:hover {
+  @apply shadow-lg border-accent/30;
+}
+
+/* Icon color theming */
+.icon-red { @apply text-red-500; }
+.icon-blue { @apply text-blue-500; }
+.icon-purple { @apply text-purple-500; }
+.icon-green { @apply text-green-500; }
+.icon-amber { @apply text-amber-500; }
+.icon-pink { @apply text-pink-500; }

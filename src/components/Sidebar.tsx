@@ -128,11 +128,11 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-sidebar z-50">
+    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-sidebar z-50 border-r border-white/5">
       {/* Brand */}
-      <div className="h-16 flex items-center px-5 border-b border-white/5">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="w-9 h-9 hero-gradient rounded-xl flex items-center justify-center shadow-lg shadow-accent/20">
+      <div className="h-16 flex items-center px-5 border-b border-white/10">
+        <Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
+          <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/20 group-hover:shadow-red-500/40 transition-shadow">
             <span className="text-white font-bold text-base">M</span>
           </div>
           <div>
@@ -175,19 +175,19 @@ export function Sidebar() {
                       <div className="flex items-center">
                         <Link
                           href={item.href}
-                          className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+                          className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                             active
-                              ? "bg-sidebar-active text-sidebar-text-active"
+                              ? "bg-sidebar-active text-sidebar-text-active shadow-sm shadow-accent/20"
                               : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
                           }`}
                         >
                           <Icon
                             size={18}
-                            className={active ? "text-accent" : "text-sidebar-text"}
+                            className={`transition-colors duration-200 ${active ? "text-red-400" : "text-sidebar-text group-hover:text-sidebar-text-active"}`}
                           />
                           <span className="flex-1">{item.label}</span>
                           {active && (
-                            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
+                            <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
                           )}
                         </Link>
                         {hasChildren && (
