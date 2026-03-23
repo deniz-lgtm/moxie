@@ -57,6 +57,7 @@ export function InspectionCamera({
   const [newRoomName, setNewRoomName] = useState("");
   const [showAddRoom, setShowAddRoom] = useState(false);
   const [analyzingCount, setAnalyzingCount] = useState(0);
+  const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -164,9 +165,8 @@ export function InspectionCamera({
   }
 
   function addPhotoToRoom(url: string) {
-    const photoId = newId();
     const photo: CameraPhoto = {
-      id: photoId,
+      id: newId(),
       url,
       timestamp: new Date().toISOString(),
       aiAnalysis: null,
@@ -175,27 +175,52 @@ export function InspectionCamera({
       i === currentRoomIdx ? { ...r, photos: [...r.photos, photo] } : r
     );
     onRoomsChange(updated);
+    // AI analysis is deferred — runs in batch when the walk is finished
+  }
 
-    // Run AI analysis in background if enabled
-    if (enableAiAnalysis && currentRoom) {
-      setAnalyzingCount((c) => c + 1);
-      analyzePhotoWithAI(url, currentRoom.name).then((analysis) => {
-        setAnalyzingCount((c) => c - 1);
-        if (analysis) {
-          // Update the photo with AI analysis — use functional update pattern via onRoomsChange
-          onRoomsChange(
-            rooms.map((r, i) =>
-              i === currentRoomIdx
-                ? {
-                    ...r,
-                    photos: [...r.photos.filter((p) => p.id !== photoId), { ...photo, aiAnalysis: analysis }],
-                  }
-                : r
-            )
-          );
+  // Batch analyze all photos across all rooms, then call onComplete
+  async function batchAnalyzeAndComplete() {
+    if (!enableAiAnalysis) {
+      onComplete(rooms);
+      return;
+    }
+
+    setIsBatchAnalyzing(true);
+    const photosToAnalyze: { roomIdx: number; photoIdx: number; url: string; roomName: string }[] = [];
+    rooms.forEach((room, ri) => {
+      room.photos.forEach((photo, pi) => {
+        if (!photo.aiAnalysis) {
+          photosToAnalyze.push({ roomIdx: ri, photoIdx: pi, url: photo.url, roomName: room.name });
         }
       });
+    });
+
+    setAnalyzingCount(photosToAnalyze.length);
+    let updatedRooms = [...rooms.map((r) => ({ ...r, photos: [...r.photos] }))];
+
+    // Analyze in parallel batches of 3
+    const batchSize = 3;
+    for (let i = 0; i < photosToAnalyze.length; i += batchSize) {
+      const batch = photosToAnalyze.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map(({ url, roomName }) => analyzePhotoWithAI(url, roomName))
+      );
+      results.forEach((analysis, j) => {
+        const { roomIdx, photoIdx } = batch[j];
+        if (analysis) {
+          updatedRooms[roomIdx].photos[photoIdx] = {
+            ...updatedRooms[roomIdx].photos[photoIdx],
+            aiAnalysis: analysis,
+          };
+        }
+      });
+      setAnalyzingCount((c) => c - batch.length);
+      onRoomsChange(updatedRooms.map((r) => ({ ...r })));
     }
+
+    setIsBatchAnalyzing(false);
+    setAnalyzingCount(0);
+    onComplete(updatedRooms);
   }
 
   function removePhoto(photoId: string) {
@@ -217,7 +242,7 @@ export function InspectionCamera({
   function goToNextRoom() {
     stopCamera();
     if (isLastRoom) {
-      onComplete(rooms);
+      batchAnalyzeAndComplete();
     } else {
       setCurrentRoomIdx((i) => i + 1);
     }
@@ -262,7 +287,8 @@ export function InspectionCamera({
       <div className="bg-black/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between text-white">
         <button
           onClick={() => { stopCamera(); onCancel?.(); }}
-          className="text-white/80 hover:text-white text-sm flex items-center gap-1"
+          disabled={isBatchAnalyzing}
+          className="text-white/80 hover:text-white text-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
         >
           <X size={18} /> Exit
         </button>
@@ -270,10 +296,10 @@ export function InspectionCamera({
           <p className="text-xs text-white/60 uppercase tracking-wider">{title}</p>
           <p className="text-xs text-white/40">
             Room {currentRoomIdx + 1} of {rooms.length} &middot; {totalPhotos} total photos
-            {analyzingCount > 0 && (
+            {isBatchAnalyzing && analyzingCount > 0 && (
               <span className="ml-2 text-yellow-400">
                 <Loader2 size={10} className="inline animate-spin mr-1" />
-                Analyzing {analyzingCount}...
+                Analyzing {analyzingCount} remaining...
               </span>
             )}
           </p>
@@ -456,7 +482,7 @@ export function InspectionCamera({
           {rooms.map((room, i) => (
             <button
               key={room.id}
-              onClick={() => { stopCamera(); setCurrentRoomIdx(i); }}
+              onClick={() => { if (!isBatchAnalyzing) { stopCamera(); setCurrentRoomIdx(i); } }}
               className={`h-1.5 rounded-full transition-all ${
                 i === currentRoomIdx
                   ? "w-6 bg-white"
@@ -469,6 +495,18 @@ export function InspectionCamera({
           ))}
         </div>
       </div>
+
+      {/* Batch analysis overlay */}
+      {isBatchAnalyzing && (
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+          <Loader2 size={48} className="text-white animate-spin mb-4" />
+          <h3 className="text-white text-xl font-bold">Analyzing Photos</h3>
+          <p className="text-white/60 text-sm mt-2">
+            {analyzingCount} photo{analyzingCount !== 1 ? "s" : ""} remaining...
+          </p>
+          <p className="text-white/40 text-xs mt-4">AI is detecting damage and estimating costs</p>
+        </div>
+      )}
     </div>
   );
 }
