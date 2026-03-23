@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Calendar,
   ChevronDown,
+  Megaphone,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -61,6 +62,16 @@ const navItems: NavItem[] = [
   { label: "Capital Projects", href: "/capital-projects", icon: HardHat },
   { label: "Notices", href: "/notices", icon: Bell },
   { label: "Analytics", href: "/resident-pulse", icon: MessageSquare },
+  {
+    label: "Marketing",
+    href: "/marketing",
+    icon: Megaphone,
+    children: [
+      { label: "Dashboard", href: "/marketing" },
+      { label: "Create Content", href: "/marketing/create" },
+      { label: "Monthly Report", href: "/marketing/report" },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -68,6 +79,7 @@ export function Sidebar() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     Inspections: pathname.startsWith("/inspections"),
     Leasing: pathname.startsWith("/leasing") || pathname.startsWith("/comp-watch"),
+    Marketing: pathname.startsWith("/marketing"),
   });
 
   function toggleExpand(label: string) {

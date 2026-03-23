@@ -54,6 +54,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string; dot: 
   emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500", iconBg: "bg-emerald-100" },
   amber: { border: "border-l-amber-500", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500", iconBg: "bg-amber-100" },
   rose: { border: "border-l-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500", iconBg: "bg-rose-100" },
+  pink: { border: "border-l-pink-500", bg: "bg-pink-50", text: "text-pink-600", dot: "bg-pink-500", iconBg: "bg-pink-100" },
 };
 
 const defaultStats: DashboardStats = {

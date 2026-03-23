@@ -17,6 +17,7 @@ import {
   Zap,
   Building2,
   Bell,
+  Megaphone,
   ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
@@ -28,6 +29,7 @@ const categoryIconMap: Record<string, LucideIcon> = {
   finance: Zap,
   asset_management: Building2,
   communications: Bell,
+  marketing: Megaphone,
 };
 
 const colorMap: Record<string, { border: string; bg: string; text: string; dot: string; iconBg: string; gradientFrom: string; gradientTo: string }> = {
@@ -37,6 +39,7 @@ const colorMap: Record<string, { border: string; bg: string; text: string; dot: 
   emerald: { border: "border-emerald-200", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500", iconBg: "bg-emerald-100", gradientFrom: "from-emerald-500", gradientTo: "to-emerald-600" },
   amber: { border: "border-amber-200", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500", iconBg: "bg-amber-100", gradientFrom: "from-amber-500", gradientTo: "to-amber-600" },
   rose: { border: "border-rose-200", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500", iconBg: "bg-rose-100", gradientFrom: "from-rose-500", gradientTo: "to-rose-600" },
+  pink: { border: "border-pink-200", bg: "bg-pink-50", text: "text-pink-600", dot: "bg-pink-500", iconBg: "bg-pink-100", gradientFrom: "from-pink-500", gradientTo: "to-pink-600" },
 };
 
 const defaultStats: DashboardStats = {

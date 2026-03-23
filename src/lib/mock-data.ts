@@ -38,6 +38,7 @@ export const appCategories: AppCategoryConfig[] = [
   { id: "finance", label: "Finance", color: "emerald", order: 4 },
   { id: "asset_management", label: "Asset Management", color: "amber", order: 5 },
   { id: "communications", label: "Communications", color: "rose", order: 6 },
+  { id: "marketing", label: "Marketing & SEO", color: "pink", order: 7 },
 ];
 
 export const apps: AppConfig[] = [
@@ -237,6 +238,43 @@ export const apps: AppConfig[] = [
     categoryLabel: "Communications",
     categoryColor: "rose",
     roles: ["property_manager", "leasing_agent", "asset_manager"],
+    isBuilt: true,
+  },
+  // --- Marketing & SEO ---
+  {
+    id: "marketing-dashboard",
+    name: "SEO Dashboard",
+    description: "Track organic traffic, keyword rankings, and search performance with GA4 and Search Console data",
+    href: "/marketing",
+    icon: "TrendingUp",
+    category: "marketing",
+    categoryLabel: "Marketing & SEO",
+    categoryColor: "pink",
+    roles: ["property_manager", "leasing_agent", "asset_manager", "owner"],
+    isBuilt: true,
+  },
+  {
+    id: "content-creator",
+    name: "Content Creator",
+    description: "AI-powered content generator for blog posts, Instagram captions, Reddit responses, and email campaigns",
+    href: "/marketing/create",
+    icon: "FileText",
+    category: "marketing",
+    categoryLabel: "Marketing & SEO",
+    categoryColor: "pink",
+    roles: ["property_manager", "leasing_agent"],
+    isBuilt: true,
+  },
+  {
+    id: "marketing-report",
+    name: "Monthly Report",
+    description: "Monthly analytics summary — website traffic, leads, applications, social metrics, and cost per lead",
+    href: "/marketing/report",
+    icon: "BarChart3",
+    category: "marketing",
+    categoryLabel: "Marketing & SEO",
+    categoryColor: "pink",
+    roles: ["property_manager", "asset_manager", "owner"],
     isBuilt: true,
   },
 ];
