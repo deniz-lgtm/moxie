@@ -9,50 +9,34 @@ import {
   getAppsByCategory,
 } from "@/lib/mock-data";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
-import type { AppConfig, DashboardStats, AcademicYear } from "@/lib/types";
+import type { DashboardStats, AcademicYear } from "@/lib/types";
 import {
   ClipboardCheck,
-  RefreshCw,
   Wrench,
-  Truck,
-  Users,
   FileText,
-  Calendar,
   Zap,
-  BarChart3,
   Building2,
-  HardHat,
   Bell,
-  TrendingUp,
-  MessageSquare,
   ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
 
-const iconMap: Record<string, LucideIcon> = {
-  ClipboardCheck,
-  RefreshCw,
-  Wrench,
-  Truck,
-  Users,
-  FileText,
-  Calendar,
-  Zap,
-  BarChart3,
-  Building2,
-  HardHat,
-  Bell,
-  TrendingUp,
-  MessageSquare,
+const categoryIconMap: Record<string, LucideIcon> = {
+  inspections: ClipboardCheck,
+  operations: Wrench,
+  leasing: FileText,
+  finance: Zap,
+  asset_management: Building2,
+  communications: Bell,
 };
 
-const colorMap: Record<string, { border: string; bg: string; text: string; dot: string; iconBg: string }> = {
-  red: { border: "border-l-red-500", bg: "bg-red-50", text: "text-red-600", dot: "bg-red-500", iconBg: "bg-red-100" },
-  blue: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-600", dot: "bg-blue-500", iconBg: "bg-blue-100" },
-  purple: { border: "border-l-purple-500", bg: "bg-purple-50", text: "text-purple-600", dot: "bg-purple-500", iconBg: "bg-purple-100" },
-  emerald: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500", iconBg: "bg-emerald-100" },
-  amber: { border: "border-l-amber-500", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500", iconBg: "bg-amber-100" },
-  rose: { border: "border-l-rose-500", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500", iconBg: "bg-rose-100" },
+const colorMap: Record<string, { border: string; bg: string; text: string; dot: string; iconBg: string; gradientFrom: string; gradientTo: string }> = {
+  red: { border: "border-red-200", bg: "bg-red-50", text: "text-red-600", dot: "bg-red-500", iconBg: "bg-red-100", gradientFrom: "from-red-500", gradientTo: "to-red-600" },
+  blue: { border: "border-blue-200", bg: "bg-blue-50", text: "text-blue-600", dot: "bg-blue-500", iconBg: "bg-blue-100", gradientFrom: "from-blue-500", gradientTo: "to-blue-600" },
+  purple: { border: "border-purple-200", bg: "bg-purple-50", text: "text-purple-600", dot: "bg-purple-500", iconBg: "bg-purple-100", gradientFrom: "from-purple-500", gradientTo: "to-purple-600" },
+  emerald: { border: "border-emerald-200", bg: "bg-emerald-50", text: "text-emerald-600", dot: "bg-emerald-500", iconBg: "bg-emerald-100", gradientFrom: "from-emerald-500", gradientTo: "to-emerald-600" },
+  amber: { border: "border-amber-200", bg: "bg-amber-50", text: "text-amber-600", dot: "bg-amber-500", iconBg: "bg-amber-100", gradientFrom: "from-amber-500", gradientTo: "to-amber-600" },
+  rose: { border: "border-rose-200", bg: "bg-rose-50", text: "text-rose-600", dot: "bg-rose-500", iconBg: "bg-rose-100", gradientFrom: "from-rose-500", gradientTo: "to-rose-600" },
 };
 
 const defaultStats: DashboardStats = {
@@ -76,99 +60,60 @@ const defaultStats: DashboardStats = {
   recurringIssues: 0,
 };
 
-function applyLiveStats(appList: AppConfig[], stats: DashboardStats): AppConfig[] {
-  const statMap: Record<string, string> = {
-    maintenance: `${stats.openMaintenanceRequests} open`,
-    vendors: `${stats.vendorCount} vendors`,
-    applications: `${stats.activeApplications} active`,
-    tours: `${stats.upcomingTours} upcoming`,
-    "comp-watch": `${stats.trackedComps} comps tracked`,
-    rubs: stats.pendingRubs,
-    reports: `${stats.reportsDue} reports due`,
-    portfolio: `${stats.totalUnits} units`,
-    "capital-projects": `${stats.activeCapitalProjects} active`,
-    notices: `${stats.pendingNotices} pending`,
-    "resident-pulse": `${stats.recurringIssues} recurring issues`,
-  };
-  return appList.map((app) => ({
-    ...app,
-    statLabel: statMap[app.id] || app.statLabel,
-  }));
-}
-
-function AppCard({ app }: { app: AppConfig }) {
-  const Icon = iconMap[app.icon];
-  const colors = colorMap[app.categoryColor] || colorMap.blue;
-
-  const card = (
-    <div
-      className={`group bg-card rounded-2xl border border-border p-5 h-full relative overflow-hidden ${
-        app.isBuilt
-          ? "card-hover cursor-pointer"
-          : "opacity-50 cursor-not-allowed"
-      }`}
-      style={{ boxShadow: "var(--shadow-sm)" }}
-    >
-      <div className={`absolute top-0 left-0 right-0 h-0.5 ${colors.dot} opacity-60`} />
-
-      <div className="flex items-start justify-between">
-        <div className={`w-10 h-10 rounded-xl ${colors.iconBg} flex items-center justify-center`}>
-          {Icon && <Icon size={20} className={colors.text} />}
-        </div>
-        {!app.isBuilt ? (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
-            Coming Soon
-          </span>
-        ) : (
-          <ArrowUpRight size={16} className="text-muted-foreground/0 group-hover:text-muted-foreground transition-all duration-200" />
-        )}
-      </div>
-      <h3 className="text-sm font-semibold mt-3">{app.name}</h3>
-      <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
-        {app.description}
-      </p>
-      {app.statLabel && (
-        <div className="mt-3 pt-2.5 border-t border-border">
-          <span className={`text-xs font-semibold ${colors.text}`}>
-            {app.statLabel}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-
-  if (!app.isBuilt) return card;
-
-  return (
-    <Link href={app.href}>
-      {card}
-    </Link>
-  );
-}
-
-function CategorySection({
+function CategoryCard({
+  id,
   label,
   color,
-  apps: categoryApps,
+  appCount,
+  appNames,
 }: {
+  id: string;
   label: string;
   color: string;
-  apps: AppConfig[];
+  appCount: number;
+  appNames: string[];
 }) {
   const colors = colorMap[color] || colorMap.blue;
+  const Icon = categoryIconMap[id];
+
   return (
-    <section>
-      <div className="flex items-center gap-2.5 mb-4">
-        <div className={`w-1.5 h-5 rounded-full ${colors.dot}`} />
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{label}</h2>
-        <span className="text-xs text-muted-foreground/50 font-medium">{categoryApps.length}</span>
+    <Link href={`/category/${id}`}>
+      <div
+        className={`group bg-card rounded-2xl border ${colors.border} p-6 h-full relative overflow-hidden card-hover cursor-pointer transition-all duration-200`}
+        style={{ boxShadow: "var(--shadow-sm)", minHeight: "220px" }}
+      >
+        {/* Top color bar */}
+        <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${colors.gradientFrom} ${colors.gradientTo}`} />
+
+        <div className="flex items-start justify-between">
+          <div className={`w-14 h-14 rounded-2xl ${colors.iconBg} flex items-center justify-center`}>
+            {Icon && <Icon size={28} className={colors.text} />}
+          </div>
+          <ArrowUpRight
+            size={20}
+            className="text-muted-foreground/0 group-hover:text-muted-foreground transition-all duration-200"
+          />
+        </div>
+
+        <h2 className="text-lg font-bold mt-4">{label}</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          {appCount} {appCount === 1 ? "tool" : "tools"}
+        </p>
+
+        <div className="mt-4 pt-3 border-t border-border">
+          <div className="flex flex-wrap gap-1.5">
+            {appNames.map((name) => (
+              <span
+                key={name}
+                className={`text-[11px] px-2 py-0.5 rounded-full ${colors.bg} ${colors.text} font-medium`}
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {categoryApps.map((app) => (
-          <AppCard key={app.id} app={app} />
-        ))}
-      </div>
-    </section>
+    </Link>
   );
 }
 
@@ -206,8 +151,7 @@ export default function Dashboard() {
   }, [academicYear]);
 
   const rawApps = getAppsForRole(currentUserRole);
-  const visibleApps = applyLiveStats(rawApps, stats);
-  const grouped = getAppsByCategory(visibleApps);
+  const grouped = getAppsByCategory(rawApps);
   const sortedCategories = appCategories
     .filter((cat) => grouped[cat.id]?.length)
     .sort((a, b) => a.order - b.order);
@@ -269,16 +213,21 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* App Grid by Category */}
-      <div className="space-y-8">
-        {sortedCategories.map((cat) => (
-          <CategorySection
-            key={cat.id}
-            label={cat.label}
-            color={cat.color}
-            apps={grouped[cat.id]}
-          />
-        ))}
+      {/* Category Cards Grid */}
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">Tools</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {sortedCategories.map((cat) => (
+            <CategoryCard
+              key={cat.id}
+              id={cat.id}
+              label={cat.label}
+              color={cat.color}
+              appCount={grouped[cat.id].length}
+              appNames={grouped[cat.id].map((app) => app.name)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
