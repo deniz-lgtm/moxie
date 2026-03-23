@@ -34,8 +34,10 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
+  // Primary
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, category: "Primary" },
+  
   // Leasing & Operations
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, category: "Leasing & Operations" },
   { label: "Applications", href: "/leasing/applications", icon: FileText, category: "Leasing & Operations" },
   { label: "Leasing", href: "/leasing", icon: FileText, category: "Leasing & Operations" },
   { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations" },
@@ -95,6 +97,7 @@ const navItems: NavItem[] = [
 
 // Group items by category
 const categoryOrder = [
+  "Primary",
   "Leasing & Operations",
   "Property Management", 
   "Revenue & Finance",
@@ -128,7 +131,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-sidebar z-50 border-r border-white/5">
+    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5" style={{ backgroundColor: '#111827' }}>
       {/* Brand */}
       <div className="h-16 flex items-center px-5 border-b border-white/10">
         <Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
@@ -153,13 +156,15 @@ export function Sidebar() {
           if (!items || items.length === 0) return null;
           
           return (
-            <div key={category} className="mb-4">
-              {/* Category header */}
-              <div className="px-3 mb-2">
-                <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
-                  {category}
-                </h3>
-              </div>
+            <div key={category} className={`mb-4 ${category === "Primary" ? "" : ""}`}>
+              {/* Category header (hidden for Primary) */}
+              {category !== "Primary" && (
+                <div className="px-3 mb-2">
+                  <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
+                    {category}
+                  </h3>
+                </div>
+              )}
               
               {/* Category items */}
               <div className="space-y-0.5">
