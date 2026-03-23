@@ -31,6 +31,7 @@ type NavItem = {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   children?: { label: string; href: string }[];
   category?: string;
+  disabled?: boolean;
 };
 
 const navItems: NavItem[] = [
@@ -40,12 +41,12 @@ const navItems: NavItem[] = [
   // Leasing & Operations
   { label: "Applications", href: "/leasing/applications", icon: FileText, category: "Leasing & Operations" },
   { label: "Leasing", href: "/leasing", icon: FileText, category: "Leasing & Operations" },
-  { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations" },
+  { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations", disabled: true },
   
   // Property Management
   { label: "Maintenance", href: "/maintenance", icon: Wrench, category: "Property Management" },
   { label: "Buildings", href: "/portfolio", icon: Building2, category: "Property Management" },
-  { label: "Units/Spaces", href: "/units", icon: Building2, category: "Property Management" },
+  { label: "Units/Spaces", href: "/units", icon: Building2, category: "Property Management", disabled: true },
   {
     label: "Inspections",
     href: "/inspections",
@@ -61,20 +62,20 @@ const navItems: NavItem[] = [
   },
   
   // Revenue & Finance
-  { label: "Revenue", href: "/revenue", icon: DollarSign, category: "Revenue & Finance" },
-  { label: "Financials", href: "/financials", icon: BarChart3, category: "Revenue & Finance" },
+  { label: "Revenue", href: "/revenue", icon: DollarSign, category: "Revenue & Finance", disabled: true },
+  { label: "Financials", href: "/financials", icon: BarChart3, category: "Revenue & Finance", disabled: true },
   { label: "Analytics", href: "/resident-pulse", icon: MessageSquare, category: "Revenue & Finance" },
   
   // Asset Management
-  { label: "Assets", href: "/assets", icon: HardHat, category: "Asset Management" },
-  { label: "Depreciation", href: "/depreciation", icon: TrendingUp, category: "Asset Management" },
-  { label: "Maintenance Log", href: "/maintenance-log", icon: Wrench, category: "Asset Management" },
-  { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management" },
+  { label: "Assets", href: "/assets", icon: HardHat, category: "Asset Management", disabled: true },
+  { label: "Depreciation", href: "/depreciation", icon: TrendingUp, category: "Asset Management", disabled: true },
+  { label: "Maintenance Log", href: "/maintenance-log", icon: Wrench, category: "Asset Management", disabled: true },
+  { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management", disabled: true },
   
   // Admin
-  { label: "Team", href: "/team", icon: Users, category: "Admin" },
-  { label: "Settings", href: "/settings", icon: Settings, category: "Admin" },
-  { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin" },
+  { label: "Team", href: "/team", icon: Users, category: "Admin", disabled: true },
+  { label: "Settings", href: "/settings", icon: Settings, category: "Admin", disabled: true },
+  { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin", disabled: true },
   
   // Legacy items (to be reviewed)
   { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw, category: "Property Management" },
@@ -168,7 +169,7 @@ export function Sidebar() {
               
               {/* Category items */}
               <div className="space-y-0.5">
-                {items.map((item) => {
+                {items.filter(item => !item.disabled).map((item) => {
                   const active = isActive(item.href);
                   const Icon = item.icon;
                   const isExpanded = expanded[item.label];
