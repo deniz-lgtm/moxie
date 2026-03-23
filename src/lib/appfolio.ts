@@ -1,8 +1,8 @@
 // ============================================
-// AppFolio Property Manager API Integration
+// AppFolio Property Manager API Integration (v2)
 // ============================================
 // AppFolio uses a report-based API at:
-//   https://{database}.appfolio.com/api/v1/reports/{report_name}.json
+//   https://{database}.appfolio.com/api/v2/reports/{report_name}.json
 //
 // Auth: HTTP Basic Auth with Client ID + Client Secret
 // Credentials: AppFolio PM → General Settings → Manage API Settings → Reports API Credentials
@@ -11,9 +11,14 @@
 //   APPFOLIO_CLIENT_ID
 //   APPFOLIO_CLIENT_SECRET
 //   APPFOLIO_DATABASE_NAME    (your AppFolio subdomain, e.g. "mbtenants")
+//
+// v2 API Changes:
+// - Base URL: /api/v2 (instead of /api/v1)
+// - Field names: snake_case (property_name, unit_name, etc.)
+// - Pagination: Still uses next_page_url
 
 const getBaseUrl = () =>
-  `https://${process.env.APPFOLIO_DATABASE_NAME}.appfolio.com/api/v1`;
+  `https://${process.env.APPFOLIO_DATABASE_NAME}.appfolio.com/api/v2`;
 
 function getAuthHeaders() {
   const clientId = process.env.APPFOLIO_CLIENT_ID;

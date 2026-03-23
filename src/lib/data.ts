@@ -31,18 +31,20 @@ import { academicYearDates } from "./types";
 const MOXIE_PORTFOLIO_ID = "24";
 
 /**
- * Filter any AppFolio report rows to Moxie Management (PortfolioId = 24).
+ * Filter any AppFolio report rows to Moxie Management (portfolio_id = 24).
+ * Supports both v2 (snake_case) and v1 (PascalCase) field names for compatibility.
  */
 function filterToMoxie(rows: any[]): any[] {
   if (!rows || rows.length === 0) return [];
   const filtered = rows.filter((row) => {
-    const pid = String(row.PortfolioId || row.portfolio_id || "");
+    // v2 uses snake_case; v1 uses PascalCase — try both
+    const pid = String(row.portfolio_id || row.PortfolioId || "");
     return pid === MOXIE_PORTFOLIO_ID;
   });
   if (filtered.length === 0) {
     console.warn(
-      `[Moxie] filterToMoxie: 0/${rows.length} rows matched PortfolioId=${MOXIE_PORTFOLIO_ID}. ` +
-      `Sample row PortfolioId: ${rows[0]?.PortfolioId}`
+      `[Moxie] filterToMoxie: 0/${rows.length} rows matched portfolio_id=${MOXIE_PORTFOLIO_ID}. ` +
+      `Sample row portfolio_id: ${rows[0]?.portfolio_id || rows[0]?.PortfolioId}`
     );
   }
   return filtered;
@@ -82,17 +84,18 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
   const rows = await afGetProperties();
   const filtered = filterToMoxie(rows || []);
   const properties: Property[] = filtered.map((p: any, i: number) => ({
-    id: String(p.PropertyId || p.property_id || `prop-${i}`),
-    name: p.PropertyName || p.property_name || "",
+    // v2 uses snake_case; fallback to v1 PascalCase for compatibility
+    id: String(p.property_id || p.PropertyId || `prop-${i}`),
+    name: p.property_name || p.PropertyName || "",
     address: [
-      p.PropertyAddress || p.property_address || "",
-      p.PropertyCity || p.property_city || "",
-      p.PropertyState || p.property_state || "",
-      p.PropertyZip || p.property_zip || "",
+      p.property_address || p.PropertyAddress || "",
+      p.property_city || p.PropertyCity || "",
+      p.property_state || p.PropertyState || "",
+      p.property_zip || p.PropertyZip || "",
     ]
       .filter(Boolean)
       .join(", "),
-    unitCount: Number(p.UnitCount || p.unit_count || 0),
+    unitCount: Number(p.units || p.UnitCount || 0),
   }));
   return { data: properties, source: "appfolio" };
 }
@@ -128,34 +131,34 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
   const filtered = filterToMoxie(rentRollRows);
 
   const units: Unit[] = filtered.map((r: any) => {
-    // "Unit Street Address 1" = primary unit identifier in Moxie
+    // v2 uses unit_street (primary identifier); fallback to v1 formats
     const unitName = String(
-      r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.UnitAddress || r.Unit || ""
+      r.unit_street || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.unit_address || r.UnitAddress || r.unit || r.Unit || ""
     );
-    const unitNum = String(r.Unit || r.UnitName || "");
-    const propName = String(r.PropertyName || "");
-    const { bed, bath } = parseBdBa(r.BdBa);
-    const rawStatus = String(r.Status || "").toLowerCase();
+    const unitNum = String(r.unit || r.Unit || r.unit_name || r.UnitName || "");
+    const propName = String(r.property_name || r.PropertyName || "");
+    const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
+    const rawStatus = String(r.status || r.Status || "").toLowerCase();
     const status = (["current", "vacant", "notice", "future"].includes(rawStatus)
       ? rawStatus
       : "vacant") as Unit["status"];
 
     return {
-      id: String(r.UnitId || ""),
-      propertyId: String(r.PropertyId || ""),
+      id: String(r.unit_id || r.UnitId || ""),
+      propertyId: String(r.property_id || r.PropertyId || ""),
       propertyName: propName,
       number: unitNum,
       unitName,
       displayName: unitName || `${propName} #${unitNum}`,
       bedrooms: bed,
       bathrooms: bath,
-      sqft: parseSqft(r.SquareFt),
-      rent: r.Rent || null,
+      sqft: parseSqft(r.sqft || r.SquareFt),
+      rent: r.rent || r.Rent || null,
       status,
-      tenant: r.Tenant || null,
-      leaseFrom: r.LeaseFrom || null,
-      leaseTo: r.LeaseTo || null,
-      appfolioId: r.UnitId ? String(r.UnitId) : undefined,
+      tenant: r.tenant || r.Tenant || null,
+      leaseFrom: r.lease_from || r.LeaseFrom || null,
+      leaseTo: r.lease_to || r.LeaseTo || null,
+      appfolioId: r.unit_id || r.UnitId ? String(r.unit_id || r.UnitId) : undefined,
     };
   });
 
