@@ -5,6 +5,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { loadLogoBase64 } from "@/lib/pdf-logo";
 import type {
   Inspection,
   InspectionRoom,
@@ -419,7 +420,8 @@ export default function MoveOutInspectionPage() {
     try {
       const { generateDepositDeductionPDF, generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
 
-      const pdfData = buildPdfData(activeInspection);
+      const logo = await loadLogoBase64();
+      const pdfData = buildPdfData(activeInspection, logo);
       const pdfDataUri = generateDepositDeductionPDF(pdfData);
 
       const totalDed = activeInspection.rooms
@@ -450,14 +452,7 @@ export default function MoveOutInspectionPage() {
   }
 
   // Build PDF data structure from inspection
-  function buildPdfData(insp: Inspection): {
-    inspection: any;
-    companyName: string;
-    companyAddress: string;
-    companyPhone: string;
-    companyEmail: string;
-    tenants?: { name: string; email: string }[];
-  } {
+  function buildPdfData(insp: Inspection, logoBase64?: string | null): import("@/lib/pdf-invoice").InvoiceData {
     return {
       inspection: {
         ...insp as any,
@@ -492,6 +487,7 @@ export default function MoveOutInspectionPage() {
       companyAddress: "Los Angeles, CA",
       companyPhone: "",
       companyEmail: "",
+      logoBase64: logoBase64 || null,
     };
   }
 
@@ -1102,7 +1098,8 @@ export default function MoveOutInspectionPage() {
           <button
             onClick={async () => {
               const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
-              const pdfData = buildPdfData(activeInspection);
+              const logo = await loadLogoBase64();
+              const pdfData = buildPdfData(activeInspection, logo);
               if (selectedTenantList.length > 0) {
                 pdfData.tenants = selectedTenantList;
               }
@@ -1119,21 +1116,22 @@ export default function MoveOutInspectionPage() {
                 : "CA Civil Code 1950.5 — formal cover letter for tenant"}
             </span>
           </button>
-          {activeInspection.invoiceUrl && (
-            <button
-              onClick={async () => {
-                const { downloadPDF } = await import("@/lib/pdf-invoice");
-                downloadPDF(
-                  activeInspection.invoiceUrl!,
-                  `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`
-                );
-              }}
-              className="group block w-full text-left px-4 py-3.5 border border-border rounded-xl hover:bg-muted/50 text-sm transition-colors"
-            >
-              <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
-              <span className="block text-xs text-muted-foreground mt-0.5">Detailed breakdown of all deductions with costs</span>
-            </button>
-          )}
+          <button
+            onClick={async () => {
+              const { generateDepositDeductionPDF, downloadPDF } = await import("@/lib/pdf-invoice");
+              const logo = await loadLogoBase64();
+              const pdfData = buildPdfData(activeInspection, logo);
+              if (selectedTenantList.length > 0) {
+                pdfData.tenants = selectedTenantList;
+              }
+              const deductionPdf = generateDepositDeductionPDF(pdfData);
+              downloadPDF(deductionPdf, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+            }}
+            className="group block w-full text-left px-4 py-3.5 border border-border rounded-xl hover:bg-muted/50 text-sm transition-colors"
+          >
+            <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
+          </button>
           {selectedEmails.length > 0 && (
             <a
               href={`mailto:${selectedEmails.join(",")}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${selectedTenantList.map((t) => t.name).join(", ")},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
