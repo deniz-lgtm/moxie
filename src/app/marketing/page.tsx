@@ -337,11 +337,26 @@ export default function MarketingPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Marketing & SEO</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Track SEO performance, manage content, and generate leads
-          </p>
+        <div className="flex items-start gap-4">
+          {/* Moxie Logo */}
+          <img 
+            src="/logos/moxie-logo.png" 
+            alt="Moxie Management" 
+            className="h-12 w-auto object-contain"
+          />
+          <div>
+            <div className="flex items-center gap-3">
+              <img 
+                src="/logos/key-icon.png" 
+                alt="Key" 
+                className="h-8 w-8 object-contain"
+              />
+              <h1 className="text-2xl font-bold tracking-tight">Marketing & SEO</h1>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              Track SEO performance, manage content, and generate leads
+            </p>
+          </div>
         </div>
         <Link
           href="/marketing/report"
