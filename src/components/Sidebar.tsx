@@ -135,23 +135,15 @@ export function Sidebar() {
   return (
     <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5" style={{ backgroundColor: '#111827' }}>
       {/* Brand */}
-      <div className="h-16 flex items-center px-5 border-b border-white/10">
-        <Link href="/" className="flex items-center gap-3 group hover:opacity-85 transition-opacity">
+      <div className="h-16 flex items-center justify-center px-5 border-b border-white/10">
+        <Link href="/" className="group hover:opacity-85 transition-opacity">
           <Image 
             src="/moxie-logo.png" 
-            alt="Moxie" 
-            width={40} 
-            height={40}
-            className="w-10 h-10 object-contain"
+            alt="Moxie Management" 
+            width={50} 
+            height={50}
+            className="w-12 h-12 object-contain"
           />
-          <div>
-            <span className="text-white font-semibold text-base tracking-tight block leading-tight">
-              Moxie
-            </span>
-            <span className="text-white/60 text-[10px] tracking-wide uppercase font-medium">
-              Management
-            </span>
-          </div>
         </Link>
       </div>
 
