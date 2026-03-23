@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -135,15 +136,19 @@ export function Sidebar() {
     <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5" style={{ backgroundColor: '#111827' }}>
       {/* Brand */}
       <div className="h-16 flex items-center px-5 border-b border-white/10">
-        <Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
-          <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/20 group-hover:shadow-red-500/40 transition-shadow">
-            <span className="text-white font-bold text-base">M</span>
-          </div>
+        <Link href="/" className="flex items-center gap-3 group hover:opacity-85 transition-opacity">
+          <Image 
+            src="/moxie-logo.png" 
+            alt="Moxie" 
+            width={40} 
+            height={40}
+            className="w-10 h-10 object-contain"
+          />
           <div>
             <span className="text-white font-semibold text-base tracking-tight block leading-tight">
               Moxie
             </span>
-            <span className="text-sidebar-text text-[10px] tracking-wide uppercase font-medium">
+            <span className="text-white/60 text-[10px] tracking-wide uppercase font-medium">
               Management
             </span>
           </div>
