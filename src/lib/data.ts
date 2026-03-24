@@ -54,9 +54,25 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
   }
 
   const propRows = await afGetProperties();
-  const moxieProps = (propRows || []).filter((p: any) => {
-    const portfolio = String(p.portfolio || p.Portfolio || "");
-    return portfolio.toLowerCase().includes("moxie");
+  if (!propRows || propRows.length === 0) {
+    console.warn("[Moxie] getMoxiePropertyRefs: property_directory returned 0 rows");
+    _moxiePropertyRefs = new Set();
+    _moxiePropertyRefsCacheTime = now;
+    return _moxiePropertyRefs;
+  }
+
+  // Log all field names from the first row so we can see what the API actually returns
+  console.log("[Moxie] property_directory fields:", Object.keys(propRows[0]));
+  console.log("[Moxie] property_directory sample row:", JSON.stringify(propRows[0]).slice(0, 500));
+
+  // Check all portfolio-related fields for "moxie" (case-insensitive)
+  const moxieProps = propRows.filter((p: any) => {
+    const candidates = [
+      p.portfolio, p.Portfolio,
+      p.property_group_name, p.PropertyGroupName,
+      p.portfolio_name, p.PortfolioName,
+    ].filter(Boolean);
+    return candidates.some((v) => String(v).toLowerCase().includes("moxie"));
   });
 
   _moxiePropertyRefs = new Set(
@@ -64,10 +80,15 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
   );
   _moxiePropertyRefsCacheTime = now;
 
-  if (_moxiePropertyRefs.size === 0 && (propRows || []).length > 0) {
+  console.log(`[Moxie] getMoxiePropertyRefs: ${moxieProps.length}/${propRows.length} properties matched. Refs: [${[..._moxiePropertyRefs].slice(0, 10).join(", ")}]`);
+
+  if (_moxiePropertyRefs.size === 0) {
+    // Log all unique portfolio values so we can see what's in the data
+    const allPortfolioValues = [...new Set(propRows.map((p: any) =>
+      String(p.portfolio || p.Portfolio || p.property_group_name || p.PropertyGroupName || "N/A")
+    ))];
     console.warn(
-      `[Moxie] getMoxiePropertyRefs: 0/${(propRows || []).length} properties matched portfolio="${MOXIE_PORTFOLIO_NAME}". ` +
-      `Sample portfolio value: ${propRows[0]?.portfolio || propRows[0]?.Portfolio || "N/A"}`
+      `[Moxie] No Moxie properties found! All portfolio values: [${allPortfolioValues.join(", ")}]`
     );
   }
 
@@ -80,8 +101,12 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
 function filterPropertiesToMoxie(rows: any[]): any[] {
   if (!rows || rows.length === 0) return [];
   return rows.filter((row) => {
-    const portfolio = String(row.portfolio || row.Portfolio || "");
-    return portfolio.toLowerCase().includes("moxie");
+    const candidates = [
+      row.portfolio, row.Portfolio,
+      row.property_group_name, row.PropertyGroupName,
+      row.portfolio_name, row.PortfolioName,
+    ].filter(Boolean);
+    return candidates.some((v) => String(v).toLowerCase().includes("moxie"));
   });
 }
 
