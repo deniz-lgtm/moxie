@@ -129,20 +129,22 @@ export function Sidebar() {
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
-    return pathname.startsWith(href);
+    // Exact match, or starts with href followed by "/" to prevent
+    // "/leasing" matching "/leasing/applications"
+    return pathname === href || pathname.startsWith(href + "/");
   }
 
   return (
     <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5" style={{ backgroundColor: '#111827' }}>
       {/* Brand */}
-      <div className="h-20 flex items-center justify-center px-3 border-b border-white/10">
+      <div className="h-24 flex items-center justify-center px-4 border-b border-white/10">
         <Link href="/" className="group hover:opacity-85 transition-opacity">
-          <Image 
-            src="/moxie-logo.png" 
-            alt="Moxie Management" 
-            width={70} 
-            height={70}
-            className="w-16 h-16 object-contain"
+          <Image
+            src="/moxie-logo.png"
+            alt="Moxie Management"
+            width={160}
+            height={80}
+            className="w-40 h-auto object-contain"
           />
         </Link>
       </div>
