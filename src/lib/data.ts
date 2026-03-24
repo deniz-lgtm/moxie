@@ -38,6 +38,7 @@ import { academicYearDates } from "./types";
 // Only property_directory has the `portfolio` field ("Moxie Management").
 // All other reports must be filtered by matching `property` against Moxie property refs.
 const MOXIE_PORTFOLIO_NAME = "Moxie Management";
+const MOXIE_PORTFOLIO_ID = 24;
 
 let _moxiePropertyRefs: Set<string> | null = null;
 let _moxiePropertyRefsCacheTime = 0;
@@ -65,14 +66,22 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
   console.log("[Moxie] property_directory fields:", Object.keys(propRows[0]));
   console.log("[Moxie] property_directory sample row:", JSON.stringify(propRows[0]).slice(0, 500));
 
-  // Check all portfolio-related fields for "moxie" (case-insensitive)
+  // Match by portfolio ID 24, or by name containing "moxie" as fallback
   const moxieProps = propRows.filter((p: any) => {
-    const candidates = [
+    // Check numeric ID fields first
+    const idCandidates = [
+      p.portfolio_id, p.portfolioId, p.PortfolioId, p.portfolio_ID,
+    ];
+    if (idCandidates.some((v) => v !== undefined && Number(v) === MOXIE_PORTFOLIO_ID)) {
+      return true;
+    }
+    // Fallback: check name fields for "moxie"
+    const nameCandidates = [
       p.portfolio, p.Portfolio,
       p.property_group_name, p.PropertyGroupName,
       p.portfolio_name, p.PortfolioName,
     ].filter(Boolean);
-    return candidates.some((v) => String(v).toLowerCase().includes("moxie"));
+    return nameCandidates.some((v) => String(v).toLowerCase().includes("moxie"));
   });
 
   _moxiePropertyRefs = new Set(
@@ -101,12 +110,20 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
 function filterPropertiesToMoxie(rows: any[]): any[] {
   if (!rows || rows.length === 0) return [];
   return rows.filter((row) => {
-    const candidates = [
+    // Check numeric ID fields first
+    const idCandidates = [
+      row.portfolio_id, row.portfolioId, row.PortfolioId, row.portfolio_ID,
+    ];
+    if (idCandidates.some((v) => v !== undefined && Number(v) === MOXIE_PORTFOLIO_ID)) {
+      return true;
+    }
+    // Fallback: check name fields for "moxie"
+    const nameCandidates = [
       row.portfolio, row.Portfolio,
       row.property_group_name, row.PropertyGroupName,
       row.portfolio_name, row.PortfolioName,
     ].filter(Boolean);
-    return candidates.some((v) => String(v).toLowerCase().includes("moxie"));
+    return nameCandidates.some((v) => String(v).toLowerCase().includes("moxie"));
   });
 }
 

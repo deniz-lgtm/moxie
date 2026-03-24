@@ -47,6 +47,8 @@ export async function GET() {
           return JSON.stringify({
             portfolio: r.portfolio,
             Portfolio: r.Portfolio,
+            portfolio_id: r.portfolio_id,
+            portfolioId: r.portfolioId,
             property_group_name: r.property_group_name,
             PropertyGroupName: r.PropertyGroupName,
           });
