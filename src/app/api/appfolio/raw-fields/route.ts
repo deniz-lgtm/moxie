@@ -22,15 +22,23 @@ export async function GET() {
   }
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const headers = { Authorization: `Basic ${credentials}`, Accept: "application/json" };
+  const headers = {
+    Authorization: `Basic ${credentials}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
   const base = `https://${dbName}.appfolio.com/api/v2/reports`;
 
   const results: Record<string, any> = {};
 
-  // Fetch property_directory — this is where we look for portfolio info
+  // Fetch property_directory — v2 uses POST with JSON body
   try {
-    const url = `${base}/property_directory.json?paginate_results=true`;
-    const res = await fetch(url, { headers });
+    const url = `${base}/property_directory.json`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ paginate_results: true }),
+    });
     if (!res.ok) {
       results.property_directory = { error: `HTTP ${res.status}`, body: (await res.text()).slice(0, 500) };
     } else {
@@ -39,11 +47,8 @@ export async function GET() {
       results.property_directory = {
         totalRows: rows.length,
         fields: rows.length > 0 ? Object.keys(rows[0]) : [],
-        // Show first 3 rows so we can see actual field values
         sampleRows: rows.slice(0, 3),
-        // Extract all unique portfolio-related values
         portfolioValues: [...new Set(rows.map((r: any) => {
-          // Check every field that might contain portfolio info
           return JSON.stringify({
             portfolio: r.portfolio,
             Portfolio: r.Portfolio,
@@ -59,10 +64,14 @@ export async function GET() {
     results.property_directory = { error: e.message };
   }
 
-  // Fetch rent_roll — first page only for field inspection
+  // Fetch rent_roll — v2 uses POST with JSON body
   try {
-    const url = `${base}/rent_roll.json?paginate_results=true`;
-    const res = await fetch(url, { headers });
+    const url = `${base}/rent_roll.json`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ paginate_results: true }),
+    });
     if (!res.ok) {
       results.rent_roll = { error: `HTTP ${res.status}`, body: (await res.text()).slice(0, 500) };
     } else {
@@ -73,7 +82,6 @@ export async function GET() {
         hasNextPage: !!data.next_page_url,
         fields: rows.length > 0 ? Object.keys(rows[0]) : [],
         sampleRows: rows.slice(0, 3),
-        // Show unique property values so we can match against property_directory
         uniquePropertyValues: [...new Set(rows.map((r: any) => String(r.property || r.Property || "N/A")))].slice(0, 20),
       };
     }
@@ -83,6 +91,7 @@ export async function GET() {
 
   return NextResponse.json({
     apiVersion: "v2",
+    httpMethod: "POST",
     baseUrl: base,
     database: dbName,
     ...results,
