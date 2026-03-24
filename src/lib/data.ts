@@ -4,11 +4,15 @@
 // Fetches live data from AppFolio report-based API v2.
 // Student housing lease year: Aug 15 → Jul 31.
 //
-// v2 API uses snake_case field names (property_id, unit_name, etc.)
-// v1 PascalCase fallbacks retained for backward compatibility.
+// v2 field names (from API docs):
+//   Property Directory: property, property_name, property_address, portfolio, units, sqft, ...
+//   Rent Roll: property, property_name, unit, tenant, status, bd_ba, sqft, rent, lease_from, lease_to, ...
+//   Tenant Directory: property, property_name, unit, tenant, status, emails, phone_numbers, ...
+//   Work Order: property, property_name, unit_name, unit_street, primary_tenant, status, priority, ...
+//   Unit Vacancy Detail: property, property_name, unit, unit_status, bed_and_bath, sqft, ...
 //
-// Portfolio filter: portfolio_id = 24 for Moxie Management.
-// Unit identity: "unit_street" from AppFolio = "Unit Name" in Moxie.
+// Portfolio filter: Only Property Directory has `portfolio` field.
+//   Other reports are filtered by matching `property` against Moxie property refs.
 
 import {
   getProperties as afGetProperties,
@@ -30,24 +34,77 @@ import type {
 } from "./types";
 import { academicYearDates } from "./types";
 
-// The one and only portfolio ID for Moxie Management
-const MOXIE_PORTFOLIO_ID = "24";
+// --- Moxie Portfolio Filtering ---
+// Only property_directory has the `portfolio` field ("Moxie Management").
+// All other reports must be filtered by matching `property` against Moxie property refs.
+const MOXIE_PORTFOLIO_NAME = "Moxie Management";
+
+let _moxiePropertyRefs: Set<string> | null = null;
+let _moxiePropertyRefsCacheTime = 0;
+const CACHE_TTL = 300_000; // 5 minutes
 
 /**
- * Filter any AppFolio report rows to Moxie Management (portfolio_id = 24).
- * Supports both v2 (snake_case) and v1 (PascalCase) field names for compatibility.
+ * Fetch Moxie property references from property_directory.
+ * Cached for 5 minutes. Returns set of `property` field values.
  */
-function filterToMoxie(rows: any[]): any[] {
-  if (!rows || rows.length === 0) return [];
-  const filtered = rows.filter((row) => {
-    // v2 uses snake_case; v1 uses PascalCase — try both
-    const pid = String(row.portfolio_id || row.PortfolioId || "");
-    return pid === MOXIE_PORTFOLIO_ID;
+async function getMoxiePropertyRefs(): Promise<Set<string>> {
+  const now = Date.now();
+  if (_moxiePropertyRefs && now - _moxiePropertyRefsCacheTime < CACHE_TTL) {
+    return _moxiePropertyRefs;
+  }
+
+  const propRows = await afGetProperties();
+  const moxieProps = (propRows || []).filter((p: any) => {
+    const portfolio = String(p.portfolio || p.Portfolio || "");
+    return portfolio.toLowerCase().includes("moxie");
   });
-  if (filtered.length === 0) {
+
+  _moxiePropertyRefs = new Set(
+    moxieProps.map((p: any) => String(p.property || p.Property || ""))
+  );
+  _moxiePropertyRefsCacheTime = now;
+
+  if (_moxiePropertyRefs.size === 0 && (propRows || []).length > 0) {
     console.warn(
-      `[Moxie] filterToMoxie: 0/${rows.length} rows matched portfolio_id=${MOXIE_PORTFOLIO_ID}. ` +
-      `Sample row portfolio_id: ${rows[0]?.portfolio_id || rows[0]?.PortfolioId}`
+      `[Moxie] getMoxiePropertyRefs: 0/${(propRows || []).length} properties matched portfolio="${MOXIE_PORTFOLIO_NAME}". ` +
+      `Sample portfolio value: ${propRows[0]?.portfolio || propRows[0]?.Portfolio || "N/A"}`
+    );
+  }
+
+  return _moxiePropertyRefs;
+}
+
+/**
+ * Filter property_directory rows by portfolio name.
+ */
+function filterPropertiesToMoxie(rows: any[]): any[] {
+  if (!rows || rows.length === 0) return [];
+  return rows.filter((row) => {
+    const portfolio = String(row.portfolio || row.Portfolio || "");
+    return portfolio.toLowerCase().includes("moxie");
+  });
+}
+
+/**
+ * Filter any report rows to Moxie by matching `property` field against Moxie property refs.
+ * Use this for rent_roll, work_order, tenant_directory, etc.
+ */
+async function filterToMoxie(rows: any[]): Promise<any[]> {
+  if (!rows || rows.length === 0) return [];
+  const moxieRefs = await getMoxiePropertyRefs();
+  if (moxieRefs.size === 0) {
+    console.warn("[Moxie] filterToMoxie: No Moxie property refs found — returning all rows as fallback.");
+    return rows;
+  }
+  const filtered = rows.filter((row) => {
+    const prop = String(row.property || row.Property || "");
+    return moxieRefs.has(prop);
+  });
+  if (filtered.length === 0 && rows.length > 0) {
+    console.warn(
+      `[Moxie] filterToMoxie: 0/${rows.length} rows matched Moxie properties. ` +
+      `Sample property value: "${rows[0]?.property || rows[0]?.Property || "N/A"}". ` +
+      `Moxie refs: [${[...moxieRefs].slice(0, 5).join(", ")}]`
     );
   }
   return filtered;
@@ -61,8 +118,8 @@ export async function debugMoxieFilter() {
   const propFields = propRows?.length > 0 ? Object.keys(propRows[0]) : [];
   const rrFields = rentRollRows?.length > 0 ? Object.keys(rentRollRows[0]) : [];
 
-  const moxieProps = filterToMoxie(propRows || []);
-  const moxieRR = filterToMoxie(rentRollRows || []);
+  const moxieProps = filterPropertiesToMoxie(propRows || []);
+  const moxieRR = await filterToMoxie(rentRollRows || []);
 
   return {
     propertyDirectory: {
@@ -83,12 +140,14 @@ export async function debugMoxieFilter() {
 }
 
 // --- Properties ---
+// v2 Property Directory fields: property, property_name, property_address,
+//   property_street, property_street2, property_city, property_state, property_zip,
+//   portfolio, units, sqft, property_type, owners, ...
 export async function fetchProperties(): Promise<{ data: Property[]; source: "appfolio" }> {
   const rows = await afGetProperties();
-  const filtered = filterToMoxie(rows || []);
+  const filtered = filterPropertiesToMoxie(rows || []);
   const properties: Property[] = filtered.map((p: any, i: number) => ({
-    // v2 uses snake_case; fallback to v1 PascalCase for compatibility
-    id: String(p.property_id || p.PropertyId || `prop-${i}`),
+    id: String(p.property || p.Property || `prop-${i}`),
     name: p.property_name || p.PropertyName || "",
     address: [
       p.property_address || p.PropertyAddress || "",
@@ -98,14 +157,15 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
     ]
       .filter(Boolean)
       .join(", "),
-    unitCount: Number(p.units || p.UnitCount || 0),
+    unitCount: Number(p.units || p.Units || 0),
   }));
   return { data: properties, source: "appfolio" };
 }
 
 // --- Units (unit-centric) ---
-// Rent roll fields: UnitId, Unit, UnitStreetAddress1, PropertyName, PropertyId,
-//   Status, Tenant, BdBa ("2/1"), SquareFt, Rent, LeaseFrom, LeaseTo, PortfolioId
+// v2 Rent Roll fields: property, property_name, property_address, property_type,
+//   unit, unit_tags, unit_type, bd_ba, tenant, status, sqft, market_rent, rent,
+//   deposit, lease_from, lease_to, move_in, move_out, monthly_charges, ...
 function parseBdBa(val: string | null | undefined): { bed: number | null; bath: number | null } {
   if (!val) return { bed: null, bath: null };
   const parts = val.split("/").map((s) => s.trim().replace("--", ""));
@@ -131,14 +191,11 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
     return { data: [], source: "appfolio" };
   }
 
-  const filtered = filterToMoxie(rentRollRows);
+  const filtered = await filterToMoxie(rentRollRows);
 
   const units: Unit[] = filtered.map((r: any) => {
-    // v2 uses unit_street (primary identifier); fallback to v1 formats
-    const unitName = String(
-      r.unit_street || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.unit_address || r.UnitAddress || r.unit || r.Unit || ""
-    );
-    const unitNum = String(r.unit || r.Unit || r.unit_name || r.UnitName || "");
+    // v2 Rent Roll: "unit" is the unit identifier (no unit_street in rent roll)
+    const unitNum = String(r.unit || r.Unit || "");
     const propName = String(r.property_name || r.PropertyName || "");
     const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
     const rawStatus = String(r.status || r.Status || "").toLowerCase();
@@ -147,12 +204,12 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
       : "vacant") as Unit["status"];
 
     return {
-      id: String(r.unit_id || r.UnitId || ""),
-      propertyId: String(r.property_id || r.PropertyId || ""),
+      id: unitNum, // Rent Roll uses "unit" as the identifier
+      propertyId: String(r.property || r.Property || ""),
       propertyName: propName,
       number: unitNum,
-      unitName,
-      displayName: unitName || `${propName} #${unitNum}`,
+      unitName: unitNum,
+      displayName: unitNum || `${propName} #${unitNum}`,
       bedrooms: bed,
       bathrooms: bath,
       sqft: parseSqft(r.sqft || r.SquareFt),
@@ -161,20 +218,18 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
       tenant: r.tenant || r.Tenant || null,
       leaseFrom: r.lease_from || r.LeaseFrom || null,
       leaseTo: r.lease_to || r.LeaseTo || null,
-      appfolioId: r.unit_id || r.UnitId ? String(r.unit_id || r.UnitId) : undefined,
+      appfolioId: unitNum || undefined,
     };
   });
 
   // If academic year is specified, re-classify statuses based on lease overlap
   if (academicYear) {
-    const { leaseStart, leaseEnd } = academicYearDates(academicYear);
+    const { leaseStart } = academicYearDates(academicYear);
     const ayStart = new Date(leaseStart);
-    const ayEnd = new Date(leaseEnd);
 
     for (const unit of units) {
       if (unit.leaseTo) {
         const leaseTo = new Date(unit.leaseTo);
-        // If lease ends before academic year starts, unit is vacant for that year
         if (leaseTo < ayStart) {
           unit.status = "vacant";
           continue;
@@ -182,7 +237,6 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
       }
       if (unit.leaseFrom) {
         const leaseFrom = new Date(unit.leaseFrom);
-        // Future lease starting in this academic year = pre-leased
         if (leaseFrom >= ayStart && unit.status === "future") {
           continue; // keep "future" status
         }
@@ -196,7 +250,7 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
 /**
  * Fetch units with all tenants grouped per unit.
  * The rent roll may have multiple rows per unit (one per tenant on the lease).
- * This function deduplicates by UnitId/UnitStreetAddress1 and groups all tenants.
+ * This function deduplicates by unit field and groups all tenants.
  */
 export async function fetchUnitsWithTenants(): Promise<{
   data: (Unit & { tenants: string[]; tenantEmails: string[] })[];
@@ -207,13 +261,13 @@ export async function fetchUnitsWithTenants(): Promise<{
     return { data: [], source: "appfolio" };
   }
 
-  const filtered = filterToMoxie(rentRollRows);
+  const filtered = await filterToMoxie(rentRollRows);
 
-  // Group rows by unit key — v2 snake_case first, v1 PascalCase fallback
+  // Group rows by unit key — v2 rent roll uses `unit` as the unit identifier
   const unitMap = new Map<string, { unit: any; tenants: string[] }>();
 
   for (const r of filtered) {
-    const unitKey = String(r.unit_id || r.UnitId || r.unit_street || r.UnitStreetAddress1 || r.unit || r.Unit || "");
+    const unitKey = String(r.unit || r.Unit || "");
     const tenant = String(r.tenant || r.Tenant || "").trim();
 
     if (!unitMap.has(unitKey)) {
@@ -225,13 +279,16 @@ export async function fetchUnitsWithTenants(): Promise<{
   }
 
   // Also fetch tenant directory for emails
+  // v2 Tenant Directory: tenant, emails (plural), phone_numbers, status, ...
   let tenantEmailMap = new Map<string, string>();
   try {
     const tenantRows = await afGetTenants();
-    const moxieTenants = filterToMoxie(tenantRows || []);
+    const moxieTenants = await filterToMoxie(tenantRows || []);
     for (const t of moxieTenants) {
-      const name = String(t.tenant_name || t.TenantName || t.name || t.Name || "").trim();
-      const email = String(t.email || t.Email || t.tenant_email || t.TenantEmail || "").trim();
+      const name = String(t.tenant || t.Tenant || "").trim();
+      const emails = String(t.emails || t.Emails || "").trim();
+      // emails may be comma-separated; take the first one
+      const email = emails.split(",")[0]?.trim() || "";
       if (name && email && email !== "null") {
         tenantEmailMap.set(name.toLowerCase(), email);
       }
@@ -243,8 +300,7 @@ export async function fetchUnitsWithTenants(): Promise<{
   const units: (Unit & { tenants: string[]; tenantEmails: string[] })[] = [];
 
   for (const [, { unit: r, tenants }] of unitMap) {
-    const unitName = String(r.unit_street || r.UnitStreetAddress1 || r.unit_address || r.UnitAddress || r.unit || r.Unit || "");
-    const unitNum = String(r.unit || r.Unit || r.unit_name || r.UnitName || "");
+    const unitNum = String(r.unit || r.Unit || "");
     const propName = String(r.property_name || r.PropertyName || "");
     const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
     const rawStatus = String(r.status || r.Status || "").toLowerCase();
@@ -257,12 +313,12 @@ export async function fetchUnitsWithTenants(): Promise<{
       .filter(Boolean);
 
     units.push({
-      id: String(r.unit_id || r.UnitId || ""),
-      propertyId: String(r.property_id || r.PropertyId || ""),
+      id: unitNum,
+      propertyId: String(r.property || r.Property || ""),
       propertyName: propName,
       number: unitNum,
-      unitName,
-      displayName: unitName || `${propName} #${unitNum}`,
+      unitName: unitNum,
+      displayName: unitNum || `${propName} #${unitNum}`,
       bedrooms: bed,
       bathrooms: bath,
       sqft: parseSqft(r.sqft || r.SquareFt),
@@ -273,7 +329,7 @@ export async function fetchUnitsWithTenants(): Promise<{
       tenantEmails,
       leaseFrom: r.lease_from || r.LeaseFrom || null,
       leaseTo: r.lease_to || r.LeaseTo || null,
-      appfolioId: r.unit_id || r.UnitId ? String(r.unit_id || r.UnitId) : undefined,
+      appfolioId: unitNum || undefined,
     });
   }
 
@@ -281,8 +337,8 @@ export async function fetchUnitsWithTenants(): Promise<{
 }
 
 /**
- * Fetch all tenants for a specific unit by matching UnitStreetAddress1.
- * More reliable than name-based matching since it uses the address directly.
+ * Fetch all tenants for a specific unit.
+ * v2 Tenant Directory: property, unit, tenant, first_name, last_name, emails, phone_numbers, status, ...
  */
 export async function fetchTenantsForUnit(
   unitAddress: string
@@ -291,18 +347,18 @@ export async function fetchTenantsForUnit(
     const tenantRows = await afGetTenants();
     if (!Array.isArray(tenantRows) || tenantRows.length === 0) return [];
 
-    const moxieTenants = filterToMoxie(tenantRows);
+    const moxieTenants = await filterToMoxie(tenantRows);
     const normalizedAddress = unitAddress.trim().toLowerCase();
 
     const matched: { name: string; email: string }[] = [];
     for (const t of moxieTenants) {
-      const addr = String(
-        t.unit_street || t.UnitStreetAddress1 || t.unit_address || ""
-      ).trim().toLowerCase();
+      // v2 tenant_directory: "unit" is the unit identifier
+      const addr = String(t.unit || t.Unit || "").trim().toLowerCase();
       if (!addr || addr !== normalizedAddress) continue;
 
-      const name = String(t.tenant_name || t.TenantName || t.name || t.Name || "").trim();
-      const email = String(t.email || t.Email || t.tenant_email || t.TenantEmail || "").trim();
+      const name = String(t.tenant || t.Tenant || "").trim();
+      const emails = String(t.emails || t.Emails || "").trim();
+      const email = emails.split(",")[0]?.trim() || "";
       if (name && name !== "null") {
         matched.push({ name, email: email && email !== "null" ? email : "" });
       }
@@ -349,6 +405,12 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 }
 
 // --- Work Orders / Maintenance ---
+// v2 Work Order fields: property, property_name, property_street, unit_address,
+//   unit_street, unit_name, priority, work_order_type, work_order_number,
+//   job_description, instructions, status, vendor, primary_tenant,
+//   primary_tenant_email, primary_tenant_phone_number, created_at, created_by,
+//   assigned_user, estimate_amount, scheduled_start, scheduled_end,
+//   work_completed_on, completed_on, amount, invoice, ...
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
   electrical: "electrical",
@@ -392,50 +454,49 @@ export async function fetchMaintenanceRequests(params?: {
   status?: string;
 }): Promise<{ data: MaintenanceRequest[]; source: "appfolio" }> {
   const allRows = await afGetWorkOrders(params);
-  const rows = filterToMoxie(allRows || []);
+  const rows = await filterToMoxie(allRows || []);
   const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
-    id: String(wo.work_order_id || wo.WorkOrderId || wo.id || wo.Id || `wo-${i}`),
-    unitId: String(wo.unit_id || wo.UnitId || ""),
-    propertyId: String(wo.property_id || wo.PropertyId || ""),
-    unitNumber: String(
-      wo.unit_street || wo.UnitStreetAddress1 || wo.unit || wo.Unit || wo.unit_name || wo.UnitName || ""
-    ),
+    id: String(wo.work_order_number || wo.WorkOrderNumber || wo.service_request_number || `wo-${i}`),
+    unitId: String(wo.unit_name || wo.UnitName || ""),
+    propertyId: String(wo.property || wo.Property || ""),
+    unitNumber: String(wo.unit_name || wo.UnitName || wo.unit_street || wo.UnitStreet || ""),
     propertyName: String(wo.property_name || wo.PropertyName || ""),
-    tenantName: String(wo.tenant_name || wo.TenantName || wo.tenant || wo.Tenant || "—"),
-    tenantPhone: wo.tenant_phone || wo.TenantPhone || undefined,
-    tenantEmail: wo.tenant_email || wo.TenantEmail || undefined,
-    category: CATEGORY_MAP[String(wo.category || wo.Category || wo.work_order_category || wo.WorkOrderCategory || "general").toLowerCase()] || "general",
+    tenantName: String(wo.primary_tenant || wo.PrimaryTenant || "—"),
+    tenantPhone: wo.primary_tenant_phone_number || wo.PrimaryTenantPhoneNumber || undefined,
+    tenantEmail: wo.primary_tenant_email || wo.PrimaryTenantEmail || undefined,
+    category: CATEGORY_MAP[String(wo.work_order_type || wo.WorkOrderType || "general").toLowerCase()] || "general",
     priority: PRIORITY_MAP[String(wo.priority || wo.Priority || "normal").toLowerCase()] || "medium",
-    status: STATUS_MAP[String(wo.status || wo.Status || wo.work_order_status || wo.WorkOrderStatus || "open").toLowerCase()] || "submitted",
-    title: String(wo.job_description || wo.JobDescription || wo.description || wo.Description || wo.summary || wo.Summary || "Work Order"),
-    description: String(wo.detail || wo.Detail || wo.job_description || wo.JobDescription || wo.description || wo.Description || ""),
+    status: STATUS_MAP[String(wo.status || wo.Status || "open").toLowerCase()] || "submitted",
+    title: String(wo.job_description || wo.JobDescription || wo.service_request_description || "Work Order"),
+    description: String(wo.instructions || wo.Instructions || wo.job_description || wo.JobDescription || ""),
     photos: [],
-    assignedTo: wo.assigned_to || wo.AssignedTo || wo.assigned_users || wo.AssignedUsers || undefined,
-    vendor: wo.vendor_name || wo.VendorName || wo.vendor || wo.Vendor || undefined,
-    estimatedCost: wo.estimated_cost || wo.EstimatedCost ? Number(wo.estimated_cost || wo.EstimatedCost) : undefined,
-    actualCost: wo.actual_cost || wo.ActualCost || wo.total_cost || wo.TotalCost ? Number(wo.actual_cost || wo.ActualCost || wo.total_cost || wo.TotalCost) : undefined,
-    scheduledDate: wo.scheduled_end || wo.ScheduledEnd || wo.scheduled_date || wo.ScheduledDate || wo.due_date || wo.DueDate || undefined,
-    completedDate: wo.completed_on || wo.CompletedOn || wo.completed_date || wo.CompletedDate || undefined,
-    notes: [],
-    createdAt: wo.created_at || wo.CreatedAt || wo.created_date || wo.CreatedDate || new Date().toISOString(),
-    updatedAt: wo.updated_at || wo.UpdatedAt || wo.last_updated || wo.LastUpdated || new Date().toISOString(),
+    assignedTo: wo.assigned_user || wo.AssignedUser || undefined,
+    vendor: wo.vendor || wo.Vendor || undefined,
+    estimatedCost: wo.estimate_amount || wo.EstimateAmount ? Number(wo.estimate_amount || wo.EstimateAmount) : undefined,
+    actualCost: wo.amount || wo.Amount ? Number(wo.amount || wo.Amount) : undefined,
+    scheduledDate: wo.scheduled_end || wo.ScheduledEnd || wo.scheduled_start || wo.ScheduledStart || undefined,
+    completedDate: wo.completed_on || wo.CompletedOn || wo.work_completed_on || wo.WorkDoneOn || undefined,
+    notes: wo.status_notes ? [wo.status_notes] : [],
+    createdAt: wo.created_at || wo.CreatedAt || new Date().toISOString(),
+    updatedAt: wo.completed_on || wo.CompletedOn || wo.created_at || wo.CreatedAt || new Date().toISOString(),
+    appfolioWorkOrderId: wo.work_order_number || wo.WorkOrderNumber || undefined,
   }));
   return { data: requests, source: "appfolio" };
 }
 
 // --- Applications (from AppFolio tenant directory) ---
 // Groups applicants by unit — roommates in same unit form one ApplicationGroup.
+// v2 Tenant Directory: property, property_name, unit, tenant, first_name, last_name,
+//   status, emails, phone_numbers, lease_from, lease_to, move_in, ...
 export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; source: "appfolio" }> {
   const allTenants = await afGetTenants({ status: "applicant" }).catch(() => [] as any[]);
-  const tenants = filterToMoxie(allTenants || []);
+  const tenants = await filterToMoxie(allTenants || []);
 
-  // Group applicants by unit — v2 snake_case first, v1 PascalCase fallback
+  // Group applicants by unit
   const groupMap = new Map<string, any[]>();
   for (const t of tenants) {
-    const unitKey = String(
-      t.unit_street || t.UnitStreetAddress1 || t.unit_id || t.UnitId || t.unit || t.Unit || ""
-    );
-    const key = `${t.property_id || t.PropertyId || ""}:${unitKey}`;
+    const unitKey = String(t.unit || t.Unit || "");
+    const key = `${t.property || t.Property || ""}:${unitKey}`;
     if (!groupMap.has(key)) groupMap.set(key, []);
     groupMap.get(key)!.push(t);
   }
@@ -445,41 +506,47 @@ export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; s
   for (const [, members] of groupMap) {
     idx++;
     const first = members[0];
-    const unitName = String(
-      first.unit_street || first.UnitStreetAddress1 || first.unit || first.Unit || first.unit_name || first.UnitName || ""
-    );
+    const unitName = String(first.unit || first.Unit || "");
 
-    const applicants = members.map((m: any, i: number) => ({
-      id: String(m.tenant_id || m.TenantId || `app-${idx}-${i}`),
-      groupId: `grp-${idx}`,
-      name: String(m.tenant_name || m.TenantName || m.name || m.Name || "Unknown"),
-      email: String(m.email || m.Email || m.tenant_email || m.TenantEmail || ""),
-      phone: m.phone || m.Phone || m.tenant_phone || m.TenantPhone || undefined,
-      role: (i === 0 ? "primary" : "co_applicant") as "primary" | "co_applicant",
-      steps: [
-        { id: `s-${idx}-${i}-1`, name: "Application Submitted", description: "Complete online application", required: true, status: "complete" as const },
-        { id: `s-${idx}-${i}-2`, name: "Background Check", description: "Credit and background screening", required: true, status: (m.screening_status === "completed" || m.ScreeningStatus === "Completed" ? "complete" : "in_review") as "complete" | "in_review" },
-        { id: `s-${idx}-${i}-3`, name: "Income Verification", description: "Verify income documentation", required: true, status: "pending" as const },
-        { id: `s-${idx}-${i}-4`, name: "Lease Signing", description: "Sign the lease agreement", required: true, status: "pending" as const },
-      ],
-      documents: [],
-      nudges: [],
-      status: "in_progress" as const,
-      startedAt: m.application_date || m.ApplicationDate || m.created_at || m.CreatedAt || new Date().toISOString(),
-    }));
+    const applicants = members.map((m: any, i: number) => {
+      const name = String(m.tenant || m.Tenant || "Unknown");
+      const emails = String(m.emails || m.Emails || "");
+      const email = emails.split(",")[0]?.trim() || "";
+      const phones = String(m.phone_numbers || m.PhoneNumbers || "");
+      const phone = phones.split(",")[0]?.trim() || undefined;
+
+      return {
+        id: String(`app-${idx}-${i}`),
+        groupId: `grp-${idx}`,
+        name,
+        email,
+        phone,
+        role: (i === 0 ? "primary" : "co_applicant") as "primary" | "co_applicant",
+        steps: [
+          { id: `s-${idx}-${i}-1`, name: "Application Submitted", description: "Complete online application", required: true, status: "complete" as const },
+          { id: `s-${idx}-${i}-2`, name: "Background Check", description: "Credit and background screening", required: true, status: "in_review" as const },
+          { id: `s-${idx}-${i}-3`, name: "Income Verification", description: "Verify income documentation", required: true, status: "pending" as const },
+          { id: `s-${idx}-${i}-4`, name: "Lease Signing", description: "Sign the lease agreement", required: true, status: "pending" as const },
+        ],
+        documents: [],
+        nudges: [],
+        status: "in_progress" as const,
+        startedAt: m.move_in || m.MoveIn || new Date().toISOString(),
+      };
+    });
 
     const hasApproved = members.some((m: any) => {
-      const s = String(m.tenant_status || m.TenantStatus || m.status || m.Status || "").toLowerCase();
+      const s = String(m.status || m.Status || "").toLowerCase();
       return s === "approved" || s === "current";
     });
     const hasDenied = members.some((m: any) => {
-      const s = String(m.tenant_status || m.TenantStatus || m.status || m.Status || "").toLowerCase();
+      const s = String(m.status || m.Status || "").toLowerCase();
       return s === "denied" || s === "rejected";
     });
 
     groups.push({
       id: `grp-${idx}`,
-      propertyId: String(first.property_id || first.PropertyId || ""),
+      propertyId: String(first.property || first.Property || ""),
       propertyName: String(first.property_name || first.PropertyName || ""),
       unitNumber: unitName,
       unitDetails: "",
@@ -488,7 +555,7 @@ export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; s
       monthlyRent: 0,
       applicants,
       status: hasApproved ? "approved" : hasDenied ? "denied" : "incomplete",
-      createdAt: first.application_date || first.ApplicationDate || first.created_at || new Date().toISOString(),
+      createdAt: first.move_in || first.MoveIn || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
   }
