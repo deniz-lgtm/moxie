@@ -35,10 +35,9 @@ import type {
 import { academicYearDates } from "./types";
 
 // --- Moxie Portfolio Filtering ---
-// Only property_directory has the `portfolio` field ("Moxie Management").
+// Only property_directory has the `Portfolio` field (value: "Moxie Management").
 // All other reports must be filtered by matching `property` against Moxie property refs.
 const MOXIE_PORTFOLIO_NAME = "Moxie Management";
-const MOXIE_PORTFOLIO_ID = 24;
 
 let _moxiePropertyRefs: Set<string> | null = null;
 let _moxiePropertyRefsCacheTime = 0;
@@ -62,26 +61,14 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
     return _moxiePropertyRefs;
   }
 
-  // Log all field names from the first row so we can see what the API actually returns
+  // Log raw fields so we can see what v2 actually returns
   console.log("[Moxie] property_directory fields:", Object.keys(propRows[0]));
-  console.log("[Moxie] property_directory sample row:", JSON.stringify(propRows[0]).slice(0, 500));
+  console.log("[Moxie] first row:", JSON.stringify(propRows[0]).slice(0, 500));
 
-  // Match by portfolio ID 24, or by name containing "moxie" as fallback
+  // v2 field is `Portfolio` (capital P), value "Moxie Management"
   const moxieProps = propRows.filter((p: any) => {
-    // Check numeric ID fields first
-    const idCandidates = [
-      p.portfolio_id, p.portfolioId, p.PortfolioId, p.portfolio_ID,
-    ];
-    if (idCandidates.some((v) => v !== undefined && Number(v) === MOXIE_PORTFOLIO_ID)) {
-      return true;
-    }
-    // Fallback: check name fields for "moxie"
-    const nameCandidates = [
-      p.portfolio, p.Portfolio,
-      p.property_group_name, p.PropertyGroupName,
-      p.portfolio_name, p.PortfolioName,
-    ].filter(Boolean);
-    return nameCandidates.some((v) => String(v).toLowerCase().includes("moxie"));
+    const portfolio = String(p.Portfolio || p.portfolio || "");
+    return portfolio.toLowerCase().includes("moxie");
   });
 
   _moxiePropertyRefs = new Set(
@@ -89,41 +76,26 @@ async function getMoxiePropertyRefs(): Promise<Set<string>> {
   );
   _moxiePropertyRefsCacheTime = now;
 
-  console.log(`[Moxie] getMoxiePropertyRefs: ${moxieProps.length}/${propRows.length} properties matched. Refs: [${[..._moxiePropertyRefs].slice(0, 10).join(", ")}]`);
-
-  if (_moxiePropertyRefs.size === 0) {
-    // Log all unique portfolio values so we can see what's in the data
+  if (moxieProps.length === 0) {
     const allPortfolioValues = [...new Set(propRows.map((p: any) =>
-      String(p.portfolio || p.Portfolio || p.property_group_name || p.PropertyGroupName || "N/A")
+      String(p.Portfolio || p.portfolio || "N/A")
     ))];
-    console.warn(
-      `[Moxie] No Moxie properties found! All portfolio values: [${allPortfolioValues.join(", ")}]`
-    );
+    console.warn(`[Moxie] 0 Moxie properties! Portfolio values seen: [${allPortfolioValues.join(", ")}]`);
+  } else {
+    console.log(`[Moxie] ${moxieProps.length}/${propRows.length} Moxie properties. property refs: [${[..._moxiePropertyRefs].slice(0, 5).join(", ")}]`);
   }
 
   return _moxiePropertyRefs;
 }
 
 /**
- * Filter property_directory rows by portfolio name.
+ * Filter property_directory rows to Moxie portfolio.
  */
 function filterPropertiesToMoxie(rows: any[]): any[] {
   if (!rows || rows.length === 0) return [];
   return rows.filter((row) => {
-    // Check numeric ID fields first
-    const idCandidates = [
-      row.portfolio_id, row.portfolioId, row.PortfolioId, row.portfolio_ID,
-    ];
-    if (idCandidates.some((v) => v !== undefined && Number(v) === MOXIE_PORTFOLIO_ID)) {
-      return true;
-    }
-    // Fallback: check name fields for "moxie"
-    const nameCandidates = [
-      row.portfolio, row.Portfolio,
-      row.property_group_name, row.PropertyGroupName,
-      row.portfolio_name, row.PortfolioName,
-    ].filter(Boolean);
-    return nameCandidates.some((v) => String(v).toLowerCase().includes("moxie"));
+    const portfolio = String(row.Portfolio || row.portfolio || "");
+    return portfolio.toLowerCase().includes("moxie");
   });
 }
 
