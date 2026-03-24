@@ -193,55 +193,120 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
 
   const filtered = await filterToMoxie(rentRollRows);
 
-  const units: Unit[] = filtered.map((r: any) => {
-    // v2 Rent Roll: "unit" is the unit identifier (no unit_street in rent roll)
-    const unitNum = String(r.unit || r.Unit || "");
-    const propName = String(r.property_name || r.PropertyName || "");
-    const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
-    const rawStatus = String(r.status || r.Status || "").toLowerCase();
-    const status = (["current", "vacant", "notice", "future"].includes(rawStatus)
-      ? rawStatus
-      : "vacant") as Unit["status"];
+  // Rent roll can have multiple rows per unit (one per tenant on the lease).
+  // Group by unit + property and keep all lease rows for analysis.
+  const unitMap = new Map<string, { rows: any[]; property: string; propertyName: string }>();
+  for (const r of filtered) {
+    const unitKey = String(r.unit || r.Unit || "");
+    const propKey = String(r.property || r.Property || "");
+    const key = `${propKey}::${unitKey}`;
+    if (!unitMap.has(key)) {
+      unitMap.set(key, {
+        rows: [],
+        property: propKey,
+        propertyName: String(r.property_name || r.PropertyName || ""),
+      });
+    }
+    unitMap.get(key)!.rows.push(r);
+  }
 
-    return {
-      id: unitNum, // Rent Roll uses "unit" as the identifier
-      propertyId: String(r.property || r.Property || ""),
-      propertyName: propName,
+  // For academic year filtering: a unit is "leased" if ANY lease row has a
+  // lease that covers the lease start date (8/15 for student housing).
+  // A unit is "unleased" if NO lease covers that date.
+  const ayStart = academicYear ? new Date(academicYearDates(academicYear).leaseStart) : null;
+
+  const units: Unit[] = [];
+  for (const [, { rows, property, propertyName }] of unitMap) {
+    // Use first row for unit metadata (bed/bath/sqft are the same across rows)
+    const first = rows[0];
+    const unitNum = String(first.unit || first.Unit || "");
+    const { bed, bath } = parseBdBa(first.bd_ba || first.BdBa);
+
+    // Determine unit status for the academic year
+    let status: Unit["status"];
+    let tenant: string | null = null;
+    let leaseFrom: string | null = null;
+    let leaseTo: string | null = null;
+    let rent: string | number | null = null;
+
+    if (ayStart) {
+      // Check if any lease row covers the academic year start date
+      let hasLeaseCoveringAY = false;
+      let hasFutureLease = false;
+      let bestRow = first;
+
+      for (const r of rows) {
+        const rLeaseFrom = r.lease_from || r.LeaseFrom || null;
+        const rLeaseTo = r.lease_to || r.LeaseTo || null;
+        const rStatus = String(r.status || r.Status || "").toLowerCase();
+
+        if (rLeaseFrom && rLeaseTo) {
+          const from = new Date(rLeaseFrom);
+          const to = new Date(rLeaseTo);
+          // Lease covers 8/15 if it starts on or before 8/15 and ends on or after 8/15
+          if (from <= ayStart && to >= ayStart) {
+            hasLeaseCoveringAY = true;
+            bestRow = r;
+            break;
+          }
+          // Future lease starting after academic year start
+          if (from > ayStart || rStatus === "future") {
+            hasFutureLease = true;
+            bestRow = r;
+          }
+        } else if (rStatus === "current" || rStatus === "notice") {
+          // Current lease with no end date — assume it covers the period
+          hasLeaseCoveringAY = true;
+          bestRow = r;
+          break;
+        }
+      }
+
+      if (hasLeaseCoveringAY) {
+        status = "current";
+      } else if (hasFutureLease) {
+        status = "future";
+      } else {
+        status = "vacant";
+      }
+
+      tenant = bestRow.tenant || bestRow.Tenant || null;
+      leaseFrom = bestRow.lease_from || bestRow.LeaseFrom || null;
+      leaseTo = bestRow.lease_to || bestRow.LeaseTo || null;
+      rent = bestRow.rent || bestRow.Rent || null;
+    } else {
+      // No academic year filter — use rent roll status directly
+      const rawStatus = String(first.status || first.Status || "").toLowerCase();
+      status = (["current", "vacant", "notice", "future"].includes(rawStatus)
+        ? rawStatus
+        : "vacant") as Unit["status"];
+      // Collect all tenant names for the unit
+      const tenantNames = rows
+        .map((r: any) => String(r.tenant || r.Tenant || "").trim())
+        .filter((t: string) => t && t !== "null" && t !== "undefined");
+      tenant = tenantNames.length > 0 ? tenantNames.join(", ") : null;
+      leaseFrom = first.lease_from || first.LeaseFrom || null;
+      leaseTo = first.lease_to || first.LeaseTo || null;
+      rent = first.rent || first.Rent || null;
+    }
+
+    units.push({
+      id: unitNum,
+      propertyId: property,
+      propertyName,
       number: unitNum,
       unitName: unitNum,
-      displayName: unitNum || `${propName} #${unitNum}`,
+      displayName: unitNum || `${propertyName} #${unitNum}`,
       bedrooms: bed,
       bathrooms: bath,
-      sqft: parseSqft(r.sqft || r.SquareFt),
-      rent: r.rent || r.Rent || null,
+      sqft: parseSqft(first.sqft || first.SquareFt),
+      rent,
       status,
-      tenant: r.tenant || r.Tenant || null,
-      leaseFrom: r.lease_from || r.LeaseFrom || null,
-      leaseTo: r.lease_to || r.LeaseTo || null,
+      tenant,
+      leaseFrom,
+      leaseTo,
       appfolioId: unitNum || undefined,
-    };
-  });
-
-  // If academic year is specified, re-classify statuses based on lease overlap
-  if (academicYear) {
-    const { leaseStart } = academicYearDates(academicYear);
-    const ayStart = new Date(leaseStart);
-
-    for (const unit of units) {
-      if (unit.leaseTo) {
-        const leaseTo = new Date(unit.leaseTo);
-        if (leaseTo < ayStart) {
-          unit.status = "vacant";
-          continue;
-        }
-      }
-      if (unit.leaseFrom) {
-        const leaseFrom = new Date(unit.leaseFrom);
-        if (leaseFrom >= ayStart && unit.status === "future") {
-          continue; // keep "future" status
-        }
-      }
-    }
+    });
   }
 
   return { data: units, source: "appfolio" };

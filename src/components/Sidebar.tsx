@@ -127,11 +127,20 @@ export function Sidebar() {
     setExpanded((prev) => ({ ...prev, [label]: !prev[label] }));
   }
 
+  // Collect all nav hrefs (including children) for specificity checks
+  const allHrefs = navItems.flatMap((item) =>
+    item.children ? [item.href, ...item.children.map((c) => c.href)] : [item.href]
+  );
+
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
-    // Exact match, or starts with href followed by "/" to prevent
-    // "/leasing" matching "/leasing/applications"
-    return pathname === href || pathname.startsWith(href + "/");
+    if (pathname === href) return true;
+    if (!pathname.startsWith(href + "/")) return false;
+    // Only match if no other nav item is a more specific (longer) match
+    const hasMoreSpecific = allHrefs.some(
+      (other) => other !== href && other.length > href.length && (pathname === other || pathname.startsWith(other + "/"))
+    );
+    return !hasMoreSpecific;
   }
 
   return (
