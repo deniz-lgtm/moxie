@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import "./globals.css";
 import "./admin-theme.css";
 import { Sidebar } from "@/components/Sidebar";
@@ -23,17 +22,16 @@ export default function RootLayout({
           {/* Main Content */}
           <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
             {/* Top bar (mobile) */}
-            <header className="lg:hidden bg-sidebar text-white h-16 flex items-center justify-center px-4 sticky top-0 z-40 border-b border-white/10">
-              <Image 
-                src="/moxie-logo.png" 
-                alt="Moxie Management" 
-                width={48} 
-                height={48}
-                className="w-12 h-12 object-contain"
-              />
+            <header className="lg:hidden bg-sidebar text-white h-14 flex items-center px-4 sticky top-0 z-40">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 hero-gradient rounded-lg flex items-center justify-center shadow-md">
+                  <span className="text-white font-bold text-sm">M</span>
+                </div>
+                <span className="text-base font-semibold tracking-tight">Moxie</span>
+              </div>
             </header>
 
-            <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-10 py-6 sm:py-8">
+            <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8">
               {children}
             </main>
 
