@@ -20,10 +20,9 @@ export async function GET() {
     });
   }
 
-  // Try the v1 report-based API (correct endpoint structure)
   try {
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const url = `https://${dbName}.appfolio.com/api/v1/reports/property_directory.json?paginate_results=true`;
+    const url = `https://${dbName}.appfolio.com/api/v2/reports/property_directory.json?paginate_results=true`;
     const res = await fetch(url, {
       headers: {
         Authorization: `Basic ${credentials}`,
@@ -36,7 +35,7 @@ export async function GET() {
       return NextResponse.json({
         status: "error",
         httpStatus: res.status,
-        url_attempted: `https://${dbName}.appfolio.com/api/v1/reports/property_directory.json`,
+        url_attempted: `https://${dbName}.appfolio.com/api/v2/reports/property_directory.json`,
         detail: text.slice(0, 500),
       });
     }
@@ -48,7 +47,7 @@ export async function GET() {
     return NextResponse.json({
       status: "connected",
       database: dbName,
-      apiVersion: "v1",
+      apiVersion: "v2",
       endpoint: "reports/property_directory",
       propertiesFound: count,
       sampleFields: Array.isArray(results) && results.length > 0

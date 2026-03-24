@@ -13,7 +13,7 @@ export async function GET() {
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const headers = { Authorization: `Basic ${credentials}`, Accept: "application/json" };
-  const base = `https://${dbName}.appfolio.com/api/v1/reports`;
+  const base = `https://${dbName}.appfolio.com/api/v2/reports`;
 
   async function fetchReport(report: string, params?: Record<string, string>) {
     try {
@@ -64,13 +64,14 @@ export async function GET() {
       const rows = data.results || [];
       const seen = new Map<string, any>();
       for (const r of rows) {
-        const key = `${r.PortfolioId || "null"}|${r.PropertyGroupId || "null"}`;
+        // v2 snake_case field names
+        const key = `${r.portfolio_id || "null"}|${r.property_group_id || "null"}`;
         if (!seen.has(key)) {
           seen.set(key, {
-            PortfolioId: r.PortfolioId,
-            PropertyGroupId: r.PropertyGroupId,
-            PropertyName: r.PropertyName,
-            PropertyType: r.PropertyType,
+            portfolio_id: r.portfolio_id,
+            property_group_id: r.property_group_id,
+            property_name: r.property_name,
+            property_type: r.property_type,
           });
         }
       }
@@ -78,7 +79,7 @@ export async function GET() {
     }
   } catch { /* ignore */ }
 
-  // Cross-reference diagnostic: compare PropertyIds between property_directory and rent_roll
+  // Cross-reference diagnostic: compare property_ids between property_directory and rent_roll
   let crossRef: any = {};
   try {
     // Fetch all property_directory rows
@@ -87,7 +88,6 @@ export async function GET() {
     const propRes = await fetch(propUrl.toString(), { headers });
     const propData = propRes.ok ? await propRes.json() : { results: [] };
     let propRows = propData.results || [];
-    // Follow pagination
     let nextPage = propData.next_page_url;
     while (nextPage) {
       const np = await fetch(nextPage, { headers });
@@ -112,35 +112,38 @@ export async function GET() {
       rrNext = npd.next_page_url;
     }
 
-    // Find Moxie properties in property_directory
+    // Find Moxie properties in property_directory (v2 snake_case)
     const moxieProps = propRows.filter((p: any) => {
-      const portfolio = String(p.Portfolio || p.PortfolioName || p.PropertyGroupName || "");
+      const portfolio = String(p.portfolio || p.portfolio_name || p.property_group_name || "");
       return portfolio === "Moxie Management";
     });
-    const moxiePropertyIds = moxieProps.map((p: any) => String(p.PropertyId || p.property_id || ""));
+    const moxiePropertyIds = moxieProps.map((p: any) => String(p.property_id || ""));
 
-    // Find unique PropertyIds in rent roll
-    const rrPropertyIds = [...new Set(rrRows.map((r: any) => String(r.PropertyId || r.property_id || "")))];
+    // Find unique property_ids in rent roll
+    const rrPropertyIds = [...new Set(rrRows.map((r: any) => String(r.property_id || "")))];
 
     // Find matches
     const moxieIdSet = new Set(moxiePropertyIds);
-    const matchingRrRows = rrRows.filter((r: any) => moxieIdSet.has(String(r.PropertyId || r.property_id || "")));
+    const matchingRrRows = rrRows.filter((r: any) => moxieIdSet.has(String(r.property_id || "")));
 
     crossRef = {
+      apiVersion: "v2",
       propertyDirectoryTotal: propRows.length,
       moxiePropertiesCount: moxieProps.length,
       moxiePropertyIds: moxiePropertyIds.slice(0, 20),
       moxieSampleRows: moxieProps.slice(0, 3).map((p: any) => ({
-        PropertyId: p.PropertyId,
-        PropertyAddress: p.PropertyAddress,
-        Portfolio: p.Portfolio,
-        PortfolioName: p.PortfolioName,
-        PropertyGroupName: p.PropertyGroupName,
+        property_id: p.property_id,
+        property_address: p.property_address,
+        portfolio: p.portfolio,
+        portfolio_name: p.portfolio_name,
+        property_group_name: p.property_group_name,
       })),
       rentRollTotal: rrRows.length,
       rentRollUniquePropertyIds: rrPropertyIds.slice(0, 20),
       rentRollSampleRow: rrRows.length > 0 ? Object.fromEntries(
-        Object.entries(rrRows[0]).filter(([k]) => ["PropertyId", "property_id", "PropertyName", "PortfolioId", "Portfolio", "PortfolioName"].includes(k))
+        Object.entries(rrRows[0]).filter(([k]) =>
+          ["property_id", "property_name", "portfolio_id", "portfolio", "portfolio_name"].includes(k)
+        )
       ) : {},
       matchingRentRollRows: matchingRrRows.length,
       portfolioFieldsInPropDir: propRows.length > 0
