@@ -60,10 +60,11 @@ export default function MoveOutInspectionPage() {
   // New inspection form (tenant info is resolved at send time, not creation)
   const [newForm, setNewForm] = useState({
     unitId: "",
-    inspector: "",
+    inspector: "Moxie Management",
     scheduledDate: "",
     depositAmount: 0,
   });
+  const [selectedProperty, setSelectedProperty] = useState("");
 
   // Tenant picker state for completed step
   const [unitTenants, setUnitTenants] = useState<{ name: string; email: string }[]>([]);
@@ -599,62 +600,96 @@ export default function MoveOutInspectionPage() {
             <h2 className="text-sm font-semibold">Unit & Details</h2>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="md:col-span-2">
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Unit *</label>
-              <select
-                value={newForm.unitId}
-                onChange={(e) => setNewForm({ ...newForm, unitId: e.target.value })}
-                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
-              >
-                <option value="">Select a unit...</option>
-                {units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.unitName || u.displayName}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {(() => {
+            const propertyNames = [...new Set(units.map((u) => u.propertyName))].sort();
+            const filteredUnits = selectedProperty
+              ? units.filter((u) => u.propertyName === selectedProperty)
+              : [];
+            return (
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Property *</label>
+                  <select
+                    value={selectedProperty}
+                    onChange={(e) => {
+                      setSelectedProperty(e.target.value);
+                      setNewForm({ ...newForm, unitId: "", depositAmount: 0 });
+                    }}
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                  >
+                    <option value="">Select a property...</option>
+                    {propertyNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
 
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Inspector *</label>
-              <input
-                type="text"
-                placeholder="Inspector name"
-                value={newForm.inspector}
-                onChange={(e) => setNewForm({ ...newForm, inspector: e.target.value })}
-                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
-              />
-            </div>
+                <div className="md:col-span-2">
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Unit *</label>
+                  <select
+                    value={newForm.unitId}
+                    onChange={(e) => {
+                      const unitId = e.target.value;
+                      const unit = units.find((u) => u.id === unitId);
+                      setNewForm({
+                        ...newForm,
+                        unitId,
+                        depositAmount: unit?.deposit ?? 0,
+                      });
+                    }}
+                    disabled={!selectedProperty}
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors disabled:opacity-40"
+                  >
+                    <option value="">{selectedProperty ? "Select a unit..." : "Select a property first"}</option>
+                    {filteredUnits.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.unitName || u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Scheduled Date</label>
-              <input
-                type="date"
-                value={newForm.scheduledDate}
-                onChange={(e) => setNewForm({ ...newForm, scheduledDate: e.target.value })}
-                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
-              />
-            </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Inspector *</label>
+                  <input
+                    type="text"
+                    placeholder="Inspector name"
+                    value={newForm.inspector}
+                    onChange={(e) => setNewForm({ ...newForm, inspector: e.target.value })}
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                  />
+                </div>
 
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Security Deposit ($)</label>
-              <input
-                type="number"
-                placeholder="0"
-                value={newForm.depositAmount || ""}
-                onChange={(e) => setNewForm({ ...newForm, depositAmount: parseFloat(e.target.value) || 0 })}
-                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
-              />
-            </div>
-          </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Inspection Date</label>
+                  <input
+                    type="date"
+                    value={newForm.scheduledDate}
+                    onChange={(e) => setNewForm({ ...newForm, scheduledDate: e.target.value })}
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Security Deposit ($)</label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={newForm.depositAmount || ""}
+                    onChange={(e) => setNewForm({ ...newForm, depositAmount: parseFloat(e.target.value) || 0 })}
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                  />
+                </div>
+              </div>
+            );
+          })()}
 
           <button
             onClick={startNewInspection}
             disabled={!newForm.unitId || !newForm.inspector}
             className="px-5 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors disabled:opacity-40 shadow-sm"
           >
-            Continue to Floor Plan &rarr;
+            Continue to Floor Plan →
           </button>
         </div>
       </div>
@@ -718,7 +753,7 @@ export default function MoveOutInspectionPage() {
               onClick={activeInspection.rooms.length > 0 ? startWalk : skipFloorPlan}
               className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90"
             >
-              {activeInspection.rooms.length > 0 ? "Start Walk &rarr;" : "Skip — Use Default Rooms &rarr;"}
+              {activeInspection.rooms.length > 0 ? "Start Walk →" : "Skip — Use Default Rooms →"}
             </button>
           </div>
         </div>
