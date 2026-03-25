@@ -5,8 +5,8 @@
 // Student housing lease year: Aug 15 → Jul 31.
 //
 // Portfolio filter: portfolio_id = 24 for Moxie Management.
-// Property directory may use different portfolio_id — cross-reference via property_id.
-// Unit identity: "Unit Street Address 1" from AppFolio = "Unit Name" in Moxie.
+// NOTE: portfolio_id=10 also says "Moxie Management" but is a DIFFERENT portfolio.
+// Unit identity: the `unit` field in rent_roll = the unit name/address in Moxie.
 
 import {
   getProperties as afGetProperties,
@@ -28,24 +28,19 @@ import type {
 } from "./types";
 import { academicYearDates } from "./types";
 
-// Moxie Management portfolio_id = 24.
-// The property_directory may use a different portfolio_id for the same portfolio,
-// so we scan ALL reports for portfolio_id=24 and also match by portfolio name
-// "Moxie Management" as a fallback. Property IDs are cached and used to cross-reference
-// reports where portfolio_id may be null (rent_roll, work_orders).
+// Moxie Management portfolio_id = 24 (strictly).
+// NOTE: portfolio_id=10 also shows "Moxie Management" name but is a DIFFERENT set
+// of properties (e.g. 1000 K Street). Do NOT match by portfolio name.
 const MOXIE_PORTFOLIO_ID = "24";
-const MOXIE_PORTFOLIO_NAME = "Moxie Management";
 
-/** Cache for Moxie property IDs */
+/** Cache for Moxie property IDs (from portfolio_id=24 across all reports) */
 let _moxiePropertyIdCache: Set<string> | null = null;
 let _moxiePropertyIdCacheTime = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Get the set of property_ids that belong to Moxie Management.
- * Scans both property_directory and rent_roll to find Moxie properties:
- * - property_directory: match by portfolio name "Moxie Management" (portfolio_id may differ)
- * - rent_roll: match by portfolio_id = 24 (where available)
+ * Get the set of property_ids that belong to Moxie (portfolio_id = 24).
+ * Scans both property_directory and rent_roll for portfolio_id=24.
  */
 async function getMoxiePropertyIds(): Promise<Set<string>> {
   const now = Date.now();
@@ -55,23 +50,19 @@ async function getMoxiePropertyIds(): Promise<Set<string>> {
 
   const ids = new Set<string>();
 
-  // Source 1: property_directory — match by portfolio_id=24 OR portfolio name
+  // property_directory: 57 properties have portfolio_id=24
   const propRows = await afGetProperties();
   for (const p of (propRows || [])) {
-    const pid = String(p.portfolio_id ?? "").trim();
-    const pname = String(p.portfolio ?? p.portfolio_name ?? "").trim();
-    if (pid === MOXIE_PORTFOLIO_ID || pname === MOXIE_PORTFOLIO_NAME) {
+    if (String(p.portfolio_id ?? "").trim() === MOXIE_PORTFOLIO_ID) {
       const propId = String(p.property_id || "");
       if (propId) ids.add(propId);
     }
   }
 
-  // Source 2: rent_roll — match by portfolio_id=24 (picks up any properties
-  // that might be in rent_roll but missing from property_directory)
+  // rent_roll: 255 rows have portfolio_id=24 (may include properties not in directory)
   const rentRollRows = await afGetRentRoll();
   for (const r of (rentRollRows || [])) {
-    const pid = String(r.portfolio_id ?? "").trim();
-    if (pid === MOXIE_PORTFOLIO_ID) {
+    if (String(r.portfolio_id ?? "").trim() === MOXIE_PORTFOLIO_ID) {
       const propId = String(r.property_id || "");
       if (propId) ids.add(propId);
     }
@@ -79,29 +70,25 @@ async function getMoxiePropertyIds(): Promise<Set<string>> {
 
   _moxiePropertyIdCache = ids;
   _moxiePropertyIdCacheTime = now;
-  console.log(`[Moxie] Cached ${ids.size} Moxie property IDs (portfolio_id=${MOXIE_PORTFOLIO_ID} or name="${MOXIE_PORTFOLIO_NAME}")`);
+  console.log(`[Moxie] Cached ${ids.size} Moxie property IDs (portfolio_id=${MOXIE_PORTFOLIO_ID})`);
   return ids;
 }
 
 /**
- * Filter any report's rows to Moxie properties.
- * Checks portfolio_id = 24 OR portfolio name = "Moxie Management" OR
- * property_id membership in the Moxie set (for reports where portfolio_id is null).
+ * Filter any report's rows to Moxie properties (portfolio_id = 24).
+ * Primary: direct portfolio_id match. Fallback: property_id membership
+ * in the Moxie set (for rows where portfolio_id is null).
  */
 async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (!rows || rows.length === 0) return [];
   const moxieIds = await getMoxiePropertyIds();
   const filtered = rows.filter((row) => {
-    // Match by portfolio_id = 24
-    const pid = String(row.portfolio_id ?? row.PortfolioId ?? "").trim();
+    // Direct portfolio_id match
+    const pid = String(row.portfolio_id ?? "").trim();
     if (pid === MOXIE_PORTFOLIO_ID) return true;
 
-    // Match by portfolio name "Moxie Management"
-    const pname = String(row.portfolio ?? row.portfolio_name ?? row.Portfolio ?? "").trim();
-    if (pname === MOXIE_PORTFOLIO_NAME) return true;
-
-    // Match by property_id membership (for reports where portfolio fields are null)
-    const propId = String(row.property_id || row.PropertyId || "");
+    // Fallback: property_id membership (for rows with null portfolio_id)
+    const propId = String(row.property_id || "");
     if (propId && moxieIds.has(propId)) return true;
 
     return false;
@@ -109,7 +96,7 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (filtered.length === 0 && rows.length > 0) {
     console.warn(
       `[Moxie] filterToMoxie: 0/${rows.length} rows matched. ` +
-      `Moxie property IDs available: ${moxieIds.size}. ` +
+      `Moxie property IDs: ${moxieIds.size}. ` +
       `Sample: portfolio_id=${rows[0]?.portfolio_id}, property_id=${rows[0]?.property_id}`
     );
   }
@@ -263,15 +250,9 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
   const filtered = await filterToMoxie(rentRollRows);
 
   const units: Unit[] = filtered.map((r: any) => {
-    // v2 rent_roll doesn't have a dedicated unit street address field;
-    // construct from property_street + property_street2, or fall back to v1 fields
-    const unitStreet = r.property_street && r.property_street2
-      ? `${r.property_street} ${r.property_street2}`.trim()
-      : "";
-    const unitName = String(
-      unitStreet || r.unit_street || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.unit_address || r.UnitAddress || r.unit || r.Unit || ""
-    );
-    const unitNum = String(r.unit || r.Unit || r.unit_name || r.UnitName || "");
+    // The `unit` field is the unit name/address (e.g. "2414 S Catalina St" or "101")
+    const unitName = String(r.unit || r.Unit || r.UnitStreetAddress1 || "");
+    const unitNum = unitName;
     const propName = String(r.property_name || r.PropertyName || "");
     const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
     const rawStatus = String(r.status || r.Status || "").toLowerCase();
@@ -294,30 +275,54 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
       tenant: r.tenant || r.Tenant || null,
       leaseFrom: r.lease_from || r.LeaseFrom || null,
       leaseTo: r.lease_to || r.LeaseTo || null,
+      moveIn: r.move_in || null,
+      moveOut: r.move_out || null,
+      deposit: r.deposit ? Number(r.deposit) : null,
+      additionalTenants: r.additional_tenants || null,
+      additionalTenantIds: r.additional_tenant_ids || null,
+      tenantId: r.tenant_id ? String(r.tenant_id) : null,
+      leaseExpiresMonth: r.lease_expires_month || null,
       appfolioId: r.unit_id || r.UnitId ? String(r.unit_id || r.UnitId) : undefined,
     };
   });
 
-  // If academic year is specified, re-classify statuses based on lease overlap
+  // If academic year is specified, re-classify statuses for that year.
+  // Academic year = Aug 15 → Jul 31 (e.g. 2026-27 = 2026-08-15 to 2027-07-31).
+  // A unit is "leased" for the year if:
+  //   - It has a lease covering the start date (lease_from <= ayStart AND lease_to >= ayStart)
+  //   - OR it's month-to-month (lease_to is null = tenant went MTM after lease ended)
+  //   - OR it has a future lease starting on/before ayStart (renewals may start earlier)
+  // A unit is "vacant" (unleased) if no lease covers the start date.
   if (academicYear) {
-    const { leaseStart, leaseEnd } = academicYearDates(academicYear);
-    const ayStart = new Date(leaseStart);
-    const ayEnd = new Date(leaseEnd);
+    const { leaseStart } = academicYearDates(academicYear);
+    const ayStart = new Date(leaseStart); // e.g. 2026-08-15
 
     for (const unit of units) {
+      // Month-to-month: lease_to is null but has a lease_from/move_in = currently occupied
+      if (!unit.leaseTo && unit.leaseFrom) {
+        unit.status = "current"; // MTM tenants are leased
+        continue;
+      }
+
       if (unit.leaseTo) {
         const leaseTo = new Date(unit.leaseTo);
-        // If lease ends before academic year starts, unit is vacant for that year
+        // Lease ends before the academic year starts → vacant for that year
         if (leaseTo < ayStart) {
           unit.status = "vacant";
           continue;
         }
       }
+
       if (unit.leaseFrom) {
         const leaseFrom = new Date(unit.leaseFrom);
-        // Future lease starting in this academic year = pre-leased
-        if (leaseFrom >= ayStart && unit.status === "future") {
-          continue; // keep "future" status
+        // Lease starts on or before ayStart and covers it → leased
+        if (leaseFrom <= ayStart) {
+          if (unit.status === "future") unit.status = "current";
+          continue;
+        }
+        // Future lease starting after ayStart → still pre-leased
+        if (leaseFrom > ayStart && unit.status === "future") {
+          continue;
         }
       }
     }
@@ -376,14 +381,8 @@ export async function fetchUnitsWithTenants(): Promise<{
   const units: (Unit & { tenants: string[]; tenantEmails: string[] })[] = [];
 
   for (const [, { unit: r, tenants }] of unitMap) {
-    // v2: construct unit name from property_street fields; v1: use UnitStreetAddress1
-    const unitStreet = r.property_street && r.property_street2
-      ? `${r.property_street} ${r.property_street2}`.trim()
-      : "";
-    const unitName = String(
-      unitStreet || r.unit_street || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.unit || r.Unit || ""
-    );
-    const unitNum = String(r.unit || r.Unit || r.unit_name || r.UnitName || "");
+    const unitName = String(r.unit || r.Unit || r.UnitStreetAddress1 || "");
+    const unitNum = unitName;
     const propName = String(r.property_name || r.PropertyName || "");
     const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
     const rawStatus = String(r.status || r.Status || "").toLowerCase();
