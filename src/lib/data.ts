@@ -411,6 +411,13 @@ export async function fetchUnitsWithTenants(): Promise<{
       tenantEmails,
       leaseFrom: r.lease_from || r.LeaseFrom || null,
       leaseTo: r.lease_to || r.LeaseTo || null,
+      moveIn: r.move_in || r.MoveIn || null,
+      moveOut: r.move_out || r.MoveOut || null,
+      deposit: r.deposit != null ? Number(r.deposit) : null,
+      additionalTenants: r.additional_tenants || null,
+      additionalTenantIds: r.additional_tenant_ids || null,
+      tenantId: r.tenant_id ? String(r.tenant_id) : null,
+      leaseExpiresMonth: r.lease_to ? new Date(r.lease_to).toLocaleString("default", { month: "long", year: "numeric" }) : null,
       appfolioId: r.unit_id || r.UnitId ? String(r.unit_id || r.UnitId) : undefined,
     });
   }
