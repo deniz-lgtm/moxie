@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -31,19 +32,22 @@ type NavItem = {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   children?: { label: string; href: string }[];
   category?: string;
+  disabled?: boolean;
 };
 
 const navItems: NavItem[] = [
+  // Primary
+  { label: "Dashboard", href: "/", icon: LayoutDashboard, category: "Primary" },
+  
   // Leasing & Operations
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, category: "Leasing & Operations" },
   { label: "Applications", href: "/leasing/applications", icon: FileText, category: "Leasing & Operations" },
   { label: "Leasing", href: "/leasing", icon: FileText, category: "Leasing & Operations" },
-  { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations" },
+  { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations", disabled: true },
   
   // Property Management
   { label: "Maintenance", href: "/maintenance", icon: Wrench, category: "Property Management" },
   { label: "Buildings", href: "/portfolio", icon: Building2, category: "Property Management" },
-  { label: "Units/Spaces", href: "/units", icon: Building2, category: "Property Management" },
+  { label: "Units/Spaces", href: "/units", icon: Building2, category: "Property Management", disabled: true },
   {
     label: "Inspections",
     href: "/inspections",
@@ -59,20 +63,20 @@ const navItems: NavItem[] = [
   },
   
   // Revenue & Finance
-  { label: "Revenue", href: "/revenue", icon: DollarSign, category: "Revenue & Finance" },
-  { label: "Financials", href: "/financials", icon: BarChart3, category: "Revenue & Finance" },
+  { label: "Revenue", href: "/revenue", icon: DollarSign, category: "Revenue & Finance", disabled: true },
+  { label: "Financials", href: "/financials", icon: BarChart3, category: "Revenue & Finance", disabled: true },
   { label: "Analytics", href: "/resident-pulse", icon: MessageSquare, category: "Revenue & Finance" },
   
   // Asset Management
-  { label: "Assets", href: "/assets", icon: HardHat, category: "Asset Management" },
-  { label: "Depreciation", href: "/depreciation", icon: TrendingUp, category: "Asset Management" },
-  { label: "Maintenance Log", href: "/maintenance-log", icon: Wrench, category: "Asset Management" },
-  { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management" },
+  { label: "Assets", href: "/assets", icon: HardHat, category: "Asset Management", disabled: true },
+  { label: "Depreciation", href: "/depreciation", icon: TrendingUp, category: "Asset Management", disabled: true },
+  { label: "Maintenance Log", href: "/maintenance-log", icon: Wrench, category: "Asset Management", disabled: true },
+  { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management", disabled: true },
   
   // Admin
-  { label: "Team", href: "/team", icon: Users, category: "Admin" },
-  { label: "Settings", href: "/settings", icon: Settings, category: "Admin" },
-  { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin" },
+  { label: "Team", href: "/team", icon: Users, category: "Admin", disabled: true },
+  { label: "Settings", href: "/settings", icon: Settings, category: "Admin", disabled: true },
+  { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin", disabled: true },
   
   // Legacy items (to be reviewed)
   { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw, category: "Property Management" },
@@ -95,6 +99,7 @@ const navItems: NavItem[] = [
 
 // Group items by category
 const categoryOrder = [
+  "Primary",
   "Leasing & Operations",
   "Property Management", 
   "Revenue & Finance",
@@ -122,27 +127,34 @@ export function Sidebar() {
     setExpanded((prev) => ({ ...prev, [label]: !prev[label] }));
   }
 
+  // Collect all nav hrefs (including children) for specificity checks
+  const allHrefs = navItems.flatMap((item) =>
+    item.children ? [item.href, ...item.children.map((c) => c.href)] : [item.href]
+  );
+
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
-    return pathname.startsWith(href);
+    if (pathname === href) return true;
+    if (!pathname.startsWith(href + "/")) return false;
+    // Only match if no other nav item is a more specific (longer) match
+    const hasMoreSpecific = allHrefs.some(
+      (other) => other !== href && other.length > href.length && (pathname === other || pathname.startsWith(other + "/"))
+    );
+    return !hasMoreSpecific;
   }
 
   return (
-    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-sidebar z-50 border-r border-white/5">
+    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5" style={{ backgroundColor: '#111827' }}>
       {/* Brand */}
-      <div className="h-16 flex items-center px-5 border-b border-white/10">
-        <Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
-          <div className="w-9 h-9 bg-gradient-to-br from-red-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-red-500/20 group-hover:shadow-red-500/40 transition-shadow">
-            <span className="text-white font-bold text-base">M</span>
-          </div>
-          <div>
-            <span className="text-white font-semibold text-base tracking-tight block leading-tight">
-              Moxie
-            </span>
-            <span className="text-sidebar-text text-[10px] tracking-wide uppercase font-medium">
-              Management
-            </span>
-          </div>
+      <div className="h-24 flex items-center justify-center px-4 border-b border-white/10">
+        <Link href="/" className="group hover:opacity-85 transition-opacity">
+          <Image
+            src="/moxie-logo.png"
+            alt="Moxie Management"
+            width={160}
+            height={80}
+            className="w-40 h-auto object-contain"
+          />
         </Link>
       </div>
 
@@ -153,17 +165,19 @@ export function Sidebar() {
           if (!items || items.length === 0) return null;
           
           return (
-            <div key={category} className="mb-4">
-              {/* Category header */}
-              <div className="px-3 mb-2">
-                <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
-                  {category}
-                </h3>
-              </div>
+            <div key={category} className={`mb-4 ${category === "Primary" ? "" : ""}`}>
+              {/* Category header (hidden for Primary) */}
+              {category !== "Primary" && (
+                <div className="px-3 mb-2">
+                  <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
+                    {category}
+                  </h3>
+                </div>
+              )}
               
               {/* Category items */}
               <div className="space-y-0.5">
-                {items.map((item) => {
+                {items.filter(item => !item.disabled).map((item) => {
                   const active = isActive(item.href);
                   const Icon = item.icon;
                   const isExpanded = expanded[item.label];

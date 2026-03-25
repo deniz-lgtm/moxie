@@ -1,8 +1,8 @@
 // ============================================
 // AppFolio Property Manager API Integration (v2)
 // ============================================
-// AppFolio uses a report-based API at:
-//   https://{database}.appfolio.com/api/v2/reports/{report_name}.json
+// AppFolio v2 uses a report-based API at:
+//   POST https://{database}.appfolio.com/api/v2/reports/{report_name}.json
 //
 // Auth: HTTP Basic Auth with Client ID + Client Secret
 // Credentials: AppFolio PM → General Settings → Manage API Settings → Reports API Credentials
@@ -12,10 +12,11 @@
 //   APPFOLIO_CLIENT_SECRET
 //   APPFOLIO_DATABASE_NAME    (your AppFolio subdomain, e.g. "mbtenants")
 //
-// v2 API Changes:
-// - Base URL: /api/v2 (instead of /api/v1)
-// - Field names: snake_case (property_name, unit_name, etc.)
-// - Pagination: Still uses next_page_url
+// v2 API:
+// - All endpoints use POST with JSON body for filters
+// - Dates use ISO 8601 format (YYYY-MM-DD)
+// - Pagination: uses next_page_url in response
+// - Rate limit: 7 requests per 15 seconds (pagination exempt)
 
 const getBaseUrl = () =>
   `https://${process.env.APPFOLIO_DATABASE_NAME}.appfolio.com/api/v2`;
@@ -33,21 +34,21 @@ function getAuthHeaders() {
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   return {
     Authorization: `Basic ${credentials}`,
+    "Content-Type": "application/json",
     Accept: "application/json",
   };
 }
 
-async function appfolioFetch(endpoint: string, params?: Record<string, string>) {
-  const url = new URL(`${getBaseUrl()}${endpoint}`);
-  url.searchParams.set("paginate_results", "true");
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value) url.searchParams.set(key, value);
-    }
-  }
+async function appfolioFetch(endpoint: string, body?: Record<string, string>) {
+  const url = `${getBaseUrl()}${endpoint}`;
 
-  const response = await fetch(url.toString(), {
+  // v2 uses POST with JSON body; paginate_results is always included
+  const requestBody = { paginate_results: true, ...body };
+
+  const response = await fetch(url, {
+    method: "POST",
     headers: getAuthHeaders(),
+    body: JSON.stringify(requestBody),
     next: { revalidate: 300 }, // cache for 5 minutes
   });
 
@@ -60,11 +61,12 @@ async function appfolioFetch(endpoint: string, params?: Record<string, string>) 
 }
 
 // Helper to follow paginated results
-async function appfolioFetchAll(endpoint: string, params?: Record<string, string>) {
-  let result = await appfolioFetch(endpoint, params);
+async function appfolioFetchAll(endpoint: string, body?: Record<string, string>) {
+  let result = await appfolioFetch(endpoint, body);
   let allResults = result.results || [];
 
   while (result.next_page_url) {
+    // Pagination URLs are fetched with GET (they contain auth info in the URL)
     const response = await fetch(result.next_page_url, {
       headers: getAuthHeaders(),
     });
@@ -83,55 +85,54 @@ export async function getProperties() {
 
 // --- Unit Directory ---
 export async function getUnits(propertyId?: string) {
-  const params: Record<string, string> = {};
-  if (propertyId) params.property_id = propertyId;
-  return appfolioFetchAll("/reports/unit_directory.json", params);
+  const body: Record<string, string> = {};
+  if (propertyId) body.property_id = propertyId;
+  return appfolioFetchAll("/reports/unit_directory.json", body);
 }
 
 // --- Tenant Directory ---
 export async function getTenants(params?: { property_id?: string; status?: string }) {
-  const queryParams: Record<string, string> = {};
-  if (params?.property_id) queryParams.property_id = params.property_id;
-  if (params?.status) queryParams.tenant_status = params.status;
-  return appfolioFetchAll("/reports/tenant_directory.json", queryParams);
+  const body: Record<string, string> = {};
+  if (params?.property_id) body.property_id = params.property_id;
+  if (params?.status) body.tenant_status = params.status;
+  return appfolioFetchAll("/reports/tenant_directory.json", body);
 }
 
 // --- Work Orders ---
-// work_order_detail requires from_date and to_date
+// work_order_detail requires from_date and to_date (ISO 8601: YYYY-MM-DD)
 export async function getWorkOrders(params?: {
   property_id?: string;
   status?: string;
   created_after?: string;
 }) {
-  const queryParams: Record<string, string> = {};
-  if (params?.property_id) queryParams.property_id = params.property_id;
-  if (params?.status) queryParams.status = params.status;
+  const body: Record<string, string> = {};
+  if (params?.property_id) body.property_id = params.property_id;
+  if (params?.status) body.status = params.status;
   // Default to last 12 months
   const toDate = new Date();
   const fromDate = new Date();
   fromDate.setFullYear(fromDate.getFullYear() - 1);
-  queryParams.from_date = params?.created_after || formatDate(fromDate);
-  queryParams.to_date = formatDate(toDate);
-  return appfolioFetchAll("/reports/work_order_detail.json", queryParams);
+  body.from_date = params?.created_after || formatDate(fromDate);
+  body.to_date = formatDate(toDate);
+  return appfolioFetchAll("/reports/work_order_detail.json", body);
 }
 
 function formatDate(d: Date): string {
-  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+  return d.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
 // --- Unit Vacancy ---
-// Accepts an optional as_of_date (MM/DD/YYYY) to project future vacancy
 export async function getVacancyReport(asOfDate?: string) {
-  const params: Record<string, string> = {};
-  if (asOfDate) params.as_of_date = asOfDate;
-  return appfolioFetchAll("/reports/unit_vacancy_detail.json", params);
+  const body: Record<string, string> = {};
+  if (asOfDate) body.as_of_date = asOfDate;
+  return appfolioFetchAll("/reports/unit_vacancy_detail.json", body);
 }
 
 // --- Rent Roll ---
 export async function getRentRoll(propertyId?: string) {
-  const params: Record<string, string> = {};
-  if (propertyId) params.property_id = propertyId;
-  return appfolioFetchAll("/reports/rent_roll.json", params);
+  const body: Record<string, string> = {};
+  if (propertyId) body.property_id = propertyId;
+  return appfolioFetchAll("/reports/rent_roll.json", body);
 }
 
 // --- Aged Receivables ---
@@ -144,8 +145,8 @@ export async function getGeneralLedger(params?: {
   from_date?: string;
   to_date?: string;
 }) {
-  const queryParams: Record<string, string> = {};
-  if (params?.from_date) queryParams.from_date = params.from_date;
-  if (params?.to_date) queryParams.to_date = params.to_date;
-  return appfolioFetchAll("/reports/general_ledger.json", queryParams);
+  const body: Record<string, string> = {};
+  if (params?.from_date) body.from_date = params.from_date;
+  if (params?.to_date) body.to_date = params.to_date;
+  return appfolioFetchAll("/reports/general_ledger.json", body);
 }

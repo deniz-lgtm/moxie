@@ -129,18 +129,21 @@ export default function Dashboard() {
   useEffect(() => {
     setLoading(true);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 15000);
 
     fetch(`/api/appfolio/dashboard?academicYear=${academicYear}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
+        if (d.error) {
+          console.error("[Dashboard] API error:", d.error);
+        }
         if (d.stats) {
           setStats(d.stats);
           setSource(d.source || "appfolio");
         }
       })
-      .catch(() => {
-        // Keep previous stats or defaults
+      .catch((err) => {
+        console.error("[Dashboard] Fetch failed:", err.message);
       })
       .finally(() => {
         clearTimeout(timer);

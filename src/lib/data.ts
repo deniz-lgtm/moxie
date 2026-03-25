@@ -4,8 +4,8 @@
 // Fetches live data from AppFolio report-based API.
 // Student housing lease year: Aug 15 → Jul 31.
 //
-// Portfolio filter: portfolio_id = 10 (v2) for Moxie Management.
-// Rent roll has portfolio_id = null — cross-reference via property_id from property_directory.
+// Portfolio filter: portfolio_id = 24 for Moxie Management.
+// Property directory may use different portfolio_id — cross-reference via property_id.
 // Unit identity: "Unit Street Address 1" from AppFolio = "Unit Name" in Moxie.
 
 import {
@@ -28,58 +28,79 @@ import type {
 } from "./types";
 import { academicYearDates } from "./types";
 
-// Moxie Management portfolio identification:
-// - v1 API used PortfolioId = 24
-// - v2 API uses portfolio_id = 10 in property_directory, and portfolio_id = null in rent_roll
-// - The portfolio name field is "Moxie Management" (sometimes with trailing space)
-// Strategy: derive Moxie property_ids from property_directory (portfolio_id=10),
-// then use those property_ids to filter rent_roll and other reports.
-const MOXIE_PORTFOLIO_ID = "10"; // v2 property_directory portfolio_id for Moxie
+// Moxie Management portfolio_id = 24.
+// The property_directory may use a different portfolio_id for the same portfolio,
+// so we scan ALL reports for portfolio_id=24 and also match by portfolio name
+// "Moxie Management" as a fallback. Property IDs are cached and used to cross-reference
+// reports where portfolio_id may be null (rent_roll, work_orders).
+const MOXIE_PORTFOLIO_ID = "24";
+const MOXIE_PORTFOLIO_NAME = "Moxie Management";
 
-/** Cache for Moxie property IDs (derived from property_directory where portfolio_id=10) */
+/** Cache for Moxie property IDs */
 let _moxiePropertyIdCache: Set<string> | null = null;
 let _moxiePropertyIdCacheTime = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Get the set of property_ids that belong to Moxie Management.
- * Derived from the property_directory report where portfolio_id = 10.
+ * Scans both property_directory and rent_roll to find Moxie properties:
+ * - property_directory: match by portfolio name "Moxie Management" (portfolio_id may differ)
+ * - rent_roll: match by portfolio_id = 24 (where available)
  */
 async function getMoxiePropertyIds(): Promise<Set<string>> {
   const now = Date.now();
   if (_moxiePropertyIdCache && now - _moxiePropertyIdCacheTime < CACHE_TTL) {
     return _moxiePropertyIdCache;
   }
-  const propRows = await afGetProperties();
+
   const ids = new Set<string>();
+
+  // Source 1: property_directory — match by portfolio_id=24 OR portfolio name
+  const propRows = await afGetProperties();
   for (const p of (propRows || [])) {
     const pid = String(p.portfolio_id ?? "").trim();
-    if (pid === MOXIE_PORTFOLIO_ID) {
+    const pname = String(p.portfolio ?? p.portfolio_name ?? "").trim();
+    if (pid === MOXIE_PORTFOLIO_ID || pname === MOXIE_PORTFOLIO_NAME) {
       const propId = String(p.property_id || "");
       if (propId) ids.add(propId);
     }
   }
+
+  // Source 2: rent_roll — match by portfolio_id=24 (picks up any properties
+  // that might be in rent_roll but missing from property_directory)
+  const rentRollRows = await afGetRentRoll();
+  for (const r of (rentRollRows || [])) {
+    const pid = String(r.portfolio_id ?? "").trim();
+    if (pid === MOXIE_PORTFOLIO_ID) {
+      const propId = String(r.property_id || "");
+      if (propId) ids.add(propId);
+    }
+  }
+
   _moxiePropertyIdCache = ids;
   _moxiePropertyIdCacheTime = now;
-  console.log(`[Moxie] Cached ${ids.size} Moxie property IDs from property_directory (portfolio_id=${MOXIE_PORTFOLIO_ID})`);
+  console.log(`[Moxie] Cached ${ids.size} Moxie property IDs (portfolio_id=${MOXIE_PORTFOLIO_ID} or name="${MOXIE_PORTFOLIO_NAME}")`);
   return ids;
 }
 
 /**
  * Filter any report's rows to Moxie properties.
- * Checks portfolio_id = 10 (property_directory) OR property_id membership
- * in the Moxie set (for rent_roll/work_orders/tenants where portfolio_id is null).
+ * Checks portfolio_id = 24 OR portfolio name = "Moxie Management" OR
+ * property_id membership in the Moxie set (for reports where portfolio_id is null).
  */
 async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (!rows || rows.length === 0) return [];
   const moxieIds = await getMoxiePropertyIds();
   const filtered = rows.filter((row) => {
-    // Match by portfolio_id (works for property_directory)
+    // Match by portfolio_id = 24
     const pid = String(row.portfolio_id ?? row.PortfolioId ?? "").trim();
     if (pid === MOXIE_PORTFOLIO_ID) return true;
 
-    // Match by property_id membership (works for rent_roll, work_orders, tenants
-    // where portfolio_id is null but property_id links to a Moxie property)
+    // Match by portfolio name "Moxie Management"
+    const pname = String(row.portfolio ?? row.portfolio_name ?? row.Portfolio ?? "").trim();
+    if (pname === MOXIE_PORTFOLIO_NAME) return true;
+
+    // Match by property_id membership (for reports where portfolio fields are null)
     const propId = String(row.property_id || row.PropertyId || "");
     if (propId && moxieIds.has(propId)) return true;
 

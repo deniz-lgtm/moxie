@@ -9,11 +9,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        sidebar: "var(--sidebar)",
-        "sidebar-hover": "var(--sidebar-hover)",
-        "sidebar-active": "var(--sidebar-active)",
-        "sidebar-text": "var(--sidebar-text)",
-        "sidebar-text-active": "var(--sidebar-text-active)",
+        sidebar: "#111827",
+        "sidebar-hover": "#1f2937",
+        "sidebar-active": "rgba(157, 21, 53, 0.3)",
+        "sidebar-text": "#ffffff",
+        "sidebar-text-active": "#ffffff",
       },
     },
   },
