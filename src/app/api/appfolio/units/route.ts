@@ -21,6 +21,16 @@ export async function GET(request: Request) {
       const { data, source } = await fetchUnitsWithTenants();
       return NextResponse.json({ units: data, source });
     }
+    // Add ?address=<value> to find a specific unit by address
+    const addressQuery = url.searchParams.get("address");
+    if (addressQuery) {
+      const { data, source } = await fetchUnits();
+      const match = data.filter((u) =>
+        u.unitName.toLowerCase().includes(addressQuery.toLowerCase()) ||
+        u.id.toLowerCase().includes(addressQuery.toLowerCase())
+      );
+      return NextResponse.json({ query: addressQuery, matches: match.length, units: match, source });
+    }
     const academicYear = url.searchParams.get("academicYear") as AcademicYear | null;
     const { data, source } = await fetchUnits(academicYear || undefined);
     return NextResponse.json({ units: data, source });
