@@ -107,8 +107,8 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (!rows || rows.length === 0) return [];
   const moxieRefs = await getMoxiePropertyRefs();
   if (moxieRefs.size === 0) {
-    console.warn("[Moxie] filterToMoxie: No Moxie property refs found — returning all rows as fallback.");
-    return rows;
+    console.warn("[Moxie] filterToMoxie: No Moxie property refs found — returning empty array (no fallback).");
+    return [];
   }
   const filtered = rows.filter((row) => {
     const prop = String(row.property || row.Property || "");
@@ -192,6 +192,24 @@ function parseSqft(val: string | null | undefined): number | null {
   if (!val) return null;
   const n = parseInt(String(val).replace(/,/g, ""), 10);
   return isNaN(n) ? null : n;
+}
+
+/**
+ * Build a human-friendly unit display name from property address + unit identifier.
+ * If the unit field already contains the property address, return it as-is.
+ * Otherwise combine them: "1137 W 29th St Unit 3".
+ */
+function buildUnitDisplayName(propertyName: string, unitNum: string): string {
+  if (!unitNum) return propertyName || "Unknown";
+  if (!propertyName) return unitNum;
+  // If unit already looks like a full address (contains the property name), use it directly
+  const unitLower = unitNum.toLowerCase();
+  const propLower = propertyName.toLowerCase();
+  if (unitLower.includes(propLower) || propLower.includes(unitLower)) {
+    // Use whichever is longer / more descriptive
+    return unitNum.length >= propertyName.length ? unitNum : propertyName;
+  }
+  return `${propertyName} ${unitNum}`;
 }
 
 /**
@@ -304,13 +322,14 @@ export async function fetchUnits(academicYear?: AcademicYear): Promise<{ data: U
       rent = first.rent || first.Rent || null;
     }
 
+    const fullName = buildUnitDisplayName(propertyName, unitNum);
     units.push({
-      id: unitNum,
+      id: `${property}::${unitNum}`,
       propertyId: property,
       propertyName,
       number: unitNum,
-      unitName: unitNum,
-      displayName: unitNum || `${propertyName} #${unitNum}`,
+      unitName: fullName,
+      displayName: fullName,
       bedrooms: bed,
       bathrooms: bath,
       sqft: parseSqft(first.sqft || first.SquareFt),
@@ -342,11 +361,11 @@ export async function fetchUnitsWithTenants(): Promise<{
 
   const filtered = await filterToMoxie(rentRollRows);
 
-  // Group rows by unit key — v2 rent roll uses `unit` as the unit identifier
+  // Group rows by property + unit key to avoid collisions across properties
   const unitMap = new Map<string, { unit: any; tenants: string[] }>();
 
   for (const r of filtered) {
-    const unitKey = String(r.unit || r.Unit || "");
+    const unitKey = `${String(r.property || r.Property || "")}::${String(r.unit || r.Unit || "")}`;
     const tenant = String(r.tenant || r.Tenant || "").trim();
 
     if (!unitMap.has(unitKey)) {
@@ -391,13 +410,14 @@ export async function fetchUnitsWithTenants(): Promise<{
       .map((t) => tenantEmailMap.get(t.toLowerCase()) || "")
       .filter(Boolean);
 
+    const fullName = buildUnitDisplayName(propName, unitNum);
     units.push({
-      id: unitNum,
+      id: `${String(r.property || r.Property || "")}::${unitNum}`,
       propertyId: String(r.property || r.Property || ""),
       propertyName: propName,
       number: unitNum,
-      unitName: unitNum,
-      displayName: unitNum || `${propName} #${unitNum}`,
+      unitName: fullName,
+      displayName: fullName,
       bedrooms: bed,
       bathrooms: bath,
       sqft: parseSqft(r.sqft || r.SquareFt),

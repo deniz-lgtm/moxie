@@ -233,7 +233,7 @@ export default function QuarterlyInspectionPage() {
                   {filteredUnits.slice(0, 20).map((u) => (
                     <button key={u.id} onClick={() => { setForm({ ...form, unitId: u.id }); setUnitSearch(u.unitName); }}
                       className={`w-full text-left px-3 py-2 text-sm hover:bg-muted border-b border-border last:border-0 ${form.unitId === u.id ? "bg-accent/10 font-medium" : ""}`}>
-                      {u.unitName} <span className="text-muted-foreground">--- {u.propertyName}</span>
+                      {u.unitName}
                     </button>
                   ))}
                 </div>
