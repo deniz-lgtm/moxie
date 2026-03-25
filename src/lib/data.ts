@@ -29,22 +29,37 @@ import { academicYearDates } from "./types";
 
 // The one and only portfolio ID for Moxie Management
 const MOXIE_PORTFOLIO_ID = "24";
+const MOXIE_PORTFOLIO_NAME = "Moxie Management";
 
 /**
- * Filter any AppFolio report rows to Moxie Management (portfolio_id = 24).
- * Supports both v2 (snake_case) and v1 (PascalCase) field names for compatibility.
+ * Filter any AppFolio report rows to Moxie Management.
+ * Matches by portfolio_id = 24 (rent_roll, etc.) OR by portfolio name
+ * (property_directory uses a name field like "Portfolio" instead of an ID).
+ * Supports both v2 (snake_case) and v1 (PascalCase) field names.
  */
 function filterToMoxie(rows: any[]): any[] {
   if (!rows || rows.length === 0) return [];
   const filtered = rows.filter((row) => {
-    // v2 uses snake_case; v1 uses PascalCase — try both
-    const pid = String(row.portfolio_id || row.PortfolioId || "");
-    return pid === MOXIE_PORTFOLIO_ID;
+    // Match by portfolio ID (rent_roll, work_orders, etc.)
+    const pid = String(row.portfolio_id || row.PortfolioId || "").trim();
+    if (pid === MOXIE_PORTFOLIO_ID) return true;
+
+    // Match by portfolio name (property_directory uses name-based field)
+    const pname = String(
+      row.portfolio_name || row.portfolio || row.PortfolioName || row.Portfolio || ""
+    ).trim();
+    if (pname === MOXIE_PORTFOLIO_NAME) return true;
+
+    return false;
   });
   if (filtered.length === 0) {
+    const sample = rows[0] || {};
+    const sampleKeys = Object.keys(sample).filter((k) => /portfolio/i.test(k));
     console.warn(
-      `[Moxie] filterToMoxie: 0/${rows.length} rows matched portfolio_id=${MOXIE_PORTFOLIO_ID}. ` +
-      `Sample row portfolio_id: ${rows[0]?.portfolio_id || rows[0]?.PortfolioId}`
+      `[Moxie] filterToMoxie: 0/${rows.length} rows matched. ` +
+      `Portfolio-related fields in sample row: ${JSON.stringify(
+        Object.fromEntries(sampleKeys.map((k) => [k, sample[k]]))
+      )}`
     );
   }
   return filtered;
@@ -61,10 +76,16 @@ export async function debugMoxieFilter() {
   const moxieProps = filterToMoxie(propRows || []);
   const moxieRR = filterToMoxie(rentRollRows || []);
 
+  // Cross-reference: check if property IDs from both reports align
+  const propIds = moxieProps.map((p: any) => String(p.property_id || p.PropertyId || p.id || ""));
+  const rrPropIds = [...new Set(moxieRR.map((r: any) => String(r.property_id || r.PropertyId || "")))];
+  const matchingIds = propIds.filter((id: string) => rrPropIds.includes(id));
+
   return {
     propertyDirectory: {
       totalRows: (propRows || []).length,
       fields: propFields,
+      portfolioFields: propFields.filter((f: string) => /portfolio/i.test(f)),
       moxieMatchCount: moxieProps.length,
       sampleRow: propRows?.[0] || null,
       moxieSampleRow: moxieProps[0] || null,
@@ -72,9 +93,17 @@ export async function debugMoxieFilter() {
     rentRoll: {
       totalRows: (rentRollRows || []).length,
       fields: rrFields,
+      portfolioFields: rrFields.filter((f: string) => /portfolio/i.test(f)),
       moxieMatchCount: moxieRR.length,
       sampleRow: rentRollRows?.[0] || null,
       moxieSampleRow: moxieRR[0] || null,
+    },
+    crossReference: {
+      propertyIdsFromPropDir: propIds.slice(0, 10),
+      propertyIdsFromRentRoll: rrPropIds.slice(0, 10),
+      matchingPropertyIds: matchingIds.length,
+      totalPropertyDirIds: propIds.length,
+      totalRentRollIds: rrPropIds.length,
     },
   };
 }
@@ -84,8 +113,8 @@ export async function fetchProperties(): Promise<{ data: Property[]; source: "ap
   const rows = await afGetProperties();
   const filtered = filterToMoxie(rows || []);
   const properties: Property[] = filtered.map((p: any, i: number) => ({
-    // v2 uses snake_case; fallback to v1 PascalCase for compatibility
-    id: String(p.property_id || p.PropertyId || `prop-${i}`),
+    // v2 uses snake_case; fallback to v1 PascalCase; also try generic "id"
+    id: String(p.property_id || p.PropertyId || p.id || `prop-${i}`),
     name: p.property_name || p.PropertyName || "",
     address: [
       p.property_address || p.PropertyAddress || "",
