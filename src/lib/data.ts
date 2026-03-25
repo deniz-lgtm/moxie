@@ -471,42 +471,66 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   preLeased: number;
   source: "appfolio";
 }> {
-  const { data: units } = await fetchUnits(academicYear);
+  // Work from raw rent roll rows so we can check ALL lease rows per unit
+  const rentRollRows = await afGetRentRoll();
+  if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
+    return { total: 0, occupied: 0, preLeased: 0, source: "appfolio" };
+  }
 
+  const filtered = await filterToMoxie(rentRollRows);
+
+  // Group all rows by unit_id so we can check every lease row
+  const unitRows = new Map<string, any[]>();
+  for (const r of filtered) {
+    const key = String(r.unit_id || r.UnitId || r.unit || r.Unit || "");
+    if (!unitRows.has(key)) unitRows.set(key, []);
+    unitRows.get(key)!.push(r);
+  }
+
+  const total = unitRows.size;
   let occupied = 0;
   let preLeased = 0;
 
-  // Pre-leased: any unit whose lease covers the academic year start date (Aug 15).
-  // A lease "covers" Aug 15 if: lease_from <= Aug 15 AND (lease_to >= Aug 15 OR lease_to is null = MTM).
   const ayStart = academicYear
     ? new Date(academicYearDates(academicYear).leaseStart)
     : null;
 
-  for (const unit of units) {
-    if (unit.status === "current" || unit.status === "notice") {
-      occupied++;
-    }
+  for (const [, rows] of unitRows) {
+    // Occupied: any row has status "current" or "notice"
+    const isOccupied = rows.some((r) => {
+      const s = String(r.status || r.Status || "").toLowerCase();
+      return s === "current" || s === "notice";
+    });
+    if (isOccupied) occupied++;
 
-    // Check if this unit is leased for the academic year
-    if (ayStart && unit.leaseFrom) {
-      const leaseFrom = new Date(unit.leaseFrom);
-      if (leaseFrom <= ayStart) {
-        // Lease starts on or before Aug 15
-        if (!unit.leaseTo) {
-          // Month-to-month → still covering Aug 15
-          preLeased++;
-        } else {
-          const leaseTo = new Date(unit.leaseTo);
-          if (leaseTo >= ayStart) {
-            preLeased++;
-          }
+    // Pre-leased: ANY row for this unit has a lease covering Aug 15
+    if (ayStart) {
+      const leased = rows.some((r) => {
+        const leaseFrom = r.lease_from || r.LeaseFrom;
+        const leaseTo = r.lease_to || r.LeaseTo;
+
+        if (!leaseFrom) {
+          // No lease_from but has move_in and no move_out → MTM, covers Aug 15
+          const moveIn = r.move_in || r.MoveIn;
+          const moveOut = r.move_out || r.MoveOut;
+          if (moveIn && !moveOut) return true;
+          return false;
         }
-      }
+
+        const from = new Date(leaseFrom);
+        if (from > ayStart) return false; // lease starts after Aug 15
+
+        if (!leaseTo) return true; // MTM — no end date, covers Aug 15
+
+        const to = new Date(leaseTo);
+        return to >= ayStart; // lease_to on or after Aug 15
+      });
+      if (leased) preLeased++;
     }
   }
 
   return {
-    total: units.length,
+    total,
     occupied,
     preLeased,
     source: "appfolio",
