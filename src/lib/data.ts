@@ -115,7 +115,7 @@ async function filterToMoxieByProperty(rows: any[]): Promise<any[]> {
   return filtered;
 }
 
-/** Diagnostic: show raw data for debugging */
+/** Diagnostic: show raw data for debugging portfolio filtering */
 export async function debugMoxieFilter() {
   const propRows = await afGetProperties();
   const rentRollRows = await afGetRentRoll();
@@ -123,37 +123,89 @@ export async function debugMoxieFilter() {
   const propFields = propRows?.length > 0 ? Object.keys(propRows[0]) : [];
   const rrFields = rentRollRows?.length > 0 ? Object.keys(rentRollRows[0]) : [];
 
+  // Show ALL unique portfolio_id values and their counts in property_directory
+  const propPortfolioBreakdown: Record<string, { count: number; sampleProperty: string; portfolioName: string }> = {};
+  for (const p of (propRows || [])) {
+    const pid = String(p.portfolio_id ?? "null");
+    const pname = String(p.portfolio ?? p.portfolio_name ?? "").trim();
+    if (!propPortfolioBreakdown[pid]) {
+      propPortfolioBreakdown[pid] = {
+        count: 0,
+        sampleProperty: p.property_name || p.property || "",
+        portfolioName: pname,
+      };
+    }
+    propPortfolioBreakdown[pid].count++;
+  }
+
+  // Show ALL unique portfolio_id values in rent_roll
+  const rrPortfolioBreakdown: Record<string, { count: number; sampleProperty: string }> = {};
+  for (const r of (rentRollRows || [])) {
+    const pid = String(r.portfolio_id ?? "null");
+    if (!rrPortfolioBreakdown[pid]) {
+      rrPortfolioBreakdown[pid] = {
+        count: 0,
+        sampleProperty: r.property_name || r.property || "",
+      };
+    }
+    rrPortfolioBreakdown[pid].count++;
+  }
+
+  // Find 2414 Catalina St specifically in both reports
+  const catalinaProps = (propRows || []).filter((p: any) => {
+    const searchable = JSON.stringify(p).toLowerCase();
+    return searchable.includes("catalina") || searchable.includes("1481 w 25th");
+  });
+  const catalinaRR = (rentRollRows || []).filter((r: any) => {
+    const searchable = JSON.stringify(r).toLowerCase();
+    return searchable.includes("catalina") || searchable.includes("1481 w 25th");
+  });
+
+  // Apply current filters
   const moxieProps = filterToMoxie(propRows || []);
   const moxieRR = await filterToMoxieByProperty(rentRollRows || []);
 
-  // Cross-reference: check if property IDs from both reports align
+  // Check if 2414 Catalina made it through the filter
+  const catalinaInFilteredRR = moxieRR.filter((r: any) => {
+    const searchable = JSON.stringify(r).toLowerCase();
+    return searchable.includes("catalina") || searchable.includes("1481 w 25th");
+  });
+
+  // Cross-reference property IDs
   const propIds = moxieProps.map((p: any) => String(p.property_id || p.PropertyId || p.id || ""));
   const rrPropIds = [...new Set(moxieRR.map((r: any) => String(r.property_id || r.PropertyId || "")))];
-  const matchingIds = propIds.filter((id: string) => rrPropIds.includes(id));
 
   return {
-    propertyDirectory: {
-      totalRows: (propRows || []).length,
-      fields: propFields,
-      portfolioFields: propFields.filter((f: string) => /portfolio/i.test(f)),
-      moxieMatchCount: moxieProps.length,
-      sampleRow: propRows?.[0] || null,
-      moxieSampleRow: moxieProps[0] || null,
+    portfolioBreakdown: {
+      propertyDirectory: propPortfolioBreakdown,
+      rentRoll: rrPortfolioBreakdown,
     },
-    rentRoll: {
-      totalRows: (rentRollRows || []).length,
-      fields: rrFields,
-      portfolioFields: rrFields.filter((f: string) => /portfolio/i.test(f)),
-      moxieMatchCount: moxieRR.length,
-      sampleRow: rentRollRows?.[0] || null,
-      moxieSampleRow: moxieRR[0] || null,
+    catalinaSearch: {
+      inPropertyDirectory: catalinaProps,
+      inRentRoll: catalinaRR,
+      inFilteredRentRoll: catalinaInFilteredRR,
+      catalinaPassedFilter: catalinaInFilteredRR.length > 0,
+    },
+    filterResults: {
+      propertyDirectory: {
+        totalRows: (propRows || []).length,
+        moxieMatchCount: moxieProps.length,
+        moxieSampleRow: moxieProps[0] || null,
+      },
+      rentRoll: {
+        totalRows: (rentRollRows || []).length,
+        moxieMatchCount: moxieRR.length,
+        moxieSampleRow: moxieRR[0] || null,
+      },
     },
     crossReference: {
-      propertyIdsFromPropDir: propIds.slice(0, 10),
-      propertyIdsFromRentRoll: rrPropIds.slice(0, 10),
-      matchingPropertyIds: matchingIds.length,
-      totalPropertyDirIds: propIds.length,
-      totalRentRollIds: rrPropIds.length,
+      moxiePropertyIds: propIds.slice(0, 20),
+      rentRollPropertyIds: rrPropIds.slice(0, 20),
+      matchingPropertyIds: propIds.filter((id: string) => rrPropIds.includes(id)).length,
+    },
+    fields: {
+      propertyDirectory: propFields,
+      rentRoll: rrFields,
     },
   };
 }
@@ -289,12 +341,12 @@ export async function fetchUnitsWithTenants(): Promise<{
 
   const filtered = await filterToMoxieByProperty(rentRollRows);
 
-  // Group rows by unit key (UnitId or UnitStreetAddress1)
+  // Group rows by unit key (unit_id for v2, UnitId for v1)
   const unitMap = new Map<string, { unit: any; tenants: string[] }>();
 
   for (const r of filtered) {
-    const unitKey = String(r.UnitId || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.Unit || "");
-    const tenant = String(r.Tenant || "").trim();
+    const unitKey = String(r.unit_id || r.UnitId || r.unit || r.Unit || "");
+    const tenant = String(r.tenant || r.Tenant || "").trim();
 
     if (!unitMap.has(unitKey)) {
       unitMap.set(unitKey, { unit: r, tenants: [] });
@@ -310,8 +362,8 @@ export async function fetchUnitsWithTenants(): Promise<{
     const tenantRows = await afGetTenants();
     const moxieTenants = await filterToMoxieByProperty(tenantRows || []);
     for (const t of moxieTenants) {
-      const name = String(t.TenantName || t.tenant_name || t.Name || "").trim();
-      const email = String(t.Email || t.TenantEmail || t.email || "").trim();
+      const name = String(t.tenant_name || t.TenantName || t.Name || "").trim();
+      const email = String(t.email || t.Email || t.TenantEmail || "").trim();
       if (name && email && email !== "null") {
         tenantEmailMap.set(name.toLowerCase(), email);
       }
@@ -323,11 +375,17 @@ export async function fetchUnitsWithTenants(): Promise<{
   const units: (Unit & { tenants: string[]; tenantEmails: string[] })[] = [];
 
   for (const [, { unit: r, tenants }] of unitMap) {
-    const unitName = String(r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.UnitAddress || r.Unit || "");
-    const unitNum = String(r.Unit || r.UnitName || "");
-    const propName = String(r.PropertyName || "");
-    const { bed, bath } = parseBdBa(r.BdBa);
-    const rawStatus = String(r.Status || "").toLowerCase();
+    // v2: construct unit name from property_street fields; v1: use UnitStreetAddress1
+    const unitStreet = r.property_street && r.property_street2
+      ? `${r.property_street} ${r.property_street2}`.trim()
+      : "";
+    const unitName = String(
+      unitStreet || r.unit_street || r.UnitStreetAddress1 || r["Unit Street Address 1"] || r.unit || r.Unit || ""
+    );
+    const unitNum = String(r.unit || r.Unit || r.unit_name || r.UnitName || "");
+    const propName = String(r.property_name || r.PropertyName || "");
+    const { bed, bath } = parseBdBa(r.bd_ba || r.BdBa);
+    const rawStatus = String(r.status || r.Status || "").toLowerCase();
     const status = (["current", "vacant", "notice", "future"].includes(rawStatus)
       ? rawStatus
       : "vacant") as Unit["status"];
@@ -337,23 +395,23 @@ export async function fetchUnitsWithTenants(): Promise<{
       .filter(Boolean);
 
     units.push({
-      id: String(r.UnitId || ""),
-      propertyId: String(r.PropertyId || ""),
+      id: String(r.unit_id || r.UnitId || ""),
+      propertyId: String(r.property_id || r.PropertyId || ""),
       propertyName: propName,
       number: unitNum,
       unitName,
       displayName: unitName || `${propName} #${unitNum}`,
       bedrooms: bed,
       bathrooms: bath,
-      sqft: parseSqft(r.SquareFt),
-      rent: r.Rent || null,
+      sqft: parseSqft(r.sqft || r.SquareFt),
+      rent: r.rent || r.Rent || null,
       status,
       tenant: tenants.length > 0 ? tenants.join(", ") : null,
       tenants,
       tenantEmails,
-      leaseFrom: r.LeaseFrom || null,
-      leaseTo: r.LeaseTo || null,
-      appfolioId: r.UnitId ? String(r.UnitId) : undefined,
+      leaseFrom: r.lease_from || r.LeaseFrom || null,
+      leaseTo: r.lease_to || r.LeaseTo || null,
+      appfolioId: r.unit_id || r.UnitId ? String(r.unit_id || r.UnitId) : undefined,
     });
   }
 
@@ -376,13 +434,17 @@ export async function fetchTenantsForUnit(
 
     const matched: { name: string; email: string }[] = [];
     for (const t of moxieTenants) {
+      // v2: construct from property_street fields; v1: UnitStreetAddress1
+      const tStreet = t.property_street && t.property_street2
+        ? `${t.property_street} ${t.property_street2}`.trim()
+        : "";
       const addr = String(
-        t.UnitStreetAddress1 || t["Unit Street Address 1"] || ""
+        tStreet || t.unit_street || t.UnitStreetAddress1 || t["Unit Street Address 1"] || ""
       ).trim().toLowerCase();
       if (!addr || addr !== normalizedAddress) continue;
 
-      const name = String(t.TenantName || t.tenant_name || t.Name || "").trim();
-      const email = String(t.Email || t.TenantEmail || t.email || "").trim();
+      const name = String(t.tenant_name || t.TenantName || t.Name || "").trim();
+      const email = String(t.email || t.Email || t.TenantEmail || "").trim();
       if (name && name !== "null") {
         matched.push({ name, email: email && email !== "null" ? email : "" });
       }
