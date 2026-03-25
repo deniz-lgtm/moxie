@@ -196,7 +196,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Units</p>
           <p className="text-3xl font-bold mt-2 tracking-tight">{stats.totalUnits}</p>
@@ -206,11 +206,6 @@ export default function Dashboard() {
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pre-Leased</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{preLeasedPct}%</p>
           <p className="text-xs text-muted-foreground mt-1">{stats.preLeasedUnits} of {stats.totalUnits} units</p>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Unleased</p>
-          <p className="text-3xl font-bold mt-2 tracking-tight text-amber-600">{stats.vacantUnits}</p>
-          <p className="text-xs text-muted-foreground mt-1">{yearLabel} lease year</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Maintenance</p>

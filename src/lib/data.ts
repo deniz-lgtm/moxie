@@ -469,30 +469,46 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   total: number;
   occupied: number;
   preLeased: number;
-  unleased: number;
   source: "appfolio";
 }> {
   const { data: units } = await fetchUnits(academicYear);
 
   let occupied = 0;
-  let vacant = 0;
-  let future = 0;
-  let notice = 0;
+  let preLeased = 0;
+
+  // Pre-leased: any unit whose lease covers the academic year start date (Aug 15).
+  // A lease "covers" Aug 15 if: lease_from <= Aug 15 AND (lease_to >= Aug 15 OR lease_to is null = MTM).
+  const ayStart = academicYear
+    ? new Date(academicYearDates(academicYear).leaseStart)
+    : null;
 
   for (const unit of units) {
-    switch (unit.status) {
-      case "current": occupied++; break;
-      case "notice": notice++; break;
-      case "future": future++; break;
-      default: vacant++; break;
+    if (unit.status === "current" || unit.status === "notice") {
+      occupied++;
+    }
+
+    // Check if this unit is leased for the academic year
+    if (ayStart && unit.leaseFrom) {
+      const leaseFrom = new Date(unit.leaseFrom);
+      if (leaseFrom <= ayStart) {
+        // Lease starts on or before Aug 15
+        if (!unit.leaseTo) {
+          // Month-to-month → still covering Aug 15
+          preLeased++;
+        } else {
+          const leaseTo = new Date(unit.leaseTo);
+          if (leaseTo >= ayStart) {
+            preLeased++;
+          }
+        }
+      }
     }
   }
 
   return {
     total: units.length,
-    occupied: occupied + notice,
-    preLeased: future,
-    unleased: vacant,
+    occupied,
+    preLeased,
     source: "appfolio",
   };
 }
@@ -660,7 +676,7 @@ export async function fetchDashboardStats(academicYear?: AcademicYear): Promise<
   const stats: DashboardStats = {
     totalUnits: unitStats.total,
     occupiedUnits: unitStats.occupied,
-    vacantUnits: unitStats.unleased,
+    vacantUnits: unitStats.total - unitStats.preLeased,
     turningUnits: 0,
     preLeasedUnits: unitStats.preLeased,
     openMaintenanceRequests: openMaintenance,
