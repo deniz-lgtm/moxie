@@ -42,6 +42,13 @@ export interface Unit {
   tenant: string | null;
   leaseFrom: string | null;
   leaseTo: string | null;
+  moveIn: string | null;
+  moveOut: string | null;
+  deposit: number | null;
+  additionalTenants: string | null;
+  additionalTenantIds: string | null;
+  tenantId: string | null;
+  leaseExpiresMonth: string | null;
   appfolioId?: string;
 }
 
