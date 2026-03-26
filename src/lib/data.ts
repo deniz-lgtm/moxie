@@ -510,31 +510,36 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
     if (!ayStart) continue;
 
-    // Pre-leased check: is this unit leased on Aug 15?
-    // A unit IS pre-leased if ANY row satisfies:
-    //   1. lease_to >= Aug 15 (lease extends past the start date)
-    //   2. lease_to is null AND has a tenant (MTM — no end date)
-    //   3. status is "future" (a new/renewal lease is signed)
-    const isPreLeased = rows.some((r: any) => {
-      const leaseTo = r.lease_to || r.LeaseTo;
-      const leaseFrom = r.lease_from || r.LeaseFrom;
-      const status = String(r.status || r.Status || "").toLowerCase();
-      const tenant = String(r.tenant || r.Tenant || "").trim();
-
-      // Future lease = pre-leased (renewal or new tenant signed)
-      if (status === "future") return true;
-
-      // MTM: has a tenant/lease but no end date → continues indefinitely
-      if (!leaseTo && (leaseFrom || tenant)) return true;
-
-      // Lease extends to or past Aug 15
-      if (leaseTo) {
-        const to = new Date(leaseTo);
-        if (to >= ayStart) return true;
-      }
-
-      return false;
+    // Pre-leased check: is this unit leased for the academic year starting Aug 15?
+    // Student housing context: if a unit has a current tenant, they are expected to
+    // renew (the rent roll shows current lease, not future renewals).
+    // A unit is pre-leased if ANY row satisfies:
+    //   1. status is "current" (tenant in place — will renew or already renewed)
+    //   2. status is "future" (a new/renewal lease is signed)
+    //   3. lease_to >= Aug 15 (lease explicitly extends past the start date)
+    //   4. lease_to is null AND has a tenant (MTM — no end date, continues)
+    // A unit is NOT pre-leased only if:
+    //   - status is "vacant" with no "future" row (empty, no tenant coming)
+    //   - status is "notice" with no "future" row (tenant leaving, no replacement)
+    const hasCurrent = rows.some((r: any) => {
+      const s = String(r.status || r.Status || "").toLowerCase();
+      return s === "current";
     });
+    const hasFuture = rows.some((r: any) => {
+      const s = String(r.status || r.Status || "").toLowerCase();
+      return s === "future";
+    });
+    const hasMTM = rows.some((r: any) => {
+      const leaseTo = r.lease_to || r.LeaseTo;
+      const tenant = String(r.tenant || r.Tenant || "").trim();
+      return !leaseTo && tenant;
+    });
+    const hasExtendedLease = rows.some((r: any) => {
+      const leaseTo = r.lease_to || r.LeaseTo;
+      return leaseTo && new Date(leaseTo) >= ayStart;
+    });
+
+    const isPreLeased = hasCurrent || hasFuture || hasMTM || hasExtendedLease;
 
     if (isPreLeased) {
       preLeased++;
