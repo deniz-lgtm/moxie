@@ -469,12 +469,13 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   total: number;
   occupied: number;
   preLeased: number;
+  unleased: string[]; // unit names that are NOT pre-leased (for debugging)
   source: "appfolio";
 }> {
   // Get unique unit count from rent roll
   const rentRollRows = await afGetRentRoll();
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
-    return { total: 0, occupied: 0, preLeased: 0, source: "appfolio" };
+    return { total: 0, occupied: 0, preLeased: 0, unleased: [], source: "appfolio" };
   }
 
   const filtered = await filterToMoxie(rentRollRows);
@@ -482,71 +483,76 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   // Deduplicate by unit_id to get unique units
   const unitRows = new Map<string, any[]>();
   for (const r of filtered) {
-    const key = String(r.unit_id || r.UnitId || r.unit || r.Unit || "");
+    const key = String(r.unit_id || r.UnitId || "");
+    if (!key) continue;
     if (!unitRows.has(key)) unitRows.set(key, []);
     unitRows.get(key)!.push(r);
   }
 
   const total = unitRows.size;
   let occupied = 0;
-  for (const [, rows] of unitRows) {
-    if (rows.some((r: any) => {
+  let preLeased = 0;
+  const unleased: string[] = [];
+
+  const ayStart = academicYear
+    ? new Date(academicYearDates(academicYear).leaseStart)
+    : null;
+
+  for (const [unitId, rows] of unitRows) {
+    const unitName = String(rows[0].unit || rows[0].Unit || unitId);
+
+    // Check occupancy
+    const isOccupied = rows.some((r: any) => {
       const s = String(r.status || r.Status || "").toLowerCase();
       return s === "current" || s === "notice";
-    })) occupied++;
+    });
+    if (isOccupied) occupied++;
+
+    if (!ayStart) continue;
+
+    // Pre-leased check: is this unit leased on Aug 15?
+    // A unit IS pre-leased if ANY row satisfies:
+    //   1. lease_to >= Aug 15 (lease extends past the start date)
+    //   2. lease_to is null AND has a tenant (MTM — no end date)
+    //   3. status is "future" (a new/renewal lease is signed)
+    const isPreLeased = rows.some((r: any) => {
+      const leaseTo = r.lease_to || r.LeaseTo;
+      const leaseFrom = r.lease_from || r.LeaseFrom;
+      const status = String(r.status || r.Status || "").toLowerCase();
+      const tenant = String(r.tenant || r.Tenant || "").trim();
+
+      // Future lease = pre-leased (renewal or new tenant signed)
+      if (status === "future") return true;
+
+      // MTM: has a tenant/lease but no end date → continues indefinitely
+      if (!leaseTo && (leaseFrom || tenant)) return true;
+
+      // Lease extends to or past Aug 15
+      if (leaseTo) {
+        const to = new Date(leaseTo);
+        if (to >= ayStart) return true;
+      }
+
+      return false;
+    });
+
+    if (isPreLeased) {
+      preLeased++;
+    } else {
+      unleased.push(unitName);
+    }
   }
 
-  // Use vacancy report to determine pre-leased count.
-  // The vacancy report shows units that will be VACANT as of a given date.
-  // Pre-leased = total units - truly vacant units (no next tenant).
-  let preLeased = total;
-  if (academicYear) {
-    const { leaseStart } = academicYearDates(academicYear);
-    try {
-      const vacancyRows = await afGetVacancyReport(leaseStart);
-      console.log(`[Moxie] Vacancy report: ${(vacancyRows || []).length} rows for ${leaseStart}`);
-      if (vacancyRows?.length > 0) {
-        console.log(`[Moxie] Vacancy sample fields:`, Object.keys(vacancyRows[0]).join(", "));
-        console.log(`[Moxie] Vacancy sample row:`, JSON.stringify(vacancyRows[0]).slice(0, 500));
-      }
-      const moxieVacant = await filterToMoxie(vacancyRows || []);
-      console.log(`[Moxie] Vacancy after Moxie filter: ${moxieVacant.length} rows`);
-
-      // Deduplicate vacancy rows by unit
-      const vacantUnits = new Set<string>();
-      for (const v of moxieVacant) {
-        const key = String(v.unit_id || v.UnitId || v.unit || v.Unit || "");
-        // Only count as truly vacant if "Unrented" — "Rented" means a new tenant is signed
-        const unitStatus = String(v.unit_status || v.UnitStatus || v.status || v.Status || "").toLowerCase();
-        console.log(`[Moxie] Vacancy unit ${key}: status="${unitStatus}"`);
-        if (unitStatus.includes("unrented") || (unitStatus.includes("vacant") && !unitStatus.includes("rented"))) {
-          vacantUnits.add(key);
-        }
-      }
-      console.log(`[Moxie] Truly vacant (unrented) units: ${vacantUnits.size}, preLeased: ${total - vacantUnits.size}`);
-      preLeased = total - vacantUnits.size;
-    } catch (err) {
-      console.error("[fetchUnitStats] vacancy report failed, falling back:", err);
-      // Fallback: count from rent roll lease dates
-      preLeased = 0;
-      const ayStart = new Date(leaseStart);
-      for (const [, rows] of unitRows) {
-        const leased = rows.some((r: any) => {
-          const leaseTo = r.lease_to || r.LeaseTo;
-          if (!leaseTo && (r.lease_from || r.move_in)) return true; // MTM
-          if (leaseTo && new Date(leaseTo) >= ayStart) return true;
-          const s = String(r.status || r.Status || "").toLowerCase();
-          return s === "future";
-        });
-        if (leased) preLeased++;
-      }
-    }
+  console.log(`[Moxie] Unit stats: total=${total}, occupied=${occupied}, preLeased=${preLeased}, unleased=${unleased.length}`);
+  if (unleased.length > 0 && unleased.length < 30) {
+    console.log(`[Moxie] Unleased units:`, unleased.join(", "));
   }
 
   return {
     total,
     occupied,
     preLeased,
+    unleased,
     source: "appfolio",
   };
 }
@@ -709,7 +715,7 @@ export async function fetchDashboardStats(academicYear?: AcademicYear): Promise<
   const [unitStats, maintenanceResult, applicationsResult] = await Promise.all([
     fetchUnitStats(academicYear).catch((err) => {
       console.error("[Moxie] fetchUnitStats failed:", err);
-      return { total: 0, occupied: 0, preLeased: 0, source: "appfolio" as const };
+      return { total: 0, occupied: 0, preLeased: 0, unleased: [] as string[], source: "appfolio" as const };
     }),
     fetchMaintenanceRequests().catch((err) => {
       console.error("[Moxie] fetchMaintenanceRequests failed:", err);

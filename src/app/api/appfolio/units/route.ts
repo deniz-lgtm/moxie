@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchUnits, fetchUnitsWithTenants, fetchTenantsForUnit, debugMoxieFilter } from "@/lib/data";
-import { getVacancyReport } from "@/lib/appfolio";
+import { fetchUnits, fetchUnitsWithTenants, fetchTenantsForUnit, debugMoxieFilter, fetchUnitStats } from "@/lib/data";
 import type { AcademicYear } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -11,15 +10,18 @@ export async function GET(request: Request) {
       const diag = await debugMoxieFilter();
       return NextResponse.json(diag);
     }
-    // Add ?vacancy_debug=1 to see raw vacancy report data
-    if (url.searchParams.get("vacancy_debug")) {
-      const asOf = url.searchParams.get("as_of") || "2026-08-15";
-      const rows = await getVacancyReport(asOf);
+    // Add ?prelease_debug=1 to see pre-lease calculation breakdown
+    if (url.searchParams.get("prelease_debug")) {
+      const ay = (url.searchParams.get("ay") || "2026-2027") as AcademicYear;
+      const stats = await fetchUnitStats(ay);
       return NextResponse.json({
-        asOfDate: asOf,
-        totalRows: (rows || []).length,
-        sampleFields: rows?.[0] ? Object.keys(rows[0]) : [],
-        first5: (rows || []).slice(0, 5),
+        academicYear: ay,
+        totalUniqueUnits: stats.total,
+        occupied: stats.occupied,
+        preLeased: stats.preLeased,
+        preLeasedPct: stats.total > 0 ? Math.round((stats.preLeased / stats.total) * 100) : 0,
+        unleasedCount: stats.unleased.length,
+        unleasedUnits: stats.unleased,
       });
     }
     // Add ?tenants_for=<unitAddress> to get tenants for a specific unit
