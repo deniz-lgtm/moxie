@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchUnits, fetchUnitsWithTenants, fetchTenantsForUnit, debugMoxieFilter } from "@/lib/data";
+import { getVacancyReport } from "@/lib/appfolio";
 import type { AcademicYear } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -9,6 +10,17 @@ export async function GET(request: Request) {
     if (url.searchParams.get("debug")) {
       const diag = await debugMoxieFilter();
       return NextResponse.json(diag);
+    }
+    // Add ?vacancy_debug=1 to see raw vacancy report data
+    if (url.searchParams.get("vacancy_debug")) {
+      const asOf = url.searchParams.get("as_of") || "2026-08-15";
+      const rows = await getVacancyReport(asOf);
+      return NextResponse.json({
+        asOfDate: asOf,
+        totalRows: (rows || []).length,
+        sampleFields: rows?.[0] ? Object.keys(rows[0]) : [],
+        first5: (rows || []).slice(0, 5),
+      });
     }
     // Add ?tenants_for=<unitAddress> to get tenants for a specific unit
     const tenantsFor = url.searchParams.get("tenants_for");

@@ -122,9 +122,12 @@ function formatDate(d: Date): string {
 }
 
 // --- Unit Vacancy ---
-export async function getVacancyReport(asOfDate?: string) {
+// v2 unit_vacancy_detail uses available_from_date / available_to_date
+export async function getVacancyReport(availableFrom?: string) {
   const body: Record<string, string> = {};
-  if (asOfDate) body.as_of_date = asOfDate;
+  if (availableFrom) {
+    body.available_from_date = availableFrom;
+  }
   return appfolioFetchAll("/reports/unit_vacancy_detail.json", body);
 }
 

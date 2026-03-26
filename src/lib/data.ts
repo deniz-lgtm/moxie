@@ -504,7 +504,13 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
     const { leaseStart } = academicYearDates(academicYear);
     try {
       const vacancyRows = await afGetVacancyReport(leaseStart);
+      console.log(`[Moxie] Vacancy report: ${(vacancyRows || []).length} rows for ${leaseStart}`);
+      if (vacancyRows?.length > 0) {
+        console.log(`[Moxie] Vacancy sample fields:`, Object.keys(vacancyRows[0]).join(", "));
+        console.log(`[Moxie] Vacancy sample row:`, JSON.stringify(vacancyRows[0]).slice(0, 500));
+      }
       const moxieVacant = await filterToMoxie(vacancyRows || []);
+      console.log(`[Moxie] Vacancy after Moxie filter: ${moxieVacant.length} rows`);
 
       // Deduplicate vacancy rows by unit
       const vacantUnits = new Set<string>();
@@ -512,10 +518,12 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
         const key = String(v.unit_id || v.UnitId || v.unit || v.Unit || "");
         // Only count as truly vacant if "Unrented" — "Rented" means a new tenant is signed
         const unitStatus = String(v.unit_status || v.UnitStatus || v.status || v.Status || "").toLowerCase();
+        console.log(`[Moxie] Vacancy unit ${key}: status="${unitStatus}"`);
         if (unitStatus.includes("unrented") || (unitStatus.includes("vacant") && !unitStatus.includes("rented"))) {
           vacantUnits.add(key);
         }
       }
+      console.log(`[Moxie] Truly vacant (unrented) units: ${vacantUnits.size}, preLeased: ${total - vacantUnits.size}`);
       preLeased = total - vacantUnits.size;
     } catch (err) {
       console.error("[fetchUnitStats] vacancy report failed, falling back:", err);
@@ -699,8 +707,14 @@ export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; s
 // --- Aggregated Dashboard Stats ---
 export async function fetchDashboardStats(academicYear?: AcademicYear): Promise<{ data: DashboardStats; source: "appfolio" }> {
   const [unitStats, maintenanceResult, applicationsResult] = await Promise.all([
-    fetchUnitStats(academicYear),
-    fetchMaintenanceRequests().catch(() => ({ data: [] as MaintenanceRequest[], source: "appfolio" as const })),
+    fetchUnitStats(academicYear).catch((err) => {
+      console.error("[Moxie] fetchUnitStats failed:", err);
+      return { total: 0, occupied: 0, preLeased: 0, source: "appfolio" as const };
+    }),
+    fetchMaintenanceRequests().catch((err) => {
+      console.error("[Moxie] fetchMaintenanceRequests failed:", err);
+      return { data: [] as MaintenanceRequest[], source: "appfolio" as const };
+    }),
     fetchApplications().catch(() => ({ data: [] as ApplicationGroup[], source: "appfolio" as const })),
   ]);
 
