@@ -196,21 +196,21 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Units</p>
-          <p className="text-3xl font-bold mt-2 tracking-tight">{stats.totalUnits}</p>
-          <p className="text-xs text-muted-foreground mt-1">{currentOccPct}% occupied</p>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pre-Leased</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{preLeasedPct}%</p>
           <p className="text-xs text-muted-foreground mt-1">{stats.preLeasedUnits} of {stats.totalUnits} units</p>
         </div>
         <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Maintenance</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Open Work Orders</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-blue-600">{stats.openMaintenanceRequests}</p>
-          <p className="text-xs text-muted-foreground mt-1">open work orders</p>
+          <p className="text-xs text-muted-foreground mt-1">maintenance requests</p>
+        </div>
+        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Leasing</p>
+          <p className="text-3xl font-bold mt-2 tracking-tight text-purple-600">{stats.activeApplications}</p>
+          <p className="text-xs text-muted-foreground mt-1">pending applications</p>
         </div>
       </div>
 

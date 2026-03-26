@@ -471,7 +471,7 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   preLeased: number;
   source: "appfolio";
 }> {
-  // Work from raw rent roll rows so we can check ALL lease rows per unit
+  // Get unique unit count from rent roll
   const rentRollRows = await afGetRentRoll();
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
     return { total: 0, occupied: 0, preLeased: 0, source: "appfolio" };
@@ -479,7 +479,7 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
   const filtered = await filterToMoxie(rentRollRows);
 
-  // Group all rows by unit_id so we can check every lease row
+  // Deduplicate by unit_id to get unique units
   const unitRows = new Map<string, any[]>();
   for (const r of filtered) {
     const key = String(r.unit_id || r.UnitId || r.unit || r.Unit || "");
@@ -489,43 +489,49 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
   const total = unitRows.size;
   let occupied = 0;
-  let preLeased = 0;
-
-  const ayStart = academicYear
-    ? new Date(academicYearDates(academicYear).leaseStart)
-    : null;
-
   for (const [, rows] of unitRows) {
-    // Occupied: any row has status "current" or "notice"
-    const isOccupied = rows.some((r) => {
+    if (rows.some((r: any) => {
       const s = String(r.status || r.Status || "").toLowerCase();
       return s === "current" || s === "notice";
-    });
-    if (isOccupied) occupied++;
+    })) occupied++;
+  }
 
-    // Pre-leased: ANY row for this unit has a lease covering Aug 15
-    if (ayStart) {
-      const leased = rows.some((r) => {
-        const leaseFrom = r.lease_from || r.LeaseFrom;
-        const leaseTo = r.lease_to || r.LeaseTo;
+  // Use vacancy report to determine pre-leased count.
+  // The vacancy report shows units that will be VACANT as of a given date.
+  // Pre-leased = total units - truly vacant units (no next tenant).
+  let preLeased = total;
+  if (academicYear) {
+    const { leaseStart } = academicYearDates(academicYear);
+    try {
+      const vacancyRows = await afGetVacancyReport(leaseStart);
+      const moxieVacant = await filterToMoxie(vacancyRows || []);
 
-        if (!leaseFrom) {
-          // No lease_from but has move_in and no move_out → MTM, covers Aug 15
-          const moveIn = r.move_in || r.MoveIn;
-          const moveOut = r.move_out || r.MoveOut;
-          if (moveIn && !moveOut) return true;
-          return false;
+      // Deduplicate vacancy rows by unit
+      const vacantUnits = new Set<string>();
+      for (const v of moxieVacant) {
+        const key = String(v.unit_id || v.UnitId || v.unit || v.Unit || "");
+        // Only count as truly vacant if "Unrented" — "Rented" means a new tenant is signed
+        const unitStatus = String(v.unit_status || v.UnitStatus || v.status || v.Status || "").toLowerCase();
+        if (unitStatus.includes("unrented") || (unitStatus.includes("vacant") && !unitStatus.includes("rented"))) {
+          vacantUnits.add(key);
         }
-
-        const from = new Date(leaseFrom);
-        if (from > ayStart) return false; // lease starts after Aug 15
-
-        if (!leaseTo) return true; // MTM — no end date, covers Aug 15
-
-        const to = new Date(leaseTo);
-        return to >= ayStart; // lease_to on or after Aug 15
-      });
-      if (leased) preLeased++;
+      }
+      preLeased = total - vacantUnits.size;
+    } catch (err) {
+      console.error("[fetchUnitStats] vacancy report failed, falling back:", err);
+      // Fallback: count from rent roll lease dates
+      preLeased = 0;
+      const ayStart = new Date(leaseStart);
+      for (const [, rows] of unitRows) {
+        const leased = rows.some((r: any) => {
+          const leaseTo = r.lease_to || r.LeaseTo;
+          if (!leaseTo && (r.lease_from || r.move_in)) return true; // MTM
+          if (leaseTo && new Date(leaseTo) >= ayStart) return true;
+          const s = String(r.status || r.Status || "").toLowerCase();
+          return s === "future";
+        });
+        if (leased) preLeased++;
+      }
     }
   }
 
@@ -581,7 +587,12 @@ export async function fetchMaintenanceRequests(params?: {
   status?: string;
 }): Promise<{ data: MaintenanceRequest[]; source: "appfolio" }> {
   const allRows = await afGetWorkOrders(params);
+  console.log(`[Moxie] Work orders raw: ${(allRows || []).length} rows`);
+  if (allRows?.length > 0) {
+    console.log(`[Moxie] Work order sample fields:`, Object.keys(allRows[0]).join(", "));
+  }
   const rows = await filterToMoxie(allRows || []);
+  console.log(`[Moxie] Work orders after filter: ${rows.length} rows`);
   const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
     id: String(wo.WorkOrderId || wo.work_order_id || wo.Id || `wo-${i}`),
     unitId: String(wo.UnitId || wo.unit_id || ""),
