@@ -54,7 +54,7 @@ export interface Unit {
 
 // --- Inspections ---
 export type InspectionType = "move_in" | "move_out" | "onboarding" | "quarterly" | "punch_list";
-export type InspectionStatus = "draft" | "walking" | "ai_review" | "team_review" | "completed";
+export type InspectionStatus = "not_started" | "draft" | "walking" | "ai_review" | "team_review" | "completed";
 export type ConditionRating = "excellent" | "good" | "fair" | "poor" | "damaged";
 
 export interface InspectionPhoto {

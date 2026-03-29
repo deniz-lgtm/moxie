@@ -71,12 +71,66 @@ export default function MoveOutInspectionPage() {
   const [selectedTenants, setSelectedTenants] = useState<Set<number>>(new Set());
   const [loadingTenants, setLoadingTenants] = useState(false);
 
+  const [populating, setPopulating] = useState(false);
+
   useEffect(() => {
     fetch("/api/appfolio/units")
       .then((r) => r.json())
       .then((d) => setUnits(d.units || []))
       .catch(() => {});
   }, []);
+
+  // Auto-populate "not_started" inspections for all units moving out 2025-07-31
+  useEffect(() => {
+    if (units.length === 0) return;
+
+    const moveOutUnits = units.filter((u) => {
+      if (!u.leaseTo) return false;
+      // Normalize date: AppFolio may return "MM/DD/YYYY" or "YYYY-MM-DD"
+      const d = new Date(u.leaseTo);
+      return d.getFullYear() === 2025 && d.getMonth() === 6 && d.getDate() === 31; // July = 6
+    });
+
+    if (moveOutUnits.length === 0) return;
+
+    const existing = loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_out");
+    const existingUnitIds = new Set(existing.map((i) => i.unitId));
+
+    const newInspections: Inspection[] = [];
+    for (const unit of moveOutUnits) {
+      if (existingUnitIds.has(unit.id)) continue;
+      newInspections.push({
+        id: newId(),
+        unitId: unit.id,
+        propertyId: unit.propertyId,
+        unitNumber: unit.unitName || unit.displayName,
+        propertyName: unit.propertyName,
+        type: "move_out",
+        status: "not_started",
+        scheduledDate: "2025-07-31",
+        inspector: "Moxie Management",
+        rooms: [],
+        floorPlanUrl: null,
+        overallNotes: "",
+        invoiceUrl: null,
+        invoiceTotal: null,
+        tenantName: unit.tenant || null,
+        tenantEmail: null,
+        depositAmount: unit.deposit || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    if (newInspections.length > 0) {
+      const all = [...existing, ...newInspections];
+      setInspections(all.filter((i) => i.type === "move_out"));
+      // Persist — merge with other types
+      const allStored = loadFromStorage<Inspection[]>("inspections_v2", []);
+      const others = allStored.filter((i) => i.type !== "move_out");
+      saveToStorage("inspections_v2", [...others, ...all]);
+    }
+  }, [units]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch tenants when entering the completed step
   useEffect(() => {
@@ -507,6 +561,16 @@ export default function MoveOutInspectionPage() {
   // ─── List view ────────────────────────────────────
 
   if (showList && !activeInspection) {
+    const completedCount = inspections.filter((i) => i.status === "completed").length;
+    const notStartedCount = inspections.filter((i) => i.status === "not_started").length;
+    const inProgressCount = inspections.filter((i) => i.status !== "completed" && i.status !== "not_started").length;
+    const totalCount = inspections.length;
+    const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    // Sort: in-progress first, then not_started, then completed
+    const statusOrder: Record<string, number> = { walking: 0, ai_review: 0, team_review: 0, draft: 0, not_started: 1, completed: 2 };
+    const sortedInspections = [...inspections].sort((a, b) => (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1));
+
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -516,7 +580,7 @@ export default function MoveOutInspectionPage() {
             </Link>
             <h1 className="text-2xl font-bold tracking-tight mt-1">Move-Out Inspections</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Full walk with floor plan, photos, AI analysis, and deposit deduction invoice
+              July 31, 2025 move-outs &mdash; full walk with floor plan, photos, AI analysis, and deposit deduction invoice
             </p>
           </div>
           <button
@@ -527,20 +591,54 @@ export default function MoveOutInspectionPage() {
           </button>
         </div>
 
-        {inspections.length > 0 ? (
+        {/* Progress summary */}
+        {totalCount > 0 && (
+          <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">Progress</h2>
+              <span className="text-sm font-bold text-accent">{progressPct}%</span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2.5 mb-4">
+              <div
+                className="h-2.5 rounded-full transition-all duration-500"
+                style={{
+                  width: `${progressPct}%`,
+                  background: progressPct === 100 ? "#16a34a" : "var(--accent)",
+                }}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-green-600">{completedCount}</p>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Completed</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-blue-600">{inProgressCount}</p>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">In Progress</p>
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-slate-500">{notStartedCount}</p>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Not Started</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {totalCount > 0 ? (
           <div className="bg-card rounded-2xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unit</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspector</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Property</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Tenant</th>
+                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deposit</th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deductions</th>
                 </tr>
               </thead>
               <tbody>
-                {inspections.map((insp) => {
+                {sortedInspections.map((insp) => {
                   const ded = insp.rooms
                     .flatMap((r) => r.items)
                     .filter((item) => item.isDeduction)
@@ -551,13 +649,28 @@ export default function MoveOutInspectionPage() {
                       onClick={() => {
                         setActiveInspection(insp);
                         setShowList(false);
-                        setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
+                        if (insp.status === "not_started") {
+                          // Pre-fill form with unit info and go to floor plan step
+                          setNewForm({
+                            unitId: insp.unitId,
+                            inspector: insp.inspector,
+                            scheduledDate: insp.scheduledDate,
+                            depositAmount: insp.depositAmount || 0,
+                          });
+                          setStep("floor_plan");
+                          // Update status to draft
+                          const updated = { ...insp, status: "draft" as const, updatedAt: new Date().toISOString() };
+                          saveInspection(updated);
+                        } else {
+                          setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
+                        }
                       }}
                       className="border-b border-border/50 last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-3.5 font-medium">{insp.unitNumber}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground">{insp.scheduledDate}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground">{insp.inspector}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.propertyName}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.tenantName || "—"}</td>
+                      <td className="px-4 py-3.5 text-muted-foreground">{insp.depositAmount ? `$${insp.depositAmount.toLocaleString()}` : "—"}</td>
                       <td className="px-4 py-3.5"><StatusBadge value={insp.status} /></td>
                       <td className="px-4 py-3.5 font-medium">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
                     </tr>
