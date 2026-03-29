@@ -89,12 +89,27 @@ export default function MoveOutInspectionPage() {
 
     const moveOutUnits = units.filter((u) => {
       if (!u.leaseTo) return false;
-      // Normalize date: AppFolio may return "MM/DD/YYYY" or "YYYY-MM-DD"
-      const d = new Date(u.leaseTo);
-      return d.getFullYear() === 2026 && d.getMonth() === 6 && d.getDate() === 31; // July = 6
+      // Normalize: handle "YYYY-MM-DD", "MM/DD/YYYY", or other formats
+      const raw = u.leaseTo.trim();
+      // Direct string match for common formats
+      if (raw === "2026-07-31" || raw === "07/31/2026" || raw === "7/31/2026") return true;
+      // Fallback: parse with UTC to avoid timezone shift
+      const parts = raw.includes("/")
+        ? raw.split("/").map(Number) // MM/DD/YYYY
+        : raw.split("-").map(Number); // YYYY-MM-DD
+      if (raw.includes("/")) {
+        return parts[2] === 2026 && parts[0] === 7 && parts[1] === 31;
+      }
+      return parts[0] === 2026 && parts[1] === 7 && parts[2] === 31;
     });
 
-    if (moveOutUnits.length === 0) return;
+    // Debug: log lease dates to help troubleshoot if no matches found
+    if (moveOutUnits.length === 0) {
+      const withLease = units.filter((u) => u.leaseTo);
+      const sampleDates = [...new Set(withLease.map((u) => u.leaseTo))].slice(0, 10);
+      console.log("[MoveOut] No units matched 2026-07-31. Sample leaseTo values:", sampleDates);
+      return;
+    }
 
     const existing = loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_out");
     const existingUnitIds = new Set(existing.map((i) => i.unitId));
