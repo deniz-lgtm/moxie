@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
 import type {
   Inspection,
@@ -42,9 +41,8 @@ function blankItem(name: string): InspectionItem {
 type WizardStep = "select_unit" | "floor_plan" | "walking" | "ai_review" | "team_review" | "completed";
 
 export default function MoveOutInspectionPage() {
-  const [inspections, setInspections] = useState<Inspection[]>(() =>
-    loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_out")
-  );
+  const [inspections, setInspections] = useState<Inspection[]>([]);
+  const [loadingInspections, setLoadingInspections] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
   const [activeInspection, setActiveInspection] = useState<Inspection | null>(null);
   const [step, setStep] = useState<WizardStep>("select_unit");
@@ -74,81 +72,83 @@ export default function MoveOutInspectionPage() {
   const [selectedTenants, setSelectedTenants] = useState<Set<number>>(new Set());
   const [loadingTenants, setLoadingTenants] = useState(false);
 
-  const [populating, setPopulating] = useState(false);
-
+  // Load inspections from API + fetch units + auto-populate
   useEffect(() => {
-    fetch("/api/appfolio/units")
-      .then((r) => r.json())
-      .then((d) => setUnits(d.units || []))
-      .catch(() => {});
-  }, []);
+    async function loadData() {
+      try {
+        // Fetch inspections and units in parallel
+        const [inspRes, unitsRes] = await Promise.all([
+          fetch("/api/inspections/crud?type=move_out").then((r) => r.json()),
+          fetch("/api/appfolio/units").then((r) => r.json()),
+        ]);
 
-  // Auto-populate "not_started" inspections for all units moving out 2025-07-31
-  useEffect(() => {
-    if (units.length === 0) return;
+        const existingInspections: Inspection[] = inspRes.inspections || [];
+        const fetchedUnits: Unit[] = unitsRes.units || [];
+        setUnits(fetchedUnits);
 
-    const moveOutUnits = units.filter((u) => {
-      if (!u.leaseTo) return false;
-      // Normalize: handle "YYYY-MM-DD", "MM/DD/YYYY", or other formats
-      const raw = u.leaseTo.trim();
-      // Direct string match for common formats
-      if (raw === "2026-07-31" || raw === "07/31/2026" || raw === "7/31/2026") return true;
-      // Fallback: parse with UTC to avoid timezone shift
-      const parts = raw.includes("/")
-        ? raw.split("/").map(Number) // MM/DD/YYYY
-        : raw.split("-").map(Number); // YYYY-MM-DD
-      if (raw.includes("/")) {
-        return parts[2] === 2026 && parts[0] === 7 && parts[1] === 31;
+        // Auto-populate for units moving out 2026-07-31
+        const existingUnitIds = new Set(existingInspections.map((i: Inspection) => i.unitId));
+        const moveOutUnits = fetchedUnits.filter((u: Unit) => {
+          if (!u.leaseTo || existingUnitIds.has(u.id)) return false;
+          const raw = u.leaseTo.trim();
+          if (raw === "2026-07-31" || raw === "07/31/2026" || raw === "7/31/2026") return true;
+          const parts = raw.includes("/")
+            ? raw.split("/").map(Number)
+            : raw.split("-").map(Number);
+          if (raw.includes("/")) return parts[2] === 2026 && parts[0] === 7 && parts[1] === 31;
+          return parts[0] === 2026 && parts[1] === 7 && parts[2] === 31;
+        });
+
+        if (moveOutUnits.length === 0) {
+          if (existingInspections.length === 0) {
+            const withLease = fetchedUnits.filter((u: Unit) => u.leaseTo);
+            const sampleDates = [...new Set(withLease.map((u: Unit) => u.leaseTo))].slice(0, 10);
+            console.log("[MoveOut] No units matched 2026-07-31. Sample leaseTo values:", sampleDates);
+          }
+          setInspections(existingInspections);
+          setLoadingInspections(false);
+          return;
+        }
+
+        // Create new inspections for unmatched units
+        const newInspections: Inspection[] = moveOutUnits.map((unit: Unit) => ({
+          id: crypto.randomUUID(),
+          unitId: unit.id,
+          propertyId: unit.propertyId,
+          unitNumber: unit.unitName || unit.displayName,
+          propertyName: unit.propertyName,
+          type: "move_out" as const,
+          status: "not_started" as const,
+          scheduledDate: "2026-07-31",
+          inspector: "Moxie Management",
+          rooms: [],
+          floorPlanUrl: null,
+          overallNotes: "",
+          invoiceUrl: null,
+          invoiceTotal: null,
+          tenantName: unit.tenant || null,
+          tenantEmail: null,
+          depositAmount: unit.deposit || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }));
+
+        // Bulk create via API
+        await fetch("/api/inspections/crud", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inspections: newInspections }),
+        });
+
+        setInspections([...existingInspections, ...newInspections]);
+      } catch (err) {
+        console.error("[MoveOut] Failed to load data:", err);
+      } finally {
+        setLoadingInspections(false);
       }
-      return parts[0] === 2026 && parts[1] === 7 && parts[2] === 31;
-    });
-
-    // Debug: log lease dates to help troubleshoot if no matches found
-    if (moveOutUnits.length === 0) {
-      const withLease = units.filter((u) => u.leaseTo);
-      const sampleDates = [...new Set(withLease.map((u) => u.leaseTo))].slice(0, 10);
-      console.log("[MoveOut] No units matched 2026-07-31. Sample leaseTo values:", sampleDates);
-      return;
     }
-
-    const existing = loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_out");
-    const existingUnitIds = new Set(existing.map((i) => i.unitId));
-
-    const newInspections: Inspection[] = [];
-    for (const unit of moveOutUnits) {
-      if (existingUnitIds.has(unit.id)) continue;
-      newInspections.push({
-        id: newId(),
-        unitId: unit.id,
-        propertyId: unit.propertyId,
-        unitNumber: unit.unitName || unit.displayName,
-        propertyName: unit.propertyName,
-        type: "move_out",
-        status: "not_started",
-        scheduledDate: "2026-07-31",
-        inspector: "Moxie Management",
-        rooms: [],
-        floorPlanUrl: null,
-        overallNotes: "",
-        invoiceUrl: null,
-        invoiceTotal: null,
-        tenantName: unit.tenant || null,
-        tenantEmail: null,
-        depositAmount: unit.deposit || null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
-    }
-
-    if (newInspections.length > 0) {
-      const all = [...existing, ...newInspections];
-      setInspections(all.filter((i) => i.type === "move_out"));
-      // Persist — merge with other types
-      const allStored = loadFromStorage<Inspection[]>("inspections_v2", []);
-      const others = allStored.filter((i) => i.type !== "move_out");
-      saveToStorage("inspections_v2", [...others, ...all]);
-    }
-  }, [units]); // eslint-disable-line react-hooks/exhaustive-deps
+    loadData();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch tenants when entering the completed step
   useEffect(() => {
@@ -167,33 +167,28 @@ export default function MoveOutInspectionPage() {
       .finally(() => setLoadingTenants(false));
   }, [step, activeInspection]);
 
-  // Persist all move-out inspections
-  const persist = useCallback(
-    (updated: Inspection[]) => {
-      // Merge with other types
-      const allInspections = loadFromStorage<Inspection[]>("inspections_v2", []);
-      const others = allInspections.filter((i) => i.type !== "move_out");
-      saveToStorage("inspections_v2", [...others, ...updated]);
-    },
-    []
-  );
-
   function saveInspection(insp: Inspection) {
     const updated = inspections.map((i) => (i.id === insp.id ? insp : i));
     if (!inspections.find((i) => i.id === insp.id)) updated.push(insp);
     setInspections(updated);
     setActiveInspection(insp);
-    persist(updated);
+    // Persist to API (fire and forget)
+    fetch("/api/inspections/crud", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inspection: insp }),
+    }).catch((err) => console.error("[MoveOut] Save failed:", err));
   }
 
   function deleteInspection(id: string) {
     const updated = inspections.filter((i) => i.id !== id);
     setInspections(updated);
-    persist(updated);
     if (activeInspection?.id === id) {
       setActiveInspection(null);
       setShowList(true);
     }
+    fetch(`/api/inspections/crud?id=${id}`, { method: "DELETE" })
+      .catch((err) => console.error("[MoveOut] Delete failed:", err));
   }
 
   function startNewInspection() {
@@ -232,9 +227,24 @@ export default function MoveOutInspectionPage() {
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = reader.result as string;
+
+      // Upload floor plan to storage
+      let floorPlanUrl = dataUrl;
+      try {
+        const uploadRes = await fetch("/api/inspections/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataUrl, inspectionId: activeInspection.id, type: "floor_plan" }),
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadData.url) floorPlanUrl = uploadData.url;
+      } catch {
+        // Keep data URL as fallback
+      }
+
       const updated = {
         ...activeInspection,
-        floorPlanUrl: dataUrl,
+        floorPlanUrl,
         updatedAt: new Date().toISOString(),
       };
 
@@ -352,10 +362,27 @@ export default function MoveOutInspectionPage() {
     if (!activeInspection || !e.target.files?.length) return;
     const file = e.target.files[0];
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      const photoId = newId();
+
+      // Upload to storage
+      let photoUrl = dataUrl;
+      try {
+        const uploadRes = await fetch("/api/inspections/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataUrl, inspectionId: activeInspection.id, photoId }),
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadData.url) photoUrl = uploadData.url;
+      } catch {
+        // Keep data URL as fallback
+      }
+
       const photo: InspectionPhoto = {
-        id: newId(),
-        url: reader.result as string,
+        id: photoId,
+        url: photoUrl,
         aiAnalysis: null,
         createdAt: new Date().toISOString(),
       };
@@ -587,6 +614,21 @@ export default function MoveOutInspectionPage() {
     : units;
 
   // ─── List view ────────────────────────────────────
+
+  if (loadingInspections && showList && !activeInspection) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <Link href="/inspections" className="text-xs font-medium text-accent hover:underline">&larr; All Inspections</Link>
+          <h1 className="text-2xl font-bold tracking-tight mt-1">Move-Out Inspections</h1>
+        </div>
+        <div className="flex items-center justify-center py-20">
+          <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin mr-3" />
+          <span className="text-sm text-muted-foreground">Loading inspections...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (showList && !activeInspection) {
     const completedCount = inspections.filter((i) => i.status === "completed").length;
