@@ -88,7 +88,7 @@ export default function MoveOutInspectionPage() {
       if (!u.leaseTo) return false;
       // Normalize date: AppFolio may return "MM/DD/YYYY" or "YYYY-MM-DD"
       const d = new Date(u.leaseTo);
-      return d.getFullYear() === 2025 && d.getMonth() === 6 && d.getDate() === 31; // July = 6
+      return d.getFullYear() === 2026 && d.getMonth() === 6 && d.getDate() === 31; // July = 6
     });
 
     if (moveOutUnits.length === 0) return;
@@ -107,7 +107,7 @@ export default function MoveOutInspectionPage() {
         propertyName: unit.propertyName,
         type: "move_out",
         status: "not_started",
-        scheduledDate: "2025-07-31",
+        scheduledDate: "2026-07-31",
         inspector: "Moxie Management",
         rooms: [],
         floorPlanUrl: null,
@@ -580,7 +580,7 @@ export default function MoveOutInspectionPage() {
             </Link>
             <h1 className="text-2xl font-bold tracking-tight mt-1">Move-Out Inspections</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              July 31, 2025 move-outs &mdash; full walk with floor plan, photos, AI analysis, and deposit deduction invoice
+              July 31, 2026 move-outs &mdash; full walk with floor plan, photos, AI analysis, and deposit deduction invoice
             </p>
           </div>
           <button
