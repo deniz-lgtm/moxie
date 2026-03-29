@@ -54,6 +54,9 @@ export default function MoveOutInspectionPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [listSearch, setListSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [propertyFilter, setPropertyFilter] = useState<string>("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -166,6 +169,16 @@ export default function MoveOutInspectionPage() {
     setInspections(updated);
     setActiveInspection(insp);
     persist(updated);
+  }
+
+  function deleteInspection(id: string) {
+    const updated = inspections.filter((i) => i.id !== id);
+    setInspections(updated);
+    persist(updated);
+    if (activeInspection?.id === id) {
+      setActiveInspection(null);
+      setShowList(true);
+    }
   }
 
   function startNewInspection() {
@@ -567,9 +580,33 @@ export default function MoveOutInspectionPage() {
     const totalCount = inspections.length;
     const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
+    // Get unique property names for filter dropdown
+    const propertyNames = [...new Set(inspections.map((i) => i.propertyName))].sort();
+
+    // Apply filters
+    let filtered = inspections;
+    if (statusFilter !== "all") {
+      if (statusFilter === "in_progress") {
+        filtered = filtered.filter((i) => !["completed", "not_started"].includes(i.status));
+      } else {
+        filtered = filtered.filter((i) => i.status === statusFilter);
+      }
+    }
+    if (propertyFilter !== "all") {
+      filtered = filtered.filter((i) => i.propertyName === propertyFilter);
+    }
+    if (listSearch.trim()) {
+      const q = listSearch.toLowerCase();
+      filtered = filtered.filter((i) =>
+        i.unitNumber.toLowerCase().includes(q) ||
+        (i.tenantName || "").toLowerCase().includes(q) ||
+        i.propertyName.toLowerCase().includes(q)
+      );
+    }
+
     // Sort: in-progress first, then not_started, then completed
     const statusOrder: Record<string, number> = { walking: 0, ai_review: 0, team_review: 0, draft: 0, not_started: 1, completed: 2 };
-    const sortedInspections = [...inspections].sort((a, b) => (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1));
+    const sortedInspections = [...filtered].sort((a, b) => (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1));
 
     return (
       <div className="space-y-6">
@@ -608,19 +645,57 @@ export default function MoveOutInspectionPage() {
               />
             </div>
             <div className="grid grid-cols-3 gap-4 text-center">
-              <div>
+              <button onClick={() => setStatusFilter(statusFilter === "completed" ? "all" : "completed")} className={`rounded-xl py-2 transition-colors ${statusFilter === "completed" ? "bg-green-50 ring-1 ring-green-200" : "hover:bg-muted/50"}`}>
                 <p className="text-2xl font-bold tracking-tight text-green-600">{completedCount}</p>
                 <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Completed</p>
-              </div>
-              <div>
+              </button>
+              <button onClick={() => setStatusFilter(statusFilter === "in_progress" ? "all" : "in_progress")} className={`rounded-xl py-2 transition-colors ${statusFilter === "in_progress" ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-muted/50"}`}>
                 <p className="text-2xl font-bold tracking-tight text-blue-600">{inProgressCount}</p>
                 <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">In Progress</p>
-              </div>
-              <div>
+              </button>
+              <button onClick={() => setStatusFilter(statusFilter === "not_started" ? "all" : "not_started")} className={`rounded-xl py-2 transition-colors ${statusFilter === "not_started" ? "bg-slate-100 ring-1 ring-slate-300" : "hover:bg-muted/50"}`}>
                 <p className="text-2xl font-bold tracking-tight text-slate-500">{notStartedCount}</p>
                 <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Not Started</p>
-              </div>
+              </button>
             </div>
+          </div>
+        )}
+
+        {/* Search and filters */}
+        {totalCount > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <input
+                type="text"
+                placeholder="Search unit, tenant, or property..."
+                value={listSearch}
+                onChange={(e) => setListSearch(e.target.value)}
+                className="w-full text-sm border border-border rounded-xl px-3.5 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+              />
+            </div>
+            {propertyNames.length > 1 && (
+              <select
+                value={propertyFilter}
+                onChange={(e) => setPropertyFilter(e.target.value)}
+                className="text-sm border border-border rounded-xl px-3 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+              >
+                <option value="all">All Properties</option>
+                {propertyNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            )}
+            {(statusFilter !== "all" || propertyFilter !== "all" || listSearch) && (
+              <button
+                onClick={() => { setStatusFilter("all"); setPropertyFilter("all"); setListSearch(""); }}
+                className="text-xs font-medium text-accent hover:underline"
+              >
+                Clear filters
+              </button>
+            )}
+            <span className="text-xs text-muted-foreground">
+              {sortedInspections.length} of {totalCount}
+            </span>
           </div>
         )}
 
@@ -635,6 +710,7 @@ export default function MoveOutInspectionPage() {
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deposit</th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
                   <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deductions</th>
+                  <th className="w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -650,7 +726,6 @@ export default function MoveOutInspectionPage() {
                         setActiveInspection(insp);
                         setShowList(false);
                         if (insp.status === "not_started") {
-                          // Pre-fill form with unit info and go to floor plan step
                           setNewForm({
                             unitId: insp.unitId,
                             inspector: insp.inspector,
@@ -658,7 +733,6 @@ export default function MoveOutInspectionPage() {
                             depositAmount: insp.depositAmount || 0,
                           });
                           setStep("floor_plan");
-                          // Update status to draft
                           const updated = { ...insp, status: "draft" as const, updatedAt: new Date().toISOString() };
                           saveInspection(updated);
                         } else {
@@ -673,11 +747,39 @@ export default function MoveOutInspectionPage() {
                       <td className="px-4 py-3.5 text-muted-foreground">{insp.depositAmount ? `$${insp.depositAmount.toLocaleString()}` : "—"}</td>
                       <td className="px-4 py-3.5"><StatusBadge value={insp.status} /></td>
                       <td className="px-4 py-3.5 font-medium">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
+                      <td className="px-2 py-3.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete inspection for ${insp.unitNumber}?`)) {
+                              deleteInspection(insp.id);
+                            }
+                          }}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
+                          title="Delete inspection"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            {sortedInspections.length === 0 && filtered.length === 0 && (
+              <div className="text-center py-10">
+                <p className="text-sm text-muted-foreground">No inspections match your filters</p>
+                <button
+                  onClick={() => { setStatusFilter("all"); setPropertyFilter("all"); setListSearch(""); }}
+                  className="text-xs font-medium text-accent hover:underline mt-1"
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center py-16 bg-card rounded-2xl border border-border" style={{ boxShadow: "var(--shadow-sm)" }}>
