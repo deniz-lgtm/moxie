@@ -540,6 +540,7 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 }
 
 // --- Work Orders / Maintenance ---
+// Maps AppFolio categories to internal types
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
   electrical: "electrical",
