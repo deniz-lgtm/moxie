@@ -469,10 +469,9 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   total: number;
   occupied: number;
   preLeased: number;
-  unleased: string[]; // unit names that are NOT pre-leased (for debugging)
+  unleased: { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[];
   source: "appfolio";
 }> {
-  // Get unique unit count from rent roll
   const rentRollRows = await afGetRentRoll();
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
     return { total: 0, occupied: 0, preLeased: 0, unleased: [], source: "appfolio" };
@@ -480,15 +479,11 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
   const filtered = await filterToMoxie(rentRollRows);
 
-  // Deduplicate by property_id + unit name to get unique PHYSICAL units.
-  // unit_id in the rent roll is per-row (per tenant-lease), NOT per physical unit.
-  // Multiple tenants on the same lease share the same property_id + unit name.
+  // Group by unit_id (one per physical unit in the rent roll)
   const unitRows = new Map<string, any[]>();
   for (const r of filtered) {
-    const propId = String(r.property_id || r.PropertyId || "");
-    const unitName = String(r.unit || r.Unit || "");
-    const key = `${propId}::${unitName}`;
-    if (!propId || !unitName) continue;
+    const key = String(r.unit_id || r.UnitId || "");
+    if (!key) continue;
     if (!unitRows.has(key)) unitRows.set(key, []);
     unitRows.get(key)!.push(r);
   }
@@ -496,7 +491,7 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   const total = unitRows.size;
   let occupied = 0;
   let preLeased = 0;
-  const unleased: string[] = [];
+  const unleased: { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[] = [];
 
   const ayStart = academicYear
     ? new Date(academicYearDates(academicYear).leaseStart)
@@ -504,10 +499,7 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
   for (const [, rows] of unitRows) {
     const unitName = String(rows[0].unit || rows[0].Unit || "");
-    const propName = String(rows[0].property_name || rows[0].PropertyName || "");
-    const displayName = propName ? `${propName} - ${unitName}` : unitName;
 
-    // Check occupancy
     const isOccupied = rows.some((r: any) => {
       const s = String(r.status || r.Status || "").toLowerCase();
       return s === "current" || s === "notice";
@@ -516,21 +508,9 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
     if (!ayStart) continue;
 
-    // Pre-leased check: is this unit leased for the academic year starting Aug 15?
     // A unit is pre-leased if ANY row satisfies:
-    //   1. status is "current" (tenant in place — will renew or already renewed)
-    //   2. status is "future" (a new/renewal lease is signed)
-    //   3. lease_to >= Aug 15 (lease explicitly extends past the start date)
-    //   4. lease_to is null AND has a tenant (MTM — no end date, continues)
-    // A unit is NOT pre-leased only if ALL rows are "vacant" with no future lease.
-    const hasCurrent = rows.some((r: any) => {
-      const s = String(r.status || r.Status || "").toLowerCase();
-      return s === "current";
-    });
-    const hasFuture = rows.some((r: any) => {
-      const s = String(r.status || r.Status || "").toLowerCase();
-      return s === "future";
-    });
+    const hasCurrent = rows.some((r: any) => String(r.status || r.Status || "").toLowerCase() === "current");
+    const hasFuture = rows.some((r: any) => String(r.status || r.Status || "").toLowerCase() === "future");
     const hasMTM = rows.some((r: any) => {
       const leaseTo = r.lease_to || r.LeaseTo;
       const tenant = String(r.tenant || r.Tenant || "").trim();
@@ -541,16 +521,23 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
       return leaseTo && new Date(leaseTo) >= ayStart;
     });
 
-    const isPreLeased = hasCurrent || hasFuture || hasMTM || hasExtendedLease;
-
-    if (isPreLeased) {
+    if (hasCurrent || hasFuture || hasMTM || hasExtendedLease) {
       preLeased++;
     } else {
-      unleased.push(displayName);
+      // Include raw data so we can see WHY it's not pre-leased
+      const r = rows[0];
+      unleased.push({
+        unit: unitName,
+        status: String(r.status || r.Status || ""),
+        tenant: String(r.tenant || r.Tenant || ""),
+        leaseFrom: String(r.lease_from || r.LeaseFrom || ""),
+        leaseTo: String(r.lease_to || r.LeaseTo || ""),
+      });
     }
   }
 
-  console.log(`[Moxie] Unit stats (${filtered.length} rows → ${total} unique units): occupied=${occupied}, preLeased=${preLeased}, unleased=${unleased.length}`);
+  return { total, occupied, preLeased, unleased, source: "appfolio" };
+}
 
   return {
     total,
