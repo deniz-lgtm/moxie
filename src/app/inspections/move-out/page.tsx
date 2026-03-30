@@ -3,8 +3,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SaveIndicator } from "@/components/SaveIndicator";
+import { InspectionErrorBoundary } from "@/components/InspectionErrorBoundary";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
+import { useSaveQueue } from "@/hooks/useSaveQueue";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
+import { validateImage, compressImage } from "@/lib/image-utils";
 import type {
   Inspection,
   InspectionRoom,
@@ -62,6 +68,14 @@ function blankItem(name: string): InspectionItem {
 type WizardStep = "select_unit" | "floor_plan" | "walking" | "ai_review" | "team_review" | "completed";
 
 export default function MoveOutInspectionPage() {
+  return (
+    <InspectionErrorBoundary>
+      <MoveOutInspectionContent />
+    </InspectionErrorBoundary>
+  );
+}
+
+function MoveOutInspectionContent() {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [loadingInspections, setLoadingInspections] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -78,6 +92,33 @@ export default function MoveOutInspectionPage() {
   const [propertyFilter, setPropertyFilter] = useState<string>("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // ─── Network status & offline sync ─────────────────
+  const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
+  const [syncingOffline, setSyncingOffline] = useState(false);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+
+  // Sync offline queue when connectivity returns
+  useEffect(() => {
+    if (wasOffline && isOnline) {
+      clearWasOffline();
+      const queue = getOfflineQueue();
+      if (queue.length > 0) {
+        setSyncingOffline(true);
+        setOfflineQueueCount(queue.length);
+        replayOfflineQueue().then(({ succeeded }) => {
+          setSyncingOffline(false);
+          setOfflineQueueCount(getOfflineQueue().length);
+          if (succeeded > 0) {
+            console.log(`[MoveOut] Synced ${succeeded} offline changes`);
+          }
+        });
+      }
+    }
+  }, [wasOffline, isOnline, clearWasOffline]);
 
   // New inspection form (tenant info is resolved at send time, not creation)
   const [newForm, setNewForm] = useState({
@@ -92,6 +133,43 @@ export default function MoveOutInspectionPage() {
   const [unitTenants, setUnitTenants] = useState<{ name: string; email: string }[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<Set<number>>(new Set());
   const [loadingTenants, setLoadingTenants] = useState(false);
+
+  // ─── Save queue with retry & debounce ──────────────
+  const { queueSave, saveStatus, isDirty, flushSave, lastError, retrySave } = useSaveQueue<Inspection>({
+    saveFn: async (insp) => {
+      const body = JSON.stringify({ inspection: insp });
+
+      // If offline, queue locally and return success
+      if (!navigator.onLine) {
+        enqueueOfflineSave({ endpoint: "/api/inspections/crud", method: "POST", body });
+        setOfflineQueueCount(getOfflineQueue().length);
+        return;
+      }
+
+      const res = await fetch("/api/inspections/crud", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Network error" }));
+        throw new Error(err.error || `Save failed (${res.status})`);
+      }
+    },
+    debounceMs: 500,
+    maxRetries: 3,
+  });
+
+  // Warn before closing tab with unsaved changes
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (isDirty) {
+        e.preventDefault();
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
 
   // Load inspections from API + fetch units + auto-populate
   useEffect(() => {
@@ -193,12 +271,7 @@ export default function MoveOutInspectionPage() {
     if (!inspections.find((i) => i.id === insp.id)) updated.push(insp);
     setInspections(updated);
     setActiveInspection(insp);
-    // Persist to API (fire and forget)
-    fetch("/api/inspections/crud", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inspection: insp }),
-    }).catch((err) => console.error("[MoveOut] Save failed:", err));
+    queueSave(insp);
   }
 
   function deleteInspection(id: string) {
@@ -214,7 +287,23 @@ export default function MoveOutInspectionPage() {
 
   function startNewInspection() {
     const unit = units.find((u) => u.id === newForm.unitId);
-    if (!unit || !newForm.inspector) return;
+    const errors: Record<string, string> = {};
+
+    if (!unit) errors.unitId = "Please select a unit";
+    if (!newForm.inspector.trim()) errors.inspector = "Inspector name is required";
+    if (newForm.depositAmount < 0) errors.depositAmount = "Deposit cannot be negative";
+
+    // Duplicate guard
+    if (unit) {
+      const existing = inspections.find((i) => i.unitId === unit.id);
+      if (existing && !confirm(`This unit already has a move-out inspection (${existing.status}). Create another?`)) {
+        return;
+      }
+    }
+
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    if (!unit) return;
 
     const insp: Inspection = {
       id: newId(),
@@ -242,12 +331,21 @@ export default function MoveOutInspectionPage() {
     setShowList(false);
   }
 
-  function handleFloorPlanUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFloorPlanUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!activeInspection || !e.target.files?.[0]) return;
     const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
+
+    // Validate file
+    const validation = validateImage(file);
+    if (!validation.valid) {
+      setUploadError(validation.error);
+      return;
+    }
+    setUploadError(null);
+
+    try {
+      // Compress before upload
+      const dataUrl = await compressImage(file, 1920, 0.8);
 
       // Upload floor plan to storage
       let floorPlanUrl = dataUrl;
@@ -260,7 +358,7 @@ export default function MoveOutInspectionPage() {
         const uploadData = await uploadRes.json();
         if (uploadData.url) floorPlanUrl = uploadData.url;
       } catch {
-        // Keep data URL as fallback
+        // Keep compressed data URL as fallback
       }
 
       const updated = {
@@ -302,8 +400,10 @@ export default function MoveOutInspectionPage() {
       }
 
       saveInspection(updated);
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      setUploadError("Failed to process image. Please try again.");
+      console.error("[MoveOut] Floor plan processing failed:", err);
+    }
   }
 
   function skipFloorPlan() {
@@ -356,6 +456,9 @@ export default function MoveOutInspectionPage() {
 
   function removeRoom(roomIdx: number) {
     if (!activeInspection) return;
+    const room = activeInspection.rooms[roomIdx];
+    const hasPhotos = room.items.some((i) => i.photos.length > 0);
+    if (hasPhotos && !confirm(`"${room.name}" has photos. Remove this room and all its data?`)) return;
     const rooms = activeInspection.rooms.filter((_, i) => i !== roomIdx);
     saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
     if (selectedRoomIdx >= rooms.length) setSelectedRoomIdx(Math.max(0, rooms.length - 1));
@@ -365,7 +468,24 @@ export default function MoveOutInspectionPage() {
     if (!activeInspection) return;
     const rooms = [...activeInspection.rooms];
     const items = [...rooms[roomIdx].items];
-    items[itemIdx] = { ...items[itemIdx], [field]: value };
+    const oldItem = items[itemIdx];
+
+    // Track edits to deduction-related fields during review steps
+    const trackableFields = ["costEstimate", "isDeduction", "condition"];
+    if (trackableFields.includes(field) && (step === "ai_review" || step === "team_review") && oldItem[field as keyof typeof oldItem] !== value) {
+      const history = [...(oldItem.editHistory || [])];
+      history.push({
+        field,
+        from: oldItem[field as keyof typeof oldItem] as any,
+        to: value,
+        editor: activeInspection.inspector,
+        timestamp: new Date().toISOString(),
+      });
+      items[itemIdx] = { ...oldItem, [field]: value, editHistory: history };
+    } else {
+      items[itemIdx] = { ...oldItem, [field]: value };
+    }
+
     // Auto-mark as deduction if condition is poor/damaged
     if (field === "condition" && (value === "poor" || value === "damaged")) {
       items[itemIdx].isDeduction = true;
@@ -384,12 +504,21 @@ export default function MoveOutInspectionPage() {
     saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
   }
 
-  function handlePhotoUpload(roomIdx: number, itemIdx: number, e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhotoUpload(roomIdx: number, itemIdx: number, e: React.ChangeEvent<HTMLInputElement>) {
     if (!activeInspection || !e.target.files?.length) return;
     const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
+
+    // Validate
+    const validation = validateImage(file);
+    if (!validation.valid) {
+      setUploadError(validation.error);
+      return;
+    }
+    setUploadError(null);
+
+    try {
+      // Compress before upload
+      const dataUrl = await compressImage(file, 1920, 0.8);
       const photoId = newId();
 
       // Upload to storage
@@ -403,7 +532,7 @@ export default function MoveOutInspectionPage() {
         const uploadData = await uploadRes.json();
         if (uploadData.url) photoUrl = uploadData.url;
       } catch {
-        // Keep data URL as fallback
+        // Keep compressed data URL as fallback
       }
 
       const photo: InspectionPhoto = {
@@ -417,8 +546,10 @@ export default function MoveOutInspectionPage() {
       items[itemIdx] = { ...items[itemIdx], photos: [...items[itemIdx].photos, photo] };
       rooms[roomIdx] = { ...rooms[roomIdx], items };
       saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      setUploadError("Failed to process photo. Please try again.");
+      console.error("[MoveOut] Photo processing failed:", err);
+    }
   }
 
   // Camera walk helpers
@@ -487,47 +618,90 @@ export default function MoveOutInspectionPage() {
     setShowCamera(false);
   }
 
+  // AI analysis state
+  const [analysisProgress, setAnalysisProgress] = useState<{ current: number; total: number; label: string } | null>(null);
+  const [failedAnalyses, setFailedAnalyses] = useState<{ roomIdx: number; itemIdx: number }[]>([]);
+
   async function endWalkAndAnalyze() {
     if (!activeInspection) return;
+
+    // Check that at least one photo has been taken
+    const totalPhotos = activeInspection.rooms.reduce((sum, r) => sum + r.items.reduce((s, i) => s + i.photos.length, 0), 0);
+    if (totalPhotos === 0) {
+      setUploadError("Take at least one photo before ending the walk.");
+      return;
+    }
+    setUploadError(null);
+
     setAnalyzing(true);
+    setFailedAnalyses([]);
 
     const rooms = [...activeInspection.rooms];
+    const failed: { roomIdx: number; itemIdx: number }[] = [];
 
-    // Analyze photos with AI for items that have photos
+    // Count total items with photos for progress
+    const itemsWithPhotos: { ri: number; ii: number }[] = [];
     for (let ri = 0; ri < rooms.length; ri++) {
       for (let ii = 0; ii < rooms[ri].items.length; ii++) {
-        const item = rooms[ri].items[ii];
-        if (item.photos.length === 0) continue;
-
-        try {
-          const res = await fetch("/api/inspections/analyze-photo", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              photoBase64: item.photos[0].url,
-              roomName: rooms[ri].name,
-              itemName: item.item,
-            }),
-          });
-          const analysis = await res.json();
-
-          if (analysis.condition) {
-            rooms[ri].items[ii] = {
-              ...item,
-              condition: analysis.condition,
-              notes: analysis.description || item.notes,
-              costEstimate: analysis.total_estimated_cost || 0,
-              isDeduction: (analysis.total_estimated_cost || 0) > 0,
-              photos: item.photos.map((p, pi) =>
-                pi === 0 ? { ...p, aiAnalysis: analysis.description } : p
-              ),
-            };
-          }
-        } catch {
-          // Skip failed analysis
+        if (rooms[ri].items[ii].photos.length > 0) {
+          itemsWithPhotos.push({ ri, ii });
         }
       }
     }
+
+    // Analyze photos with AI
+    for (let idx = 0; idx < itemsWithPhotos.length; idx++) {
+      const { ri, ii } = itemsWithPhotos[idx];
+      const item = rooms[ri].items[ii];
+      setAnalysisProgress({
+        current: idx + 1,
+        total: itemsWithPhotos.length,
+        label: `${rooms[ri].name} — ${item.item}`,
+      });
+
+      try {
+        const res = await fetch("/api/inspections/analyze-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            photoBase64: item.photos[0].url,
+            roomName: rooms[ri].name,
+            itemName: item.item,
+          }),
+        });
+        const analysis = await res.json();
+
+        if (analysis.condition) {
+          rooms[ri].items[ii] = {
+            ...item,
+            condition: analysis.condition,
+            notes: analysis.description || item.notes,
+            costEstimate: analysis.total_estimated_cost || 0,
+            isDeduction: (analysis.total_estimated_cost || 0) > 0,
+            aiOriginalCondition: analysis.condition,
+            aiOriginalCost: analysis.total_estimated_cost || 0,
+            editHistory: [],
+            photos: item.photos.map((p, pi) =>
+              pi === 0 ? { ...p, aiAnalysis: analysis.description } : p
+            ),
+          };
+        } else {
+          failed.push({ roomIdx: ri, itemIdx: ii });
+        }
+      } catch {
+        failed.push({ roomIdx: ri, itemIdx: ii });
+      }
+
+      // Incremental save after each photo (so progress isn't lost if interrupted)
+      saveInspection({
+        ...activeInspection,
+        rooms,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    setFailedAnalyses(failed);
+    setAnalysisProgress(null);
 
     saveInspection({
       ...activeInspection,
@@ -537,6 +711,45 @@ export default function MoveOutInspectionPage() {
     });
     setStep("ai_review");
     setAnalyzing(false);
+  }
+
+  async function retryFailedAnalysis(roomIdx: number, itemIdx: number) {
+    if (!activeInspection) return;
+    const rooms = [...activeInspection.rooms];
+    const item = rooms[roomIdx].items[itemIdx];
+    if (item.photos.length === 0) return;
+
+    try {
+      const res = await fetch("/api/inspections/analyze-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          photoBase64: item.photos[0].url,
+          roomName: rooms[roomIdx].name,
+          itemName: item.item,
+        }),
+      });
+      const analysis = await res.json();
+      if (analysis.condition) {
+        rooms[roomIdx].items[itemIdx] = {
+          ...item,
+          condition: analysis.condition,
+          notes: analysis.description || item.notes,
+          costEstimate: analysis.total_estimated_cost || 0,
+          isDeduction: (analysis.total_estimated_cost || 0) > 0,
+          aiOriginalCondition: analysis.condition,
+          aiOriginalCost: analysis.total_estimated_cost || 0,
+          editHistory: [],
+          photos: item.photos.map((p, pi) =>
+            pi === 0 ? { ...p, aiAnalysis: analysis.description } : p
+          ),
+        };
+        setFailedAnalyses((prev) => prev.filter((f) => !(f.roomIdx === roomIdx && f.itemIdx === itemIdx)));
+        saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
+      }
+    } catch {
+      // Still failed
+    }
   }
 
   function moveToTeamReview() {
@@ -581,7 +794,7 @@ export default function MoveOutInspectionPage() {
       setStep("completed");
     } catch (err) {
       console.error("PDF generation failed:", err);
-      alert("PDF generation failed. Check console for details.");
+      setPdfError("PDF generation failed. Please try again.");
     }
 
     setGeneratingPDF(false);
@@ -648,9 +861,34 @@ export default function MoveOutInspectionPage() {
           <Link href="/inspections" className="text-xs font-medium text-accent hover:underline">&larr; All Inspections</Link>
           <h1 className="text-2xl font-bold tracking-tight mt-1">Move-Out Inspections</h1>
         </div>
-        <div className="flex items-center justify-center py-20">
-          <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin mr-3" />
-          <span className="text-sm text-muted-foreground">Loading inspections...</span>
+        {/* Skeleton loading state */}
+        <div className="bg-card rounded-2xl border border-border p-5 animate-pulse" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <div className="flex justify-between mb-3">
+            <div className="h-4 w-20 bg-muted rounded" />
+            <div className="h-4 w-10 bg-muted rounded" />
+          </div>
+          <div className="w-full bg-muted rounded-full h-2.5 mb-4" />
+          <div className="grid grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="text-center py-2">
+                <div className="h-8 w-12 bg-muted rounded mx-auto mb-1" />
+                <div className="h-3 w-16 bg-muted rounded mx-auto" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="bg-card rounded-xl border border-border p-4 animate-pulse" style={{ boxShadow: "var(--shadow-sm)" }}>
+              <div className="flex items-center justify-between">
+                <div className="space-y-2 flex-1">
+                  <div className="h-4 w-32 bg-muted rounded" />
+                  <div className="h-3 w-48 bg-muted rounded" />
+                </div>
+                <div className="h-6 w-20 bg-muted rounded-full" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -919,11 +1157,21 @@ export default function MoveOutInspectionPage() {
           </div>
         ) : (
           <div className="text-center py-16 bg-card rounded-2xl border border-border" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <div className="w-14 h-14 bg-muted rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <span className="text-2xl text-muted-foreground">+</span>
+            <div className="w-14 h-14 bg-accent/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
             </div>
-            <p className="text-sm font-medium">No move-out inspections yet</p>
-            <p className="text-xs text-muted-foreground mt-1">Click &quot;+ Start Inspection&quot; to begin your first walk</p>
+            <p className="text-sm font-semibold">No move-out inspections yet</p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
+              Start your first inspection to walk a unit, capture photos, and generate CA-compliant deposit deduction documents.
+            </p>
+            <button
+              onClick={() => { setShowList(false); setStep("select_unit"); }}
+              className="mt-4 px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
+            >
+              + Start First Inspection
+            </button>
           </div>
         )}
       </div>
@@ -939,7 +1187,10 @@ export default function MoveOutInspectionPage() {
           &larr; Back to list
         </button>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Start Move-Out Inspection</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">Start Move-Out Inspection</h1>
+            <SaveIndicator status={saveStatus} onRetry={retrySave} />
+          </div>
           <p className="text-sm text-muted-foreground mt-1">Select a unit and fill in the details to begin</p>
         </div>
 
@@ -1006,9 +1257,10 @@ export default function MoveOutInspectionPage() {
                     type="text"
                     placeholder="Inspector name"
                     value={newForm.inspector}
-                    onChange={(e) => setNewForm({ ...newForm, inspector: e.target.value })}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                    onChange={(e) => { setNewForm({ ...newForm, inspector: e.target.value }); setFormErrors((prev) => { const n = { ...prev }; delete n.inspector; return n; }); }}
+                    className={`w-full text-sm border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors ${formErrors.inspector ? "border-red-300" : "border-border"}`}
                   />
+                  {formErrors.inspector && <p className="text-xs text-red-500 mt-1">{formErrors.inspector}</p>}
                 </div>
 
                 <div>
@@ -1055,7 +1307,10 @@ export default function MoveOutInspectionPage() {
         <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
           &larr; Back to list
         </button>
-        <h1 className="text-2xl font-bold">Upload Floor Plan</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Upload Floor Plan</h1>
+          <SaveIndicator status={saveStatus} onRetry={retrySave} />
+        </div>
         <p className="text-muted-foreground">
           {activeInspection.unitNumber} — Upload an architectural floor plan and AI will identify rooms automatically.
         </p>
@@ -1140,10 +1395,16 @@ export default function MoveOutInspectionPage() {
                 {activeInspection.unitNumber}
               </h1>
               <StatusBadge value={activeInspection.status} />
+              <SaveIndicator status={saveStatus} onRetry={retrySave} />
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
               {isReview ? "Review AI analysis and edit costs" : "Photos and conditions for each room"}
             </p>
+            {analyzing && analysisProgress && (
+              <p className="text-xs text-accent mt-1">
+                Analyzing: {analysisProgress.label}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {step === "walking" && (
@@ -1159,7 +1420,11 @@ export default function MoveOutInspectionPage() {
                   disabled={analyzing}
                   className="flex-1 sm:flex-none px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50"
                 >
-                  {analyzing ? "Analyzing..." : "End Walk & Analyze"}
+                  {analyzing && analysisProgress
+                    ? `Analyzing ${analysisProgress.current}/${analysisProgress.total}...`
+                    : analyzing
+                    ? "Starting analysis..."
+                    : "End Walk & Analyze"}
                 </button>
               </>
             )}
@@ -1172,16 +1437,38 @@ export default function MoveOutInspectionPage() {
               </button>
             )}
             {step === "team_review" && (
-              <button
-                onClick={completeAndGeneratePDF}
-                disabled={generatingPDF}
-                className="w-full sm:w-auto px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
-              >
-                {generatingPDF ? "Generating PDF..." : "Complete & Generate Invoice"}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => { setPdfError(null); completeAndGeneratePDF(); }}
+                  disabled={generatingPDF}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
+                >
+                  {generatingPDF ? "Generating PDF..." : "Complete & Generate Invoice"}
+                </button>
+                {pdfError && (
+                  <p className="text-xs text-red-500 font-medium">{pdfError}</p>
+                )}
+              </div>
             )}
           </div>
         </div>
+
+        {/* Failed analysis banner */}
+        {isReview && failedAnalyses.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-amber-800 font-medium">
+                {failedAnalyses.length} item{failedAnalyses.length !== 1 ? "s" : ""} failed AI analysis — review manually or retry
+              </p>
+              <button
+                onClick={() => failedAnalyses.forEach((f) => retryFailedAnalysis(f.roomIdx, f.itemIdx))}
+                className="text-xs font-medium text-accent hover:underline shrink-0 ml-3"
+              >
+                Retry All
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Deduction summary */}
         {isReview && (
@@ -1194,6 +1481,36 @@ export default function MoveOutInspectionPage() {
               </p>
             </div>
             <p className="text-2xl font-bold text-red-600">${totalDeductions.toLocaleString()}</p>
+          </div>
+        )}
+
+        {/* Offline banner */}
+        {!isOnline && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600 shrink-0"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+            <p className="text-sm text-amber-800 font-medium">
+              You&apos;re offline — changes are saved locally and will sync when reconnected
+            </p>
+          </div>
+        )}
+
+        {/* Syncing banner */}
+        {syncingOffline && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-2">
+            <div className="w-3.5 h-3.5 border-[1.5px] border-blue-400/30 border-t-blue-500 rounded-full animate-spin shrink-0" />
+            <p className="text-sm text-blue-800 font-medium">
+              Syncing {offlineQueueCount} pending change{offlineQueueCount !== 1 ? "s" : ""}...
+            </p>
+          </div>
+        )}
+
+        {/* Upload error banner */}
+        {uploadError && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between">
+            <p className="text-sm text-red-700">{uploadError}</p>
+            <button onClick={() => setUploadError(null)} className="text-red-400 hover:text-red-600 ml-3 shrink-0">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </div>
         )}
 
@@ -1315,6 +1632,14 @@ export default function MoveOutInspectionPage() {
                       AI: {item.photos[0].aiAnalysis}
                     </p>
                   )}
+                  {isReview && item.photos.length > 0 && !item.photos[0]?.aiAnalysis && failedAnalyses.some((f) => f.roomIdx === selectedRoomIdx && f.itemIdx === itemIdx) && (
+                    <button
+                      onClick={() => retryFailedAnalysis(selectedRoomIdx, itemIdx)}
+                      className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                    >
+                      AI analysis failed — tap to retry
+                    </button>
+                  )}
 
                   <div className="flex flex-wrap gap-2">
                     <input
@@ -1345,6 +1670,28 @@ export default function MoveOutInspectionPage() {
                       </>
                     )}
                   </div>
+                  {/* Audit trail: show "Edited" badge if item was manually changed from AI values */}
+                  {isReview && item.editHistory && item.editHistory.length > 0 && (
+                    <details className="mt-1">
+                      <summary className="text-[10px] text-amber-600 font-medium cursor-pointer hover:text-amber-700">
+                        Edited ({item.editHistory.length} change{item.editHistory.length !== 1 ? "s" : ""})
+                        {item.aiOriginalCost !== undefined && item.costEstimate !== item.aiOriginalCost && (
+                          <span className="ml-1 text-muted-foreground font-normal">
+                            AI: ${item.aiOriginalCost} &rarr; ${item.costEstimate}
+                          </span>
+                        )}
+                      </summary>
+                      <div className="mt-1 space-y-0.5 pl-2 border-l-2 border-amber-200">
+                        {item.editHistory.map((edit, ei) => (
+                          <p key={ei} className="text-[10px] text-muted-foreground">
+                            <span className="font-medium">{edit.field}</span>: {String(edit.from)} &rarr; {String(edit.to)}
+                            <span className="ml-1">by {edit.editor}</span>
+                            <span className="ml-1">{new Date(edit.timestamp).toLocaleString()}</span>
+                          </p>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               ))}
             </div>
@@ -1528,6 +1875,89 @@ export default function MoveOutInspectionPage() {
             </a>
           )}
         </div>
+
+        {/* Photo Evidence Gallery */}
+        {(() => {
+          const allPhotos = activeInspection.rooms.flatMap((room) =>
+            room.items.flatMap((item) =>
+              item.photos.map((photo) => ({
+                ...photo,
+                roomName: room.name,
+                itemName: item.item,
+                condition: item.condition,
+                isDeduction: item.isDeduction,
+                costEstimate: item.costEstimate,
+              }))
+            )
+          );
+
+          if (allPhotos.length === 0) return null;
+
+          return (
+            <div className="bg-card rounded-2xl border border-border p-6 space-y-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-600"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  </div>
+                  <h2 className="text-sm font-semibold">Photo Evidence</h2>
+                  <span className="text-xs text-muted-foreground">{allPhotos.length} photos</span>
+                </div>
+              </div>
+
+              {activeInspection.rooms.map((room) => {
+                const roomPhotos = room.items.flatMap((item) =>
+                  item.photos.map((p) => ({ photo: p, item }))
+                );
+                if (roomPhotos.length === 0) return null;
+
+                return (
+                  <div key={room.id}>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{room.name}</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                      {roomPhotos.map(({ photo, item }) => (
+                        <div key={photo.id} className="group relative">
+                          <a href={photo.url} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={photo.url}
+                              alt={`${item.item} - ${room.name}`}
+                              className="w-full aspect-square object-cover rounded-lg border border-border hover:ring-2 hover:ring-accent/50 transition-all cursor-pointer"
+                            />
+                          </a>
+                          <div className="mt-1">
+                            <p className="text-[10px] font-medium truncate">{item.item}</p>
+                            {item.isDeduction && item.costEstimate > 0 && (
+                              <p className="text-[10px] text-red-500 font-medium">${item.costEstimate}</p>
+                            )}
+                          </div>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(photo.url);
+                              } catch {
+                                // Fallback: select text
+                                const input = document.createElement("input");
+                                input.value = photo.url;
+                                document.body.appendChild(input);
+                                input.select();
+                                document.execCommand("copy");
+                                document.body.removeChild(input);
+                              }
+                            }}
+                            className="absolute top-1 right-1 w-6 h-6 bg-black/60 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Copy photo link"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         <p className="text-[11px] text-muted-foreground text-center">
           Per California Civil Code 1950.5, the itemized statement and remaining deposit must be

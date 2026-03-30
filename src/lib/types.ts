@@ -64,6 +64,14 @@ export interface InspectionPhoto {
   createdAt: string;
 }
 
+export interface ItemEditRecord {
+  field: string;
+  from: string | number | boolean;
+  to: string | number | boolean;
+  editor: string;
+  timestamp: string;
+}
+
 export interface InspectionItem {
   id: string;
   area: string;
@@ -73,6 +81,11 @@ export interface InspectionItem {
   photos: InspectionPhoto[];
   costEstimate: number;
   isDeduction: boolean;
+  /** Original AI-suggested values (set once after analysis, never mutated) */
+  aiOriginalCondition?: ConditionRating | "";
+  aiOriginalCost?: number;
+  /** Chronological log of manual edits to deduction fields */
+  editHistory?: ItemEditRecord[];
 }
 
 export interface InspectionRoom {

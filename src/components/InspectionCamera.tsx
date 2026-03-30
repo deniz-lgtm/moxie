@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2 } from "lucide-react";
+import { validateImage, compressImage, compressDataUrl } from "@/lib/image-utils";
 
 export interface CameraPhoto {
   id: string;
@@ -137,31 +138,49 @@ export function InspectionCamera({
     }
   }
 
-  // Capture photo from camera
-  function capturePhoto() {
+  // Capture photo from camera (capped at 1920px width)
+  async function capturePhoto() {
     if (!videoRef.current || !canvasRef.current || !currentRoom) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+
+    // Cap resolution to 1920px width
+    const maxWidth = 1920;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w > maxWidth) {
+      h = Math.round((h * maxWidth) / w);
+      w = maxWidth;
+    }
+
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    ctx.drawImage(video, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
     addPhotoToRoom(dataUrl);
   }
 
-  // Handle file upload (gallery picker, no camera)
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // Handle file upload (gallery picker, no camera) with validation + compression
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length || !currentRoom) return;
-    Array.from(e.target.files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        addPhotoToRoom(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    });
+    const files = Array.from(e.target.files);
     e.target.value = "";
+
+    for (const file of files) {
+      const validation = validateImage(file);
+      if (!validation.valid) {
+        console.warn("[Camera] Skipping invalid file:", validation.error);
+        continue;
+      }
+      try {
+        const compressed = await compressImage(file, 1920, 0.8);
+        addPhotoToRoom(compressed);
+      } catch (err) {
+        console.error("[Camera] Failed to compress photo:", err);
+      }
+    }
   }
 
   function addPhotoToRoom(url: string) {
