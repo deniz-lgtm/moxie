@@ -706,7 +706,7 @@ export async function fetchDashboardStats(academicYear?: AcademicYear): Promise<
   const [unitStats, maintenanceResult, applicationsResult] = await Promise.all([
     fetchUnitStats(academicYear).catch((err) => {
       console.error("[Moxie] fetchUnitStats failed:", err);
-      return { total: 0, occupied: 0, preLeased: 0, unleased: [] as string[], source: "appfolio" as const };
+      return { total: 0, occupied: 0, preLeased: 0, unleased: [] as { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[], source: "appfolio" as const };
     }),
     fetchMaintenanceRequests().catch((err) => {
       console.error("[Moxie] fetchMaintenanceRequests failed:", err);
