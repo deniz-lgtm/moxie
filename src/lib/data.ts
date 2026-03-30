@@ -480,11 +480,15 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
   const filtered = await filterToMoxie(rentRollRows);
 
-  // Deduplicate by unit_id to get unique units
+  // Deduplicate by property_id + unit name to get unique PHYSICAL units.
+  // unit_id in the rent roll is per-row (per tenant-lease), NOT per physical unit.
+  // Multiple tenants on the same lease share the same property_id + unit name.
   const unitRows = new Map<string, any[]>();
   for (const r of filtered) {
-    const key = String(r.unit_id || r.UnitId || "");
-    if (!key) continue;
+    const propId = String(r.property_id || r.PropertyId || "");
+    const unitName = String(r.unit || r.Unit || "");
+    const key = `${propId}::${unitName}`;
+    if (!propId || !unitName) continue;
     if (!unitRows.has(key)) unitRows.set(key, []);
     unitRows.get(key)!.push(r);
   }
@@ -498,8 +502,10 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
     ? new Date(academicYearDates(academicYear).leaseStart)
     : null;
 
-  for (const [unitId, rows] of unitRows) {
-    const unitName = String(rows[0].unit || rows[0].Unit || unitId);
+  for (const [, rows] of unitRows) {
+    const unitName = String(rows[0].unit || rows[0].Unit || "");
+    const propName = String(rows[0].property_name || rows[0].PropertyName || "");
+    const displayName = propName ? `${propName} - ${unitName}` : unitName;
 
     // Check occupancy
     const isOccupied = rows.some((r: any) => {
@@ -511,16 +517,12 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
     if (!ayStart) continue;
 
     // Pre-leased check: is this unit leased for the academic year starting Aug 15?
-    // Student housing context: if a unit has a current tenant, they are expected to
-    // renew (the rent roll shows current lease, not future renewals).
     // A unit is pre-leased if ANY row satisfies:
     //   1. status is "current" (tenant in place — will renew or already renewed)
     //   2. status is "future" (a new/renewal lease is signed)
     //   3. lease_to >= Aug 15 (lease explicitly extends past the start date)
     //   4. lease_to is null AND has a tenant (MTM — no end date, continues)
-    // A unit is NOT pre-leased only if:
-    //   - status is "vacant" with no "future" row (empty, no tenant coming)
-    //   - status is "notice" with no "future" row (tenant leaving, no replacement)
+    // A unit is NOT pre-leased only if ALL rows are "vacant" with no future lease.
     const hasCurrent = rows.some((r: any) => {
       const s = String(r.status || r.Status || "").toLowerCase();
       return s === "current";
@@ -544,14 +546,11 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
     if (isPreLeased) {
       preLeased++;
     } else {
-      unleased.push(unitName);
+      unleased.push(displayName);
     }
   }
 
-  console.log(`[Moxie] Unit stats: total=${total}, occupied=${occupied}, preLeased=${preLeased}, unleased=${unleased.length}`);
-  if (unleased.length > 0 && unleased.length < 30) {
-    console.log(`[Moxie] Unleased units:`, unleased.join(", "));
-  }
+  console.log(`[Moxie] Unit stats (${filtered.length} rows → ${total} unique units): occupied=${occupied}, preLeased=${preLeased}, unleased=${unleased.length}`);
 
   return {
     total,
