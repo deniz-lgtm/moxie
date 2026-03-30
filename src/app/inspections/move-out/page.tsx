@@ -802,7 +802,19 @@ export default function MoveOutInspectionPage() {
                       <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.propertyName}</td>
                       <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.tenantName || "—"}</td>
                       <td className="px-4 py-3.5 text-muted-foreground">{insp.depositAmount ? `$${insp.depositAmount.toLocaleString()}` : "—"}</td>
-                      <td className="px-4 py-3.5"><StatusBadge value={insp.status} /></td>
+                      <td className="px-4 py-3.5">
+                        <StatusBadge
+                          value={insp.status}
+                          options={["not_started", "draft", "walking", "ai_review", "team_review", "completed"]}
+                          onChange={(newStatus) => {
+                            const updated = { ...insp, status: newStatus as Inspection["status"], updatedAt: new Date().toISOString() };
+                            if (newStatus === "completed" && !insp.completedDate) {
+                              updated.completedDate = new Date().toISOString().split("T")[0];
+                            }
+                            saveInspection(updated);
+                          }}
+                        />
+                      </td>
                       <td className="px-4 py-3.5 font-medium">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
                       <td className="px-2 py-3.5">
                         <button
