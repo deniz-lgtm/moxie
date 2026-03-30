@@ -124,38 +124,59 @@ IMPORTANT:
 - If no damage beyond normal wear and tear is present, return empty damage_items and 0 total
 - Do NOT flag normal wear and tear (minor scuffs in traffic areas, sparse pinholes, minor fading)`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1500,
-      system: FORENSIC_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: "image/jpeg",
-                data: photoBase64.replace(/^data:image\/\w+;base64,/, ""),
+  // 30-second timeout per photo analysis
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
+        system: FORENSIC_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/jpeg",
+                  data: photoBase64.replace(/^data:image\/\w+;base64,/, ""),
+                },
               },
-            },
-            {
-              type: "text",
-              text: userPrompt,
-            },
-          ],
-        },
-      ],
-    }),
-  });
+              {
+                type: "text",
+                text: userPrompt,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  } catch (err: any) {
+    clearTimeout(timeout);
+    if (err?.name === "AbortError") {
+      return {
+        description: "AI analysis timed out (30s). Manual inspection recommended.",
+        condition: "fair" as const,
+        damage_items: [],
+        total_estimated_cost: 0,
+      };
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const err = await response.text();

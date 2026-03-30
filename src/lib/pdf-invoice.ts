@@ -305,6 +305,20 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
         y += 4.5;
       }
 
+      // Edit trail footnote (audit trail)
+      if (item.ai_original_cost !== undefined && item.cost_estimate !== item.ai_original_cost) {
+        checkNewPage(5);
+        doc.setFontSize(6.5);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(...BRAND.medGray);
+        doc.text(
+          `Original AI assessment: $${item.ai_original_cost.toFixed(2)} — adjusted to $${item.cost_estimate.toFixed(2)} by inspector`,
+          margin + 48,
+          y
+        );
+        y += 4;
+      }
+
       y += 2;
 
       // Separator

@@ -51,6 +51,14 @@ export type DbRoom = {
   items: DbInspectionItem[];
 };
 
+export type DbItemEditRecord = {
+  field: string;
+  from: string | number | boolean;
+  to: string | number | boolean;
+  editor: string;
+  timestamp: string;
+};
+
 export type DbInspectionItem = {
   id: string;
   name: string;
@@ -59,6 +67,9 @@ export type DbInspectionItem = {
   photos: DbPhoto[];
   cost_estimate: number;
   is_deduction: boolean;
+  ai_original_condition?: string;
+  ai_original_cost?: number;
+  edit_history?: DbItemEditRecord[];
 };
 
 export type DbPhoto = {
