@@ -539,15 +539,6 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   return { total, occupied, preLeased, unleased, source: "appfolio" };
 }
 
-  return {
-    total,
-    occupied,
-    preLeased,
-    unleased,
-    source: "appfolio",
-  };
-}
-
 // --- Work Orders / Maintenance ---
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
