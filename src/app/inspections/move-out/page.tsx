@@ -21,6 +21,27 @@ const DEFAULT_ITEMS = [
   "Lighting", "Outlets/Switches", "Closet", "Fixtures",
 ];
 
+// Room-specific items that get added on top of defaults
+const ROOM_EXTRA_ITEMS: Record<string, string[]> = {
+  "Kitchen": ["Appliances", "Kitchen Cabinets", "Countertops", "Sink/Faucet"],
+  "Bathroom 1": ["Bathroom Cabinets", "Shower Glass", "Toilet", "Sink/Faucet", "Tub/Shower"],
+  "Bathroom 2": ["Bathroom Cabinets", "Shower Glass", "Toilet", "Sink/Faucet", "Tub/Shower"],
+  "Exterior": ["Front Door", "Patio/Balcony", "Walkway", "Landscaping", "Parking", "Gate/Fence", "Mailbox", "Trash Area"],
+};
+
+function itemsForRoom(roomName: string): InspectionItem[] {
+  // Exterior uses its own items only
+  if (roomName === "Exterior") {
+    return (ROOM_EXTRA_ITEMS["Exterior"] || []).map((item) => blankItem(item));
+  }
+  const base = DEFAULT_ITEMS.map((item) => blankItem(item));
+  const extras = ROOM_EXTRA_ITEMS[roomName];
+  if (extras) {
+    return [...base, ...extras.map((item) => blankItem(item))];
+  }
+  return base;
+}
+
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -257,21 +278,26 @@ export default function MoveOutInspectionPage() {
         });
         const data = await res.json();
         if (data.rooms?.length > 0) {
-          updated.rooms = data.rooms.map((name: string) => ({
+          const detectedRooms = data.rooms.map((name: string) => ({
             id: newId(),
             name,
-            items: DEFAULT_ITEMS.map((item) => blankItem(item)),
+            items: itemsForRoom(name),
           }));
+          // Always add Exterior if not detected
+          if (!data.rooms.some((n: string) => n.toLowerCase() === "exterior")) {
+            detectedRooms.push({ id: newId(), name: "Exterior", items: itemsForRoom("Exterior") });
+          }
+          updated.rooms = detectedRooms;
         }
       } catch {
         // Fall back to default rooms
         updated.rooms = [
           "Living Room", "Kitchen", "Bedroom 1", "Bedroom 2",
-          "Bathroom 1", "Bathroom 2", "Hallway", "Closet",
+          "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior",
         ].map((name) => ({
           id: newId(),
           name,
-          items: DEFAULT_ITEMS.map((item) => blankItem(item)),
+          items: itemsForRoom(name),
         }));
       }
 
@@ -286,11 +312,11 @@ export default function MoveOutInspectionPage() {
       ...activeInspection,
       rooms: [
         "Living Room", "Kitchen", "Bedroom 1", "Bedroom 2",
-        "Bathroom 1", "Bathroom 2", "Hallway", "Closet",
+        "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior",
       ].map((name) => ({
         id: newId(),
         name,
-        items: DEFAULT_ITEMS.map((item) => blankItem(item)),
+        items: itemsForRoom(name),
       })),
       status: "walking" as const,
       updatedAt: new Date().toISOString(),
@@ -315,7 +341,7 @@ export default function MoveOutInspectionPage() {
       ...activeInspection,
       rooms: [
         ...activeInspection.rooms,
-        { id: newId(), name, items: DEFAULT_ITEMS.map((item) => blankItem(item)) },
+        { id: newId(), name, items: itemsForRoom(name) },
       ],
       updatedAt: new Date().toISOString(),
     });
@@ -757,89 +783,130 @@ export default function MoveOutInspectionPage() {
         )}
 
         {totalCount > 0 ? (
-          <div className="bg-card rounded-2xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unit</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Property</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Tenant</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deposit</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
-                  <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deductions</th>
-                  <th className="w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedInspections.map((insp) => {
-                  const ded = insp.rooms
-                    .flatMap((r) => r.items)
-                    .filter((item) => item.isDeduction)
-                    .reduce((sum, item) => sum + item.costEstimate, 0);
-                  return (
-                    <tr
-                      key={insp.id}
-                      onClick={() => {
-                        setActiveInspection(insp);
-                        setShowList(false);
-                        if (insp.status === "not_started") {
-                          setNewForm({
-                            unitId: insp.unitId,
-                            inspector: insp.inspector,
-                            scheduledDate: insp.scheduledDate,
-                            depositAmount: insp.depositAmount || 0,
-                          });
-                          setStep("floor_plan");
-                          const updated = { ...insp, status: "draft" as const, updatedAt: new Date().toISOString() };
-                          saveInspection(updated);
-                        } else {
-                          setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
-                        }
-                      }}
-                      className="border-b border-border/50 last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3.5 font-medium">{insp.unitNumber}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.propertyName}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.tenantName || "—"}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground">{insp.depositAmount ? `$${insp.depositAmount.toLocaleString()}` : "—"}</td>
-                      <td className="px-4 py-3.5">
+          <div>
+            {/* Desktop table */}
+            <div className="hidden md:block bg-card rounded-2xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unit</th>
+                    <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Property</th>
+                    <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Tenant</th>
+                    <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deposit</th>
+                    <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Deductions</th>
+                    <th className="w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedInspections.map((insp) => {
+                    const ded = insp.rooms
+                      .flatMap((r) => r.items)
+                      .filter((item) => item.isDeduction)
+                      .reduce((sum, item) => sum + item.costEstimate, 0);
+                    return (
+                      <tr
+                        key={insp.id}
+                        onClick={() => {
+                          setActiveInspection(insp);
+                          setShowList(false);
+                          if (insp.status === "not_started") {
+                            setNewForm({ unitId: insp.unitId, inspector: insp.inspector, scheduledDate: insp.scheduledDate, depositAmount: insp.depositAmount || 0 });
+                            setStep("floor_plan");
+                            saveInspection({ ...insp, status: "draft" as const, updatedAt: new Date().toISOString() });
+                          } else {
+                            setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
+                          }
+                        }}
+                        className="border-b border-border/50 last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3.5 font-medium">{insp.unitNumber}</td>
+                        <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.propertyName}</td>
+                        <td className="px-4 py-3.5 text-muted-foreground text-xs">{insp.tenantName || "—"}</td>
+                        <td className="px-4 py-3.5 text-muted-foreground">{insp.depositAmount ? `$${insp.depositAmount.toLocaleString()}` : "—"}</td>
+                        <td className="px-4 py-3.5">
+                          <StatusBadge
+                            value={insp.status}
+                            options={["not_started", "draft", "walking", "ai_review", "team_review", "completed"]}
+                            onChange={(newStatus) => {
+                              const updated = { ...insp, status: newStatus as Inspection["status"], updatedAt: new Date().toISOString() };
+                              if (newStatus === "completed" && !insp.completedDate) updated.completedDate = new Date().toISOString().split("T")[0];
+                              saveInspection(updated);
+                            }}
+                          />
+                        </td>
+                        <td className="px-4 py-3.5 font-medium">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
+                        <td className="px-2 py-3.5">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); if (confirm(`Delete inspection for ${insp.unitNumber}?`)) deleteInspection(insp.id); }}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden space-y-2">
+              {sortedInspections.map((insp) => {
+                const ded = insp.rooms.flatMap((r) => r.items).filter((item) => item.isDeduction).reduce((sum, item) => sum + item.costEstimate, 0);
+                return (
+                  <div
+                    key={insp.id}
+                    onClick={() => {
+                      setActiveInspection(insp);
+                      setShowList(false);
+                      if (insp.status === "not_started") {
+                        setNewForm({ unitId: insp.unitId, inspector: insp.inspector, scheduledDate: insp.scheduledDate, depositAmount: insp.depositAmount || 0 });
+                        setStep("floor_plan");
+                        saveInspection({ ...insp, status: "draft" as const, updatedAt: new Date().toISOString() });
+                      } else {
+                        setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
+                      }
+                    }}
+                    className="bg-card rounded-xl border border-border p-3.5 active:bg-muted/50 transition-colors cursor-pointer"
+                    style={{ boxShadow: "var(--shadow-sm)" }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{insp.unitNumber}</p>
+                        <p className="text-[11px] text-muted-foreground truncate">{insp.propertyName}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <StatusBadge
                           value={insp.status}
                           options={["not_started", "draft", "walking", "ai_review", "team_review", "completed"]}
                           onChange={(newStatus) => {
                             const updated = { ...insp, status: newStatus as Inspection["status"], updatedAt: new Date().toISOString() };
-                            if (newStatus === "completed" && !insp.completedDate) {
-                              updated.completedDate = new Date().toISOString().split("T")[0];
-                            }
+                            if (newStatus === "completed" && !insp.completedDate) updated.completedDate = new Date().toISOString().split("T")[0];
                             saveInspection(updated);
                           }}
                         />
-                      </td>
-                      <td className="px-4 py-3.5 font-medium">{ded > 0 ? `$${ded.toLocaleString()}` : "—"}</td>
-                      <td className="px-2 py-3.5">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm(`Delete inspection for ${insp.unitNumber}?`)) {
-                              deleteInspection(insp.id);
-                            }
-                          }}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Delete inspection"
+                          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete ${insp.unitNumber}?`)) deleteInspection(insp.id); }}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-red-600"
                         >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
                         </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {sortedInspections.length === 0 && filtered.length === 0 && (
-              <div className="text-center py-10">
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
+                      <span className="truncate flex-1">{insp.tenantName || "No tenant"}</span>
+                      {insp.depositAmount ? <span className="shrink-0">${insp.depositAmount.toLocaleString()}</span> : null}
+                      {ded > 0 && <span className="shrink-0 text-red-600 font-medium">-${ded.toLocaleString()}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {sortedInspections.length === 0 && (
+              <div className="text-center py-10 bg-card rounded-2xl border border-border" style={{ boxShadow: "var(--shadow-sm)" }}>
                 <p className="text-sm text-muted-foreground">No inspections match your filters</p>
                 <button
                   onClick={() => { setStatusFilter("all"); setPropertyFilter("all"); setListSearch(""); }}
@@ -1063,32 +1130,34 @@ export default function MoveOutInspectionPage() {
             enableAiAnalysis={true}
           />
         )}
-        <div className="flex items-center justify-between">
+        <div className="space-y-3">
           <div>
             <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
               &larr; Back to list
             </button>
-            <h1 className="text-2xl font-bold mt-1">
-              {activeInspection.unitNumber} — {isReview ? "Review" : "Walk"}
-            </h1>
-            <p className="text-muted-foreground">
-              {isReview ? "Review AI analysis and edit costs before generating invoice" : "Take photos and note conditions for each room"}
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-bold">
+                {activeInspection.unitNumber}
+              </h1>
+              <StatusBadge value={activeInspection.status} />
+            </div>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {isReview ? "Review AI analysis and edit costs" : "Photos and conditions for each room"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <StatusBadge value={activeInspection.status} />
+          <div className="flex flex-wrap gap-2">
             {step === "walking" && (
               <>
                 <button
                   onClick={() => setShowCamera(true)}
-                  className="px-4 py-2 bg-[#9d1535] text-white text-sm rounded-lg hover:bg-[#b91c42] flex items-center gap-1.5"
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-[#9d1535] text-white text-sm font-medium rounded-xl hover:bg-[#b91c42] flex items-center justify-center gap-1.5"
                 >
-                  📷 Camera Walk
+                  Camera Walk
                 </button>
                 <button
                   onClick={endWalkAndAnalyze}
                   disabled={analyzing}
-                  className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 disabled:opacity-50"
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50"
                 >
                   {analyzing ? "Analyzing..." : "End Walk & Analyze"}
                 </button>
@@ -1097,7 +1166,7 @@ export default function MoveOutInspectionPage() {
             {step === "ai_review" && (
               <button
                 onClick={moveToTeamReview}
-                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90"
+                className="w-full sm:w-auto px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
               >
                 Send to Team Review &rarr;
               </button>
@@ -1106,7 +1175,7 @@ export default function MoveOutInspectionPage() {
               <button
                 onClick={completeAndGeneratePDF}
                 disabled={generatingPDF}
-                className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
+                className="w-full sm:w-auto px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
               >
                 {generatingPDF ? "Generating PDF..." : "Complete & Generate Invoice"}
               </button>
@@ -1129,20 +1198,20 @@ export default function MoveOutInspectionPage() {
         )}
 
         {/* Room tabs */}
-        <div className="flex gap-2 overflow-x-auto pb-2">
+        <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1 snap-x">
           {activeInspection.rooms.map((room, idx) => (
             <button
               key={room.id}
               onClick={() => setSelectedRoomIdx(idx)}
-              className={`shrink-0 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+              className={`shrink-0 px-3 py-2 text-xs sm:text-sm font-medium rounded-xl border transition-colors snap-start ${
                 selectedRoomIdx === idx
-                  ? "bg-accent text-white border-accent"
+                  ? "bg-accent text-white border-accent shadow-sm"
                   : "border-border hover:bg-muted"
               }`}
             >
               {room.name}
               {room.items.some((i) => i.isDeduction) && (
-                <span className="ml-1 text-xs">!</span>
+                <span className="ml-1 text-[10px] text-red-300">!</span>
               )}
             </button>
           ))}
@@ -1202,48 +1271,26 @@ export default function MoveOutInspectionPage() {
 
             <div className="divide-y divide-border">
               {currentRoom.items.map((item, itemIdx) => (
-                <div key={item.id} className="p-4 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{item.item}</p>
-                      {item.photos.length > 0 && (
-                        <div className="flex gap-2 mt-2">
-                          {item.photos.map((photo) => (
-                            <img
-                              key={photo.id}
-                              src={photo.url}
-                              alt=""
-                              className="w-16 h-16 object-cover rounded border border-border"
-                            />
-                          ))}
-                        </div>
-                      )}
-                      {item.photos[0]?.aiAnalysis && (
-                        <p className="text-xs text-muted-foreground mt-1 italic">
-                          AI: {item.photos[0].aiAnalysis}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-3 shrink-0">
-                      {/* Condition */}
+                <div key={item.id} className="p-3 sm:p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium flex-1 min-w-0 truncate">{item.item}</p>
+                    <div className="flex items-center gap-2 shrink-0">
                       <select
                         value={item.condition}
                         onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "condition", e.target.value)}
-                        className="text-xs border border-border rounded-md px-2 py-1.5 bg-card"
+                        className="text-xs border border-border rounded-lg px-2 py-1.5 bg-card min-w-[90px]"
                       >
-                        <option value="">—</option>
+                        <option value="">Condition</option>
                         {CONDITIONS.map((c) => (
-                          <option key={c} value={c}>{c}</option>
+                          <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                         ))}
                       </select>
-
-                      {/* Photo upload */}
-                      <label className="text-xs text-accent hover:underline cursor-pointer">
+                      <label className="px-2.5 py-1.5 text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 transition-colors whitespace-nowrap">
                         + Photo
                         <input
                           type="file"
                           accept="image/*"
+                          capture="environment"
                           className="hidden"
                           onChange={(e) => handlePhotoUpload(selectedRoomIdx, itemIdx, e)}
                         />
@@ -1251,31 +1298,49 @@ export default function MoveOutInspectionPage() {
                     </div>
                   </div>
 
-                  {/* Notes and cost (shown in review) */}
-                  <div className="flex gap-3">
+                  {item.photos.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {item.photos.map((photo) => (
+                        <img
+                          key={photo.id}
+                          src={photo.url}
+                          alt=""
+                          className="w-14 h-14 sm:w-16 sm:h-16 object-cover rounded-lg border border-border shrink-0"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {item.photos[0]?.aiAnalysis && (
+                    <p className="text-xs text-muted-foreground italic line-clamp-2">
+                      AI: {item.photos[0].aiAnalysis}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
                     <input
                       type="text"
                       placeholder="Notes..."
                       value={item.notes}
                       onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "notes", e.target.value)}
-                      className="flex-1 text-xs border border-border rounded px-2 py-1.5 bg-card"
+                      className="flex-1 min-w-[150px] text-xs border border-border rounded-lg px-2.5 py-2 bg-card"
                     />
                     {isReview && (
                       <>
-                        <div className="flex items-center gap-1">
+                        <label className="flex items-center gap-1.5 px-2 py-1.5 border border-border rounded-lg cursor-pointer">
                           <input
                             type="checkbox"
                             checked={item.isDeduction}
                             onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "isDeduction", e.target.checked)}
+                            className="rounded"
                           />
                           <span className="text-xs text-muted-foreground">Deduct</span>
-                        </div>
+                        </label>
                         <input
                           type="number"
                           placeholder="$0"
                           value={item.costEstimate || ""}
                           onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "costEstimate", parseFloat(e.target.value) || 0)}
-                          className="w-20 text-xs text-right border border-border rounded px-2 py-1.5 bg-card"
+                          className="w-24 text-xs text-right border border-border rounded-lg px-2.5 py-2 bg-card"
                         />
                       </>
                     )}
