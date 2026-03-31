@@ -469,10 +469,9 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   total: number;
   occupied: number;
   preLeased: number;
-  unleased: string[]; // unit names that are NOT pre-leased (for debugging)
+  unleased: { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[];
   source: "appfolio";
 }> {
-  // Get unique unit count from rent roll
   const rentRollRows = await afGetRentRoll();
   if (!Array.isArray(rentRollRows) || rentRollRows.length === 0) {
     return { total: 0, occupied: 0, preLeased: 0, unleased: [], source: "appfolio" };
@@ -480,7 +479,7 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
   const filtered = await filterToMoxie(rentRollRows);
 
-  // Deduplicate by unit_id to get unique units
+  // Group by unit_id (one per physical unit in the rent roll)
   const unitRows = new Map<string, any[]>();
   for (const r of filtered) {
     const key = String(r.unit_id || r.UnitId || "");
@@ -492,16 +491,15 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   const total = unitRows.size;
   let occupied = 0;
   let preLeased = 0;
-  const unleased: string[] = [];
+  const unleased: { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[] = [];
 
   const ayStart = academicYear
     ? new Date(academicYearDates(academicYear).leaseStart)
     : null;
 
-  for (const [unitId, rows] of unitRows) {
-    const unitName = String(rows[0].unit || rows[0].Unit || unitId);
+  for (const [, rows] of unitRows) {
+    const unitName = String(rows[0].unit || rows[0].Unit || "");
 
-    // Check occupancy
     const isOccupied = rows.some((r: any) => {
       const s = String(r.status || r.Status || "").toLowerCase();
       return s === "current" || s === "notice";
@@ -510,25 +508,9 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
     if (!ayStart) continue;
 
-    // Pre-leased check: is this unit leased for the academic year starting Aug 15?
-    // Student housing context: if a unit has a current tenant, they are expected to
-    // renew (the rent roll shows current lease, not future renewals).
     // A unit is pre-leased if ANY row satisfies:
-    //   1. status is "current" (tenant in place — will renew or already renewed)
-    //   2. status is "future" (a new/renewal lease is signed)
-    //   3. lease_to >= Aug 15 (lease explicitly extends past the start date)
-    //   4. lease_to is null AND has a tenant (MTM — no end date, continues)
-    // A unit is NOT pre-leased only if:
-    //   - status is "vacant" with no "future" row (empty, no tenant coming)
-    //   - status is "notice" with no "future" row (tenant leaving, no replacement)
-    const hasCurrent = rows.some((r: any) => {
-      const s = String(r.status || r.Status || "").toLowerCase();
-      return s === "current";
-    });
-    const hasFuture = rows.some((r: any) => {
-      const s = String(r.status || r.Status || "").toLowerCase();
-      return s === "future";
-    });
+    const hasCurrent = rows.some((r: any) => String(r.status || r.Status || "").toLowerCase() === "current");
+    const hasFuture = rows.some((r: any) => String(r.status || r.Status || "").toLowerCase() === "future");
     const hasMTM = rows.some((r: any) => {
       const leaseTo = r.lease_to || r.LeaseTo;
       const tenant = String(r.tenant || r.Tenant || "").trim();
@@ -539,30 +521,26 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
       return leaseTo && new Date(leaseTo) >= ayStart;
     });
 
-    const isPreLeased = hasCurrent || hasFuture || hasMTM || hasExtendedLease;
-
-    if (isPreLeased) {
+    if (hasCurrent || hasFuture || hasMTM || hasExtendedLease) {
       preLeased++;
     } else {
-      unleased.push(unitName);
+      // Include raw data so we can see WHY it's not pre-leased
+      const r = rows[0];
+      unleased.push({
+        unit: unitName,
+        status: String(r.status || r.Status || ""),
+        tenant: String(r.tenant || r.Tenant || ""),
+        leaseFrom: String(r.lease_from || r.LeaseFrom || ""),
+        leaseTo: String(r.lease_to || r.LeaseTo || ""),
+      });
     }
   }
 
-  console.log(`[Moxie] Unit stats: total=${total}, occupied=${occupied}, preLeased=${preLeased}, unleased=${unleased.length}`);
-  if (unleased.length > 0 && unleased.length < 30) {
-    console.log(`[Moxie] Unleased units:`, unleased.join(", "));
-  }
-
-  return {
-    total,
-    occupied,
-    preLeased,
-    unleased,
-    source: "appfolio",
-  };
+  return { total, occupied, preLeased, unleased, source: "appfolio" };
 }
 
 // --- Work Orders / Maintenance ---
+// Maps AppFolio categories to internal types
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
   electrical: "electrical",
@@ -720,7 +698,7 @@ export async function fetchDashboardStats(academicYear?: AcademicYear): Promise<
   const [unitStats, maintenanceResult, applicationsResult] = await Promise.all([
     fetchUnitStats(academicYear).catch((err) => {
       console.error("[Moxie] fetchUnitStats failed:", err);
-      return { total: 0, occupied: 0, preLeased: 0, unleased: [] as string[], source: "appfolio" as const };
+      return { total: 0, occupied: 0, preLeased: 0, unleased: [] as { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[], source: "appfolio" as const };
     }),
     fetchMaintenanceRequests().catch((err) => {
       console.error("[Moxie] fetchMaintenanceRequests failed:", err);
