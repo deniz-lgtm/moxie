@@ -621,6 +621,7 @@ function MoveOutInspectionContent() {
         item.photos.map((p) => ({ id: p.id, url: p.url, timestamp: p.createdAt }))
       ),
       notes: "",
+      panoramaUrl: r.panoramaUrl || null,
     }));
   }
 
@@ -668,7 +669,7 @@ function MoveOutInspectionContent() {
         }
       }
 
-      return { ...room, items };
+      return { ...room, items, panoramaUrl: cRoom.panoramaUrl };
     });
     saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
   }
