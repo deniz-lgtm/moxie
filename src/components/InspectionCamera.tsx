@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2 } from "lucide-react";
-import { validateImage, compressImage, compressDataUrl } from "@/lib/image-utils";
+import { validateImage, compressImage, compressDataUrl, isHeicFile, convertHeicToJpeg } from "@/lib/image-utils";
 
 export interface CameraPhoto {
   id: string;
@@ -162,7 +162,7 @@ export function InspectionCamera({
     addPhotoToRoom(dataUrl);
   }
 
-  // Handle file upload (gallery picker, no camera) with validation + compression
+  // Handle file upload (gallery picker, no camera) with validation + compression + HEIC
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length || !currentRoom) return;
     const files = Array.from(e.target.files);
@@ -175,10 +175,23 @@ export function InspectionCamera({
         continue;
       }
       try {
-        const compressed = await compressImage(file, 1920, 0.8);
-        addPhotoToRoom(compressed);
+        let dataUrl: string;
+        if (isHeicFile(file)) {
+          const converted = await convertHeicToJpeg(file);
+          if (converted.startsWith("blob:")) {
+            const resp = await fetch(converted);
+            const blob = await resp.blob();
+            dataUrl = await compressImage(new File([blob], "photo.jpg", { type: "image/jpeg" }), 1920, 0.8);
+            URL.revokeObjectURL(converted);
+          } else {
+            dataUrl = converted;
+          }
+        } else {
+          dataUrl = await compressImage(file, 1920, 0.8);
+        }
+        addPhotoToRoom(dataUrl);
       } catch (err) {
-        console.error("[Camera] Failed to compress photo:", err);
+        console.error("[Camera] Failed to process photo:", err);
       }
     }
   }
@@ -296,7 +309,7 @@ export function InspectionCamera({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         multiple
         onChange={handleFileUpload}
         className="hidden"

@@ -265,65 +265,76 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
 
   const allRooms: DbRoom[] = inspection.rooms || [];
 
+  // Helper to render a single deduction line
+  function renderDeductionLine(roomName: string, description: string, cost: number, aiOrigCost?: number) {
+    itemNum++;
+    totalDeductions += cost;
+
+    checkNewPage(22);
+
+    if (itemNum % 2 === 0) {
+      doc.setFillColor(250, 250, 250);
+      doc.rect(margin, y - 4, contentWidth, 5, "F");
+    }
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...BRAND.darkGray);
+    doc.text(String(itemNum), margin + 3, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.black);
+    doc.text(roomName, margin + 12, y);
+
+    const descLines = doc.splitTextToSize(description, contentWidth - 78);
+    for (let i = 0; i < descLines.length; i++) {
+      if (i > 0) checkNewPage(5);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text(descLines[i], margin + 48, y);
+      if (i === 0) {
+        doc.setFont("helvetica", "bold");
+        doc.text(`$${cost.toFixed(2)}`, pageWidth - margin - 4, y, { align: "right" });
+      }
+      y += 4.5;
+    }
+
+    // Edit trail footnote
+    if (aiOrigCost !== undefined && cost !== aiOrigCost) {
+      checkNewPage(5);
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(...BRAND.medGray);
+      doc.text(
+        `Original AI assessment: $${aiOrigCost.toFixed(2)} — adjusted to $${cost.toFixed(2)} by inspector`,
+        margin + 48, y
+      );
+      y += 4;
+    }
+
+    y += 2;
+    doc.setDrawColor(...BRAND.lightGray);
+    doc.line(margin + 10, y - 1, pageWidth - margin, y - 1);
+  }
+
   for (const room of allRooms) {
     for (const item of room.items) {
-      if (!item.is_deduction || item.cost_estimate <= 0) continue;
+      // Check for per-photo deductions first
+      const photoDeductions = (item.photos || []).filter(
+        (p) => p.is_deduction && (p.cost_estimate || 0) > 0
+      );
 
-      itemNum++;
-      totalDeductions += item.cost_estimate;
-
-      checkNewPage(22);
-
-      // Alternating row shading
-      if (itemNum % 2 === 0) {
-        doc.setFillColor(250, 250, 250);
-        doc.rect(margin, y - 4, contentWidth, 5, "F");
-      }
-
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(...BRAND.darkGray);
-      doc.text(String(itemNum), margin + 3, y);
-
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(...BRAND.black);
-      doc.text(room.name, margin + 12, y);
-
-      // Description — uses forensic format from AI analysis
-      const desc = `${item.name}${item.notes ? ` — ${item.notes}` : ""}`;
-      const descLines = doc.splitTextToSize(desc, contentWidth - 78);
-
-      for (let i = 0; i < descLines.length; i++) {
-        if (i > 0) checkNewPage(5);
-        doc.setFontSize(8);
-        doc.setFont("helvetica", "normal");
-        doc.text(descLines[i], margin + 48, y);
-        if (i === 0) {
-          doc.setFont("helvetica", "bold");
-          doc.text(`$${item.cost_estimate.toFixed(2)}`, pageWidth - margin - 4, y, { align: "right" });
+      if (photoDeductions.length > 0) {
+        // Render each deductible photo as its own line
+        for (const photo of photoDeductions) {
+          const desc = `${item.name}${photo.notes ? ` — ${photo.notes}` : photo.ai_analysis ? ` — ${photo.ai_analysis}` : ""}`;
+          renderDeductionLine(room.name, desc, photo.cost_estimate || 0, photo.ai_original_cost);
         }
-        y += 4.5;
+      } else if (item.is_deduction && item.cost_estimate > 0) {
+        // Item-level deduction (no per-photo deductions)
+        const desc = `${item.name}${item.notes ? ` — ${item.notes}` : ""}`;
+        renderDeductionLine(room.name, desc, item.cost_estimate, item.ai_original_cost);
       }
-
-      // Edit trail footnote (audit trail)
-      if (item.ai_original_cost !== undefined && item.cost_estimate !== item.ai_original_cost) {
-        checkNewPage(5);
-        doc.setFontSize(6.5);
-        doc.setFont("helvetica", "italic");
-        doc.setTextColor(...BRAND.medGray);
-        doc.text(
-          `Original AI assessment: $${item.ai_original_cost.toFixed(2)} — adjusted to $${item.cost_estimate.toFixed(2)} by inspector`,
-          margin + 48,
-          y
-        );
-        y += 4;
-      }
-
-      y += 2;
-
-      // Separator
-      doc.setDrawColor(...BRAND.lightGray);
-      doc.line(margin + 10, y - 1, pageWidth - margin, y - 1);
     }
   }
 
@@ -547,7 +558,12 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
   let totalDeductions = 0;
   for (const room of allRooms) {
     for (const item of room.items) {
-      if (item.is_deduction && item.cost_estimate > 0) {
+      const photoDeductions = (item.photos || [])
+        .filter((p) => p.is_deduction && (p.cost_estimate || 0) > 0)
+        .reduce((s, p) => s + (p.cost_estimate || 0), 0);
+      if (photoDeductions > 0) {
+        totalDeductions += photoDeductions;
+      } else if (item.is_deduction && item.cost_estimate > 0) {
         totalDeductions += item.cost_estimate;
       }
     }

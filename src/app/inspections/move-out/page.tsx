@@ -10,7 +10,7 @@ import { useSaveQueue } from "@/hooks/useSaveQueue";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
-import { validateImage, compressImage } from "@/lib/image-utils";
+import { validateImage, compressImage, isHeicFile, convertHeicToJpeg } from "@/lib/image-utils";
 import type {
   Inspection,
   InspectionRoom,
@@ -50,6 +50,16 @@ function itemsForRoom(roomName: string): InspectionItem[] {
 
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Calculate total deductions for an inspection (per-photo + item-level) */
+function calcDeductions(insp: Inspection): number {
+  return insp.rooms.flatMap((r) => r.items).reduce((sum, item) => {
+    const photoDed = item.photos
+      .filter((p) => p.isDeduction && (p.costEstimate || 0) > 0)
+      .reduce((s, p) => s + (p.costEstimate || 0), 0);
+    return sum + (photoDed > 0 ? photoDed : item.isDeduction ? item.costEstimate : 0);
+  }, 0);
 }
 
 function blankItem(name: string): InspectionItem {
@@ -344,8 +354,21 @@ function MoveOutInspectionContent() {
     setUploadError(null);
 
     try {
-      // Compress before upload
-      const dataUrl = await compressImage(file, 1920, 0.8);
+      // Convert HEIC if needed, then compress
+      let dataUrl: string;
+      if (isHeicFile(file)) {
+        const converted = await convertHeicToJpeg(file);
+        if (converted.startsWith("blob:")) {
+          const resp = await fetch(converted);
+          const blob = await resp.blob();
+          dataUrl = await compressImage(new File([blob], "plan.jpg", { type: "image/jpeg" }), 1920, 0.8);
+          URL.revokeObjectURL(converted);
+        } else {
+          dataUrl = converted;
+        }
+      } else {
+        dataUrl = await compressImage(file, 1920, 0.8);
+      }
 
       // Upload floor plan to storage
       let floorPlanUrl = dataUrl;
@@ -504,6 +527,30 @@ function MoveOutInspectionContent() {
     saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
   }
 
+  function updatePhoto(roomIdx: number, itemIdx: number, photoIdx: number, field: string, value: any) {
+    if (!activeInspection) return;
+    const rooms = [...activeInspection.rooms];
+    const items = [...rooms[roomIdx].items];
+    const photos = [...items[itemIdx].photos];
+    photos[photoIdx] = { ...photos[photoIdx], [field]: value };
+    // Auto-mark deduction if condition is poor/damaged
+    if (field === "condition" && (value === "poor" || value === "damaged")) {
+      photos[photoIdx].isDeduction = true;
+    }
+    items[itemIdx] = { ...items[itemIdx], photos };
+    rooms[roomIdx] = { ...rooms[roomIdx], items };
+    saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
+  }
+
+  function removePhoto(roomIdx: number, itemIdx: number, photoIdx: number) {
+    if (!activeInspection) return;
+    const rooms = [...activeInspection.rooms];
+    const items = [...rooms[roomIdx].items];
+    items[itemIdx] = { ...items[itemIdx], photos: items[itemIdx].photos.filter((_, i) => i !== photoIdx) };
+    rooms[roomIdx] = { ...rooms[roomIdx], items };
+    saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
+  }
+
   async function handlePhotoUpload(roomIdx: number, itemIdx: number, e: React.ChangeEvent<HTMLInputElement>) {
     if (!activeInspection || !e.target.files?.length) return;
     const file = e.target.files[0];
@@ -517,8 +564,21 @@ function MoveOutInspectionContent() {
     setUploadError(null);
 
     try {
-      // Compress before upload
-      const dataUrl = await compressImage(file, 1920, 0.8);
+      // Convert HEIC if needed, then compress
+      let dataUrl: string;
+      if (isHeicFile(file)) {
+        const converted = await convertHeicToJpeg(file);
+        if (converted.startsWith("blob:")) {
+          const resp = await fetch(converted);
+          const blob = await resp.blob();
+          dataUrl = await compressImage(new File([blob], "photo.jpg", { type: "image/jpeg" }), 1920, 0.8);
+          URL.revokeObjectURL(converted);
+        } else {
+          dataUrl = converted;
+        }
+      } else {
+        dataUrl = await compressImage(file, 1920, 0.8);
+      }
       const photoId = newId();
 
       // Upload to storage
@@ -639,24 +699,25 @@ function MoveOutInspectionContent() {
     const rooms = [...activeInspection.rooms];
     const failed: { roomIdx: number; itemIdx: number }[] = [];
 
-    // Count total items with photos for progress
-    const itemsWithPhotos: { ri: number; ii: number }[] = [];
+    // Count ALL individual photos for progress
+    const allPhotos: { ri: number; ii: number; pi: number }[] = [];
     for (let ri = 0; ri < rooms.length; ri++) {
       for (let ii = 0; ii < rooms[ri].items.length; ii++) {
-        if (rooms[ri].items[ii].photos.length > 0) {
-          itemsWithPhotos.push({ ri, ii });
+        for (let pi = 0; pi < rooms[ri].items[ii].photos.length; pi++) {
+          allPhotos.push({ ri, ii, pi });
         }
       }
     }
 
-    // Analyze photos with AI
-    for (let idx = 0; idx < itemsWithPhotos.length; idx++) {
-      const { ri, ii } = itemsWithPhotos[idx];
+    // Analyze every photo individually
+    for (let idx = 0; idx < allPhotos.length; idx++) {
+      const { ri, ii, pi } = allPhotos[idx];
       const item = rooms[ri].items[ii];
+      const photo = item.photos[pi];
       setAnalysisProgress({
         current: idx + 1,
-        total: itemsWithPhotos.length,
-        label: `${rooms[ri].name} — ${item.item}`,
+        total: allPhotos.length,
+        label: `${rooms[ri].name} — ${item.item} (photo ${pi + 1})`,
       });
 
       try {
@@ -664,7 +725,7 @@ function MoveOutInspectionContent() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            photoBase64: item.photos[0].url,
+            photoBase64: photo.url,
             roomName: rooms[ri].name,
             itemName: item.item,
           }),
@@ -672,27 +733,37 @@ function MoveOutInspectionContent() {
         const analysis = await res.json();
 
         if (analysis.condition) {
-          rooms[ri].items[ii] = {
-            ...item,
+          // Set per-photo metadata
+          rooms[ri].items[ii].photos[pi] = {
+            ...photo,
+            aiAnalysis: analysis.description,
             condition: analysis.condition,
-            notes: analysis.description || item.notes,
+            notes: analysis.description || "",
             costEstimate: analysis.total_estimated_cost || 0,
             isDeduction: (analysis.total_estimated_cost || 0) > 0,
             aiOriginalCondition: analysis.condition,
             aiOriginalCost: analysis.total_estimated_cost || 0,
-            editHistory: [],
-            photos: item.photos.map((p, pi) =>
-              pi === 0 ? { ...p, aiAnalysis: analysis.description } : p
-            ),
           };
-        } else {
+          // Also set item-level condition from first photo if not set
+          if (pi === 0) {
+            rooms[ri].items[ii] = {
+              ...rooms[ri].items[ii],
+              condition: analysis.condition,
+              aiOriginalCondition: analysis.condition,
+              editHistory: [],
+            };
+          }
+        } else if (pi === 0) {
+          // Only track failure at item level for progress/retry
           failed.push({ roomIdx: ri, itemIdx: ii });
         }
       } catch {
-        failed.push({ roomIdx: ri, itemIdx: ii });
+        if (pi === 0) {
+          failed.push({ roomIdx: ri, itemIdx: ii });
+        }
       }
 
-      // Incremental save after each photo (so progress isn't lost if interrupted)
+      // Incremental save after each photo
       saveInspection({
         ...activeInspection,
         rooms,
@@ -719,36 +790,45 @@ function MoveOutInspectionContent() {
     const item = rooms[roomIdx].items[itemIdx];
     if (item.photos.length === 0) return;
 
-    try {
-      const res = await fetch("/api/inspections/analyze-photo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          photoBase64: item.photos[0].url,
-          roomName: rooms[roomIdx].name,
-          itemName: item.item,
-        }),
-      });
-      const analysis = await res.json();
-      if (analysis.condition) {
-        rooms[roomIdx].items[itemIdx] = {
-          ...item,
-          condition: analysis.condition,
-          notes: analysis.description || item.notes,
-          costEstimate: analysis.total_estimated_cost || 0,
-          isDeduction: (analysis.total_estimated_cost || 0) > 0,
-          aiOriginalCondition: analysis.condition,
-          aiOriginalCost: analysis.total_estimated_cost || 0,
-          editHistory: [],
-          photos: item.photos.map((p, pi) =>
-            pi === 0 ? { ...p, aiAnalysis: analysis.description } : p
-          ),
-        };
-        setFailedAnalyses((prev) => prev.filter((f) => !(f.roomIdx === roomIdx && f.itemIdx === itemIdx)));
-        saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
+    let anySuccess = false;
+    // Retry all photos in this item
+    for (let pi = 0; pi < item.photos.length; pi++) {
+      const photo = item.photos[pi];
+      if (photo.aiAnalysis) continue; // Already analyzed
+      try {
+        const res = await fetch("/api/inspections/analyze-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            photoBase64: photo.url,
+            roomName: rooms[roomIdx].name,
+            itemName: item.item,
+          }),
+        });
+        const analysis = await res.json();
+        if (analysis.condition) {
+          rooms[roomIdx].items[itemIdx].photos[pi] = {
+            ...photo,
+            aiAnalysis: analysis.description,
+            condition: analysis.condition,
+            notes: analysis.description || "",
+            costEstimate: analysis.total_estimated_cost || 0,
+            isDeduction: (analysis.total_estimated_cost || 0) > 0,
+            aiOriginalCondition: analysis.condition,
+            aiOriginalCost: analysis.total_estimated_cost || 0,
+          };
+          if (pi === 0) {
+            rooms[roomIdx].items[itemIdx].condition = analysis.condition;
+          }
+          anySuccess = true;
+        }
+      } catch {
+        // Still failed for this photo
       }
-    } catch {
-      // Still failed
+    }
+    if (anySuccess) {
+      setFailedAnalyses((prev) => prev.filter((f) => !(f.roomIdx === roomIdx && f.itemIdx === itemIdx)));
+      saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
     }
   }
 
@@ -773,10 +853,7 @@ function MoveOutInspectionContent() {
       const pdfData = buildPdfData(activeInspection, logo);
       const pdfDataUri = generateDepositDeductionPDF(pdfData);
 
-      const totalDed = activeInspection.rooms
-        .flatMap((r) => r.items)
-        .filter((item) => item.isDeduction)
-        .reduce((sum, item) => sum + item.costEstimate, 0);
+      const totalDed = calcDeductions(activeInspection);
 
       // Download both the deduction statement and disposition letter
       downloadPDF(pdfDataUri, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
@@ -820,6 +897,11 @@ function MoveOutInspectionContent() {
               url: p.url,
               ai_analysis: p.aiAnalysis,
               created_at: p.createdAt,
+              condition: p.condition,
+              notes: p.notes,
+              cost_estimate: p.costEstimate,
+              is_deduction: p.isDeduction,
+              ai_original_cost: p.aiOriginalCost,
             })),
             cost_estimate: item.costEstimate,
             is_deduction: item.isDeduction,
@@ -841,11 +923,9 @@ function MoveOutInspectionContent() {
   }
 
   // Calculate totals
+  // Total deductions: sum item-level + per-photo deductions
   const totalDeductions = activeInspection
-    ? activeInspection.rooms
-        .flatMap((r) => r.items)
-        .filter((item) => item.isDeduction)
-        .reduce((sum, item) => sum + item.costEstimate, 0)
+    ? calcDeductions(activeInspection)
     : 0;
 
   const filteredUnits = unitSearch
@@ -1092,7 +1172,7 @@ function MoveOutInspectionContent() {
             {/* Mobile cards */}
             <div className="md:hidden space-y-2">
               {sortedInspections.map((insp) => {
-                const ded = insp.rooms.flatMap((r) => r.items).filter((item) => item.isDeduction).reduce((sum, item) => sum + item.costEstimate, 0);
+                const ded = calcDeductions(insp);
                 return (
                   <div
                     key={insp.id}
@@ -1345,7 +1425,7 @@ function MoveOutInspectionContent() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,.heic,.heif"
               className="hidden"
               onChange={handleFloorPlanUpload}
             />
@@ -1589,6 +1669,7 @@ function MoveOutInspectionContent() {
             <div className="divide-y divide-border">
               {currentRoom.items.map((item, itemIdx) => (
                 <div key={item.id} className="p-3 sm:p-4 space-y-2">
+                  {/* Item header */}
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium flex-1 min-w-0 truncate">{item.item}</p>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1606,7 +1687,7 @@ function MoveOutInspectionContent() {
                         + Photo
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/*,.heic,.heif"
                           capture="environment"
                           className="hidden"
                           onChange={(e) => handlePhotoUpload(selectedRoomIdx, itemIdx, e)}
@@ -1615,23 +1696,97 @@ function MoveOutInspectionContent() {
                     </div>
                   </div>
 
+                  {/* Item-level notes */}
+                  <input
+                    type="text"
+                    placeholder="Item notes..."
+                    value={item.notes}
+                    onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "notes", e.target.value)}
+                    className="w-full text-xs border border-border rounded-lg px-2.5 py-2 bg-card"
+                  />
+
+                  {/* Per-photo cards */}
                   {item.photos.length > 0 && (
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {item.photos.map((photo) => (
-                        <img
-                          key={photo.id}
-                          src={photo.url}
-                          alt=""
-                          className="w-14 h-14 sm:w-16 sm:h-16 object-cover rounded-lg border border-border shrink-0"
-                        />
+                    <div className="space-y-2 pl-2 border-l-2 border-border/50">
+                      {item.photos.map((photo, photoIdx) => (
+                        <div key={photo.id} className={`rounded-lg border p-2 space-y-1.5 ${photo.isDeduction ? "border-red-200 bg-red-50/30" : "border-border bg-card"}`}>
+                          <div className="flex gap-2">
+                            {/* Thumbnail */}
+                            <a href={photo.url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                              <img
+                                src={photo.url}
+                                alt=""
+                                className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-md border border-border"
+                              />
+                            </a>
+                            {/* Photo metadata */}
+                            <div className="flex-1 min-w-0 space-y-1">
+                              {/* AI analysis text */}
+                              {photo.aiAnalysis && (
+                                <p className="text-[10px] text-muted-foreground italic line-clamp-2">AI: {photo.aiAnalysis}</p>
+                              )}
+                              {/* Per-photo condition */}
+                              {isReview && (
+                                <select
+                                  value={photo.condition || ""}
+                                  onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "condition", e.target.value)}
+                                  className="text-[11px] border border-border rounded px-1.5 py-1 bg-card w-full"
+                                >
+                                  <option value="">Condition</option>
+                                  {CONDITIONS.map((c) => (
+                                    <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                                  ))}
+                                </select>
+                              )}
+                              {/* Per-photo notes */}
+                              <input
+                                type="text"
+                                placeholder="Photo notes..."
+                                value={photo.notes || ""}
+                                onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", e.target.value)}
+                                className="w-full text-[11px] border border-border rounded px-1.5 py-1 bg-card"
+                              />
+                              {/* Per-photo deduction controls (review only) */}
+                              {isReview && (
+                                <div className="flex items-center gap-1.5">
+                                  <label className="flex items-center gap-1 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={photo.isDeduction || false}
+                                      onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "isDeduction", e.target.checked)}
+                                      className="rounded w-3 h-3"
+                                    />
+                                    <span className="text-[10px] text-muted-foreground">Deduct</span>
+                                  </label>
+                                  <input
+                                    type="number"
+                                    placeholder="$0"
+                                    value={photo.costEstimate || ""}
+                                    onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "costEstimate", parseFloat(e.target.value) || 0)}
+                                    className="w-20 text-[11px] text-right border border-border rounded px-1.5 py-1 bg-card"
+                                  />
+                                  {photo.aiOriginalCost !== undefined && (photo.costEstimate || 0) !== photo.aiOriginalCost && (
+                                    <span className="text-[9px] text-amber-600">AI: ${photo.aiOriginalCost}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            {/* Remove button */}
+                            {!isReview && (
+                              <button
+                                onClick={() => removePhoto(selectedRoomIdx, itemIdx, photoIdx)}
+                                className="self-start p-1 text-muted-foreground hover:text-red-500 shrink-0"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
-                  {item.photos[0]?.aiAnalysis && (
-                    <p className="text-xs text-muted-foreground italic line-clamp-2">
-                      AI: {item.photos[0].aiAnalysis}
-                    </p>
-                  )}
+
+                  {/* Failed analysis retry */}
                   {isReview && item.photos.length > 0 && !item.photos[0]?.aiAnalysis && failedAnalyses.some((f) => f.roomIdx === selectedRoomIdx && f.itemIdx === itemIdx) && (
                     <button
                       onClick={() => retryFailedAnalysis(selectedRoomIdx, itemIdx)}
@@ -1641,25 +1796,19 @@ function MoveOutInspectionContent() {
                     </button>
                   )}
 
-                  <div className="flex flex-wrap gap-2">
-                    <input
-                      type="text"
-                      placeholder="Notes..."
-                      value={item.notes}
-                      onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "notes", e.target.value)}
-                      className="flex-1 min-w-[150px] text-xs border border-border rounded-lg px-2.5 py-2 bg-card"
-                    />
-                    {isReview && (
-                      <>
-                        <label className="flex items-center gap-1.5 px-2 py-1.5 border border-border rounded-lg cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={item.isDeduction}
-                            onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "isDeduction", e.target.checked)}
-                            className="rounded"
-                          />
-                          <span className="text-xs text-muted-foreground">Deduct</span>
-                        </label>
+                  {/* Item-level deduction (fallback when no per-photo deductions) */}
+                  {isReview && !item.photos.some((p) => p.isDeduction) && (
+                    <div className="flex flex-wrap gap-2">
+                      <label className="flex items-center gap-1.5 px-2 py-1.5 border border-border rounded-lg cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={item.isDeduction}
+                          onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "isDeduction", e.target.checked)}
+                          className="rounded"
+                        />
+                        <span className="text-xs text-muted-foreground">Deduct (item-level)</span>
+                      </label>
+                      {item.isDeduction && (
                         <input
                           type="number"
                           placeholder="$0"
@@ -1667,26 +1816,21 @@ function MoveOutInspectionContent() {
                           onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "costEstimate", parseFloat(e.target.value) || 0)}
                           className="w-24 text-xs text-right border border-border rounded-lg px-2.5 py-2 bg-card"
                         />
-                      </>
-                    )}
-                  </div>
-                  {/* Audit trail: show "Edited" badge if item was manually changed from AI values */}
+                      )}
+                    </div>
+                  )}
+
+                  {/* Audit trail */}
                   {isReview && item.editHistory && item.editHistory.length > 0 && (
                     <details className="mt-1">
                       <summary className="text-[10px] text-amber-600 font-medium cursor-pointer hover:text-amber-700">
                         Edited ({item.editHistory.length} change{item.editHistory.length !== 1 ? "s" : ""})
-                        {item.aiOriginalCost !== undefined && item.costEstimate !== item.aiOriginalCost && (
-                          <span className="ml-1 text-muted-foreground font-normal">
-                            AI: ${item.aiOriginalCost} &rarr; ${item.costEstimate}
-                          </span>
-                        )}
                       </summary>
                       <div className="mt-1 space-y-0.5 pl-2 border-l-2 border-amber-200">
                         {item.editHistory.map((edit, ei) => (
                           <p key={ei} className="text-[10px] text-muted-foreground">
                             <span className="font-medium">{edit.field}</span>: {String(edit.from)} &rarr; {String(edit.to)}
                             <span className="ml-1">by {edit.editor}</span>
-                            <span className="ml-1">{new Date(edit.timestamp).toLocaleString()}</span>
                           </p>
                         ))}
                       </div>

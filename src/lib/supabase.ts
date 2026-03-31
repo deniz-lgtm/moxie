@@ -77,4 +77,11 @@ export type DbPhoto = {
   url: string; // Supabase storage URL or data URL
   ai_analysis: string | null;
   created_at: string;
+  /** Per-photo deduction metadata */
+  condition?: string;
+  notes?: string;
+  cost_estimate?: number;
+  is_deduction?: boolean;
+  ai_original_condition?: string;
+  ai_original_cost?: number;
 };

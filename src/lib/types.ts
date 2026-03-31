@@ -62,6 +62,13 @@ export interface InspectionPhoto {
   url: string; // data URL or storage URL
   aiAnalysis: string | null;
   createdAt: string;
+  /** Per-photo metadata for individual deductions */
+  condition?: ConditionRating | "";
+  notes?: string;
+  costEstimate?: number;
+  isDeduction?: boolean;
+  aiOriginalCondition?: ConditionRating | "";
+  aiOriginalCost?: number;
 }
 
 export interface ItemEditRecord {
