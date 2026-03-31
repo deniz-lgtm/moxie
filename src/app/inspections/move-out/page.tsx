@@ -77,6 +77,78 @@ function blankItem(name: string): InspectionItem {
 
 type WizardStep = "select_unit" | "floor_plan" | "walking" | "ai_review" | "team_review" | "completed";
 
+const WIZARD_STEPS: { key: WizardStep; label: string; shortLabel: string }[] = [
+  { key: "floor_plan", label: "Floor Plan", shortLabel: "Plan" },
+  { key: "walking", label: "Camera Walk", shortLabel: "Walk" },
+  { key: "ai_review", label: "AI Review", shortLabel: "AI" },
+  { key: "team_review", label: "Team Review", shortLabel: "Team" },
+  { key: "completed", label: "Complete", shortLabel: "Done" },
+];
+
+function StepProgressBar({
+  currentStep,
+  onStepClick,
+  inspectionStatus,
+}: {
+  currentStep: WizardStep;
+  onStepClick: (step: WizardStep) => void;
+  inspectionStatus: string;
+}) {
+  const currentIdx = WIZARD_STEPS.findIndex((s) => s.key === currentStep);
+  // Determine the furthest step reached based on inspection status
+  const statusStepMap: Record<string, number> = {
+    draft: 0,
+    not_started: 0,
+    walking: 1,
+    ai_review: 2,
+    team_review: 3,
+    completed: 4,
+  };
+  const furthestIdx = Math.max(statusStepMap[inspectionStatus] ?? 0, currentIdx);
+
+  return (
+    <div className="flex items-center gap-1 w-full">
+      {WIZARD_STEPS.map((s, idx) => {
+        const isActive = idx === currentIdx;
+        const isCompleted = idx < furthestIdx;
+        const isReachable = idx <= furthestIdx + 1; // can go one step ahead or any step back
+        return (
+          <div key={s.key} className="flex items-center flex-1 min-w-0">
+            <button
+              onClick={() => isReachable ? onStepClick(s.key) : undefined}
+              disabled={!isReachable}
+              className={`flex items-center gap-1.5 w-full px-2 py-2 rounded-lg text-xs font-medium transition-all ${
+                isActive
+                  ? "bg-accent text-white shadow-sm"
+                  : isCompleted
+                  ? "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                  : isReachable
+                  ? "bg-muted/50 text-muted-foreground hover:bg-muted border border-border"
+                  : "bg-muted/30 text-muted-foreground/40 border border-transparent cursor-not-allowed"
+              }`}
+            >
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                isActive
+                  ? "bg-white/20 text-white"
+                  : isCompleted
+                  ? "bg-green-200 text-green-700"
+                  : "bg-muted text-muted-foreground"
+              }`}>
+                {isCompleted ? "✓" : idx + 1}
+              </span>
+              <span className="truncate hidden sm:inline">{s.label}</span>
+              <span className="truncate sm:hidden">{s.shortLabel}</span>
+            </button>
+            {idx < WIZARD_STEPS.length - 1 && (
+              <div className={`w-3 h-0.5 shrink-0 mx-0.5 ${idx < furthestIdx ? "bg-green-300" : "bg-border"}`} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function MoveOutInspectionPage() {
   return (
     <InspectionErrorBoundary>
@@ -282,6 +354,24 @@ function MoveOutInspectionContent() {
     setInspections(updated);
     setActiveInspection(insp);
     queueSave(insp);
+  }
+
+  function navigateToStep(targetStep: WizardStep) {
+    if (!activeInspection || targetStep === step) return;
+    // Update status to match the step if going backwards
+    const stepStatusMap: Partial<Record<WizardStep, Inspection["status"]>> = {
+      floor_plan: "draft",
+      walking: "walking",
+      ai_review: "ai_review",
+      team_review: "team_review",
+      completed: "completed",
+    };
+    const newStatus = stepStatusMap[targetStep];
+    if (newStatus && newStatus !== activeInspection.status) {
+      saveInspection({ ...activeInspection, status: newStatus, updatedAt: new Date().toISOString() });
+    }
+    setStep(targetStep);
+    setSelectedRoomIdx(0);
   }
 
   function deleteInspection(id: string) {
@@ -1388,6 +1478,7 @@ function MoveOutInspectionContent() {
         <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
           &larr; Back to list
         </button>
+        <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold">Upload Floor Plan</h1>
           <SaveIndicator status={saveStatus} onRetry={retrySave} />
@@ -1471,11 +1562,24 @@ function MoveOutInspectionContent() {
             <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
               &larr; Back to list
             </button>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-bold">
                 {activeInspection.unitNumber}
               </h1>
-              <StatusBadge value={activeInspection.status} />
+              <StatusBadge
+                value={activeInspection.status}
+                options={["draft", "walking", "ai_review", "team_review", "completed"]}
+                onChange={(newStatus) => {
+                  const updated = { ...activeInspection, status: newStatus as Inspection["status"], updatedAt: new Date().toISOString() };
+                  if (newStatus === "completed" && !activeInspection.completedDate) updated.completedDate = new Date().toISOString().split("T")[0];
+                  saveInspection(updated);
+                  // Sync the wizard step with the new status
+                  const statusToStep: Record<string, WizardStep> = { draft: "floor_plan", walking: "walking", ai_review: "ai_review", team_review: "team_review", completed: "completed" };
+                  const newStep = statusToStep[newStatus];
+                  if (newStep) setStep(newStep);
+                }}
+              />
               <SaveIndicator status={saveStatus} onRetry={retrySave} />
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -1871,6 +1975,7 @@ function MoveOutInspectionContent() {
         <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="text-xs font-medium text-accent hover:underline">
           &larr; Back to list
         </button>
+        <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
 
         <div className="text-center py-10">
           <div className="w-16 h-16 bg-green-50 rounded-2xl flex items-center justify-center mx-auto mb-4 ring-4 ring-green-100">
