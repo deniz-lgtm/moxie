@@ -14,6 +14,7 @@
     "jspdf": "^4.2.1",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
+    "pannellum": "^2.5.7",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "sharp": "^0.34.5"

@@ -226,6 +226,7 @@ export default function OnboardingInspectionPage() {
         item.photos.map((p) => ({ id: p.id, url: p.url, timestamp: p.createdAt }))
       ),
       notes: "",
+      panoramaUrl: r.panoramaUrl || null,
     }));
   }
 
@@ -242,7 +243,7 @@ export default function OnboardingInspectionPage() {
         id: p.id, url: p.url, aiAnalysis: null, createdAt: p.timestamp,
       }))] };
       items[0] = firstItem;
-      return { ...room, items };
+      return { ...room, items, panoramaUrl: cRoom.panoramaUrl };
     });
     save({ ...active, rooms, updatedAt: new Date().toISOString() });
   }

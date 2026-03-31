@@ -49,6 +49,7 @@ export type DbRoom = {
   id: string;
   name: string;
   items: DbInspectionItem[];
+  panorama_url?: string | null;
 };
 
 export type DbItemEditRecord = {

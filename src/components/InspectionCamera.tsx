@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2 } from "lucide-react";
-import { validateImage, compressImage, compressDataUrl, isHeicFile, convertHeicToJpeg } from "@/lib/image-utils";
+import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2, Globe } from "lucide-react";
+import { validateImage, compressImage, compressDataUrl, isHeicFile, convertHeicToJpeg, validatePanorama, compressPanorama, isLikelyEquirectangular } from "@/lib/image-utils";
+import { PanoramaViewer } from "@/components/PanoramaViewer";
 
 export interface CameraPhoto {
   id: string;
@@ -21,6 +22,7 @@ export interface CameraRoom {
   name: string;
   photos: CameraPhoto[];
   notes: string;
+  panoramaUrl?: string | null;
 }
 
 interface InspectionCameraProps {
@@ -62,9 +64,11 @@ export function InspectionCamera({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const panoramaInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   // Track pending stream so we can assign it after video element renders
   const pendingStreamRef = useRef<MediaStream | null>(null);
+  const [showPanoramaViewer, setShowPanoramaViewer] = useState(false);
 
   const currentRoom = rooms[currentRoomIdx];
   const isLastRoom = currentRoomIdx === rooms.length - 1;
@@ -196,6 +200,53 @@ export function InspectionCamera({
     }
   }
 
+  // Handle 360 panorama upload
+  async function handlePanoramaUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.length || !currentRoom) return;
+    const file = e.target.files[0];
+    e.target.value = "";
+
+    const validation = validatePanorama(file);
+    if (!validation.valid) {
+      console.warn("[Camera] Invalid panorama:", validation.error);
+      return;
+    }
+
+    try {
+      const dataUrl = await compressPanorama(file);
+
+      // Check aspect ratio to warn if it doesn't look like a 360 photo
+      const img = new window.Image();
+      await new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        img.src = dataUrl;
+      });
+
+      if (!isLikelyEquirectangular(img.width, img.height)) {
+        const proceed = window.confirm(
+          "This image doesn't appear to be a 360 photo (expected ~2:1 aspect ratio). Upload anyway?"
+        );
+        if (!proceed) return;
+      }
+
+      const updated = rooms.map((r, i) =>
+        i === currentRoomIdx ? { ...r, panoramaUrl: dataUrl } : r
+      );
+      onRoomsChange(updated);
+    } catch (err) {
+      console.error("[Camera] Failed to process panorama:", err);
+    }
+  }
+
+  function removePanorama() {
+    const updated = rooms.map((r, i) =>
+      i === currentRoomIdx ? { ...r, panoramaUrl: null } : r
+    );
+    onRoomsChange(updated);
+    setShowPanoramaViewer(false);
+  }
+
   function addPhotoToRoom(url: string) {
     const photo: CameraPhoto = {
       id: newId(),
@@ -273,6 +324,7 @@ export function InspectionCamera({
 
   function goToNextRoom() {
     stopCamera();
+    setShowPanoramaViewer(false);
     if (isLastRoom) {
       batchAnalyzeAndComplete();
     } else {
@@ -282,6 +334,7 @@ export function InspectionCamera({
 
   function goToPrevRoom() {
     stopCamera();
+    setShowPanoramaViewer(false);
     if (!isFirstRoom) setCurrentRoomIdx((i) => i - 1);
   }
 
@@ -292,6 +345,7 @@ export function InspectionCamera({
       name: newRoomName.trim(),
       photos: [],
       notes: "",
+      panoramaUrl: null,
     };
     onRoomsChange([...rooms, newRoom]);
     setNewRoomName("");
@@ -312,6 +366,14 @@ export function InspectionCamera({
         accept="image/*,.heic,.heif"
         multiple
         onChange={handleFileUpload}
+        className="hidden"
+      />
+      {/* 360 panorama file input */}
+      <input
+        ref={panoramaInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={handlePanoramaUpload}
         className="hidden"
       />
 
@@ -349,6 +411,9 @@ export function InspectionCamera({
         <h2 className="text-2xl font-bold text-white text-center">{currentRoom.name}</h2>
         <p className="text-white/50 text-center text-sm mt-1">
           {currentRoom.photos.length} photo{currentRoom.photos.length !== 1 ? "s" : ""} taken
+          {currentRoom.panoramaUrl ? (
+            <span className="ml-2 text-blue-400">· 360° captured</span>
+          ) : null}
         </p>
       </div>
 
@@ -392,6 +457,35 @@ export function InspectionCamera({
           </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 gap-4 px-6">
+            {/* 360 Panorama viewer */}
+            {currentRoom.panoramaUrl && !showPanoramaViewer && (
+              <button
+                onClick={() => setShowPanoramaViewer(true)}
+                className="w-full max-w-lg relative rounded-lg overflow-hidden border border-blue-500/30 hover:border-blue-400/50 transition-colors"
+              >
+                <img src={currentRoom.panoramaUrl} alt="360 panorama" className="w-full h-20 object-cover opacity-70" />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                  <span className="text-white text-xs font-medium bg-blue-600/80 px-3 py-1 rounded-full flex items-center gap-1.5">
+                    <Globe size={12} /> View 360° Panorama
+                  </span>
+                </div>
+              </button>
+            )}
+            {currentRoom.panoramaUrl && showPanoramaViewer && (
+              <div className="w-full max-w-lg h-[40vh]">
+                <PanoramaViewer
+                  imageUrl={currentRoom.panoramaUrl}
+                  onRemove={removePanorama}
+                  className="h-full"
+                />
+                <button
+                  onClick={() => setShowPanoramaViewer(false)}
+                  className="mt-1 text-white/40 text-xs hover:text-white/70 w-full text-center"
+                >
+                  Collapse viewer
+                </button>
+              </div>
+            )}
             {/* Photo thumbnails grid */}
             {currentRoom.photos.length > 0 ? (
               <div className="w-full max-w-lg overflow-y-auto max-h-[60vh] px-2">
@@ -460,6 +554,12 @@ export function InspectionCamera({
               className="flex items-center gap-2 px-5 py-2.5 bg-white/10 text-white rounded-lg text-sm hover:bg-white/20"
             >
               <Image size={18} /> Upload Photos
+            </button>
+            <button
+              onClick={() => panoramaInputRef.current?.click()}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600/30 text-blue-300 rounded-lg text-sm hover:bg-blue-600/50 border border-blue-500/30"
+            >
+              <Globe size={18} /> Upload 360°
             </button>
           </div>
         )}

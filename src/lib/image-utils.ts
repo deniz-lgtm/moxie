@@ -6,6 +6,7 @@
  */
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB raw input limit
+const MAX_PANORAMA_SIZE = 30 * 1024 * 1024; // 30MB for 360 camera output
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
 export type ImageValidationResult =
@@ -122,6 +123,37 @@ export async function convertHeicToJpeg(file: File): Promise<string> {
     };
     img.src = url;
   });
+}
+
+/** Check if an image's aspect ratio suggests equirectangular (360) projection */
+export function isLikelyEquirectangular(width: number, height: number): boolean {
+  const ratio = width / height;
+  return ratio >= 1.8 && ratio <= 2.2;
+}
+
+/** Validate a panorama file (higher size limit than regular photos) */
+export function validatePanorama(file: File): ImageValidationResult {
+  const isHeic = isHeicFile(file);
+  if (!isHeic && !ALLOWED_TYPES.includes(file.type)) {
+    return { valid: false, error: `Unsupported file type: ${file.type || "unknown"}. Use JPEG, PNG, WebP, or HEIC.` };
+  }
+  if (file.size > MAX_PANORAMA_SIZE) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    return { valid: false, error: `File too large (${sizeMB}MB). Maximum for 360 photos is 30MB.` };
+  }
+  return { valid: true };
+}
+
+/**
+ * Compress a 360 panorama image. Uses a higher resolution cap (4096px)
+ * since equirectangular images need more pixels for acceptable viewer quality.
+ */
+export function compressPanorama(
+  file: File,
+  maxWidth: number = 4096,
+  quality: number = 0.7,
+): Promise<string> {
+  return compressImage(file, maxWidth, quality);
 }
 
 /**

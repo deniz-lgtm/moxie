@@ -30,6 +30,7 @@ function toDb(insp: Inspection): Omit<DbInspection, "created_at" | "updated_at">
     rooms: insp.rooms.map((r) => ({
       id: r.id,
       name: r.name,
+      panorama_url: r.panoramaUrl || null,
       items: r.items.map((item) => ({
         id: item.id,
         name: item.item,
@@ -79,6 +80,7 @@ function fromDb(row: DbInspection): Inspection {
     rooms: (row.rooms || []).map((r) => ({
       id: r.id,
       name: r.name,
+      panoramaUrl: r.panorama_url || null,
       items: (r.items || []).map((item) => ({
         id: item.id,
         area: r.name,
@@ -160,6 +162,29 @@ export async function uploadFloorPlan(dataUrl: string, inspectionId: string): Pr
 
   if (error) {
     console.error("[Moxie] Floor plan upload failed:", error.message);
+    return dataUrl;
+  }
+
+  const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+/** Upload a 360 panorama data URL. Returns the public URL. */
+export async function uploadPanorama(dataUrl: string, inspectionId: string, roomId: string): Promise<string> {
+  const sb = getSupabase();
+  if (!sb) return dataUrl;
+
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const path = `inspections/${inspectionId}/panorama-${roomId}.jpg`;
+
+  const { error } = await sb.storage.from(BUCKET).upload(path, blob, {
+    contentType: "image/jpeg",
+    upsert: true,
+  });
+
+  if (error) {
+    console.error("[Moxie] Panorama upload failed:", error.message);
     return dataUrl;
   }
 

@@ -99,6 +99,7 @@ export interface InspectionRoom {
   id: string;
   name: string;
   items: InspectionItem[];
+  panoramaUrl?: string | null;
 }
 
 export interface Inspection {
