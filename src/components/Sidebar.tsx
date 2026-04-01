@@ -23,8 +23,10 @@ import {
   DollarSign,
   Settings,
   Link as LinkIcon,
+  LogOut,
 } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 
 type NavItem = {
   label: string;
@@ -118,6 +120,7 @@ const groupedItems = navItems.reduce((acc, item) => {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user, signOut } = useAuth();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     Inspections: pathname.startsWith("/inspections"),
     Marketing: pathname.startsWith("/marketing"),
@@ -251,16 +254,27 @@ export function Sidebar() {
       <div className="border-t border-white/5 p-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-sidebar-hover flex items-center justify-center">
-            <span className="text-xs font-medium text-sidebar-text-active">PM</span>
+            <span className="text-xs font-medium text-sidebar-text-active">
+              {user?.email ? user.email.substring(0, 2).toUpperCase() : "PM"}
+            </span>
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-sidebar-text-active truncate">
-              Property Manager
+              {user?.email || "Property Manager"}
             </p>
             <p className="text-[10px] text-sidebar-text truncate">
               Moxie Management
             </p>
           </div>
+          {user && (
+            <button
+              onClick={signOut}
+              className="p-1.5 rounded-lg text-sidebar-text hover:text-red-400 hover:bg-sidebar-hover transition-colors"
+              title="Sign out"
+            >
+              <LogOut size={14} />
+            </button>
+          )}
         </div>
       </div>
     </aside>
