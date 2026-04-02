@@ -83,7 +83,16 @@ const navItems: NavItem[] = [
   // Legacy items (to be reviewed)
   { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw, category: "Property Management" },
   { label: "Vendors", href: "/vendors", icon: Users, category: "Property Management" },
-  { label: "RUBs", href: "/rubs", icon: Zap, category: "Revenue & Finance" },
+  {
+    label: "RUBs",
+    href: "/rubs",
+    icon: Zap,
+    category: "Revenue & Finance",
+    children: [
+      { label: "Bills", href: "/rubs" },
+      { label: "Settings", href: "/rubs/settings" },
+    ],
+  },
   { label: "Capital Projects", href: "/capital-projects", icon: HardHat, category: "Asset Management" },
   { label: "Notices", href: "/notices", icon: Bell, category: "Leasing & Operations" },
   {
