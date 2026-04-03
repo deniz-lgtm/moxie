@@ -5,13 +5,21 @@ import Link from "next/link";
 import type { Unit } from "@/lib/types";
 import type {
   RubsBill,
-  RubsAllocation,
   MeterMapping,
   MeterType,
   SplitMethod,
   BillStatus,
 } from "@/lib/rubs-types";
 import { METER_TYPE_LABELS, SPLIT_METHOD_LABELS } from "@/lib/rubs-types";
+import {
+  getMeterMappings,
+  getMeterMappingById,
+  getBills,
+  saveBill as saveBillToStorage,
+  deleteBill as deleteBillFromStorage,
+} from "@/lib/rubs-db";
+import { seedRubsData, isSeeded as checkIsSeeded } from "@/lib/rubs-seed";
+import { calculateAllocations } from "@/lib/rubs-calc";
 
 // ─── Main Page ─────────────────────────────────────────────────
 
@@ -28,15 +36,15 @@ export default function RubsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [unitsRes, billsRes, mappingsRes] = await Promise.all([
-        fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] })),
-        fetch("/api/rubs/bills").then((r) => r.json()),
-        fetch("/api/rubs/mappings").then((r) => r.json()),
-      ]);
+      // Units come from AppFolio API (server-side), RUBS data from localStorage (client-side)
+      const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
-      setBills(billsRes.bills || []);
-      setMappings(mappingsRes.mappings || []);
-      setSeeded((billsRes.bills || []).length > 0 || (mappingsRes.mappings || []).length > 0);
+
+      const localBills = getBills();
+      const localMappings = getMeterMappings();
+      setBills(localBills);
+      setMappings(localMappings);
+      setSeeded(localBills.length > 0 || localMappings.length > 0);
     } catch {
       // ignore
     } finally {
@@ -48,31 +56,53 @@ export default function RubsPage() {
     loadData();
   }, [loadData]);
 
-  async function handleSeed() {
+  function handleSeed() {
     setLoading(true);
-    await fetch("/api/rubs/seed", { method: "POST" });
-    await loadData();
+    seedRubsData();
+    // Reload from localStorage
+    setBills(getBills());
+    setMappings(getMeterMappings());
+    setSeeded(true);
+    setLoading(false);
   }
 
-  async function handleDeleteBill(id: string) {
-    await fetch(`/api/rubs/bills?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  function handleDeleteBill(id: string) {
+    deleteBillFromStorage(id);
     setBills((prev) => prev.filter((b) => b.id !== id));
     if (selected?.id === id) setSelected(null);
   }
 
-  async function handlePostBill(bill: RubsBill) {
+  function handlePostBill(bill: RubsBill) {
     const updated: RubsBill = { ...bill, status: "posted", updatedAt: new Date().toISOString() };
-    await fetch("/api/rubs/bills", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bill: updated }),
-    });
+    saveBillToStorage(updated);
     setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
     setSelected(updated);
   }
 
-  async function handleExport(billId: string) {
-    window.open(`/api/rubs/export?billId=${encodeURIComponent(billId)}`, "_blank");
+  function handleExport(billId: string) {
+    const bill = bills.find((b) => b.id === billId);
+    if (!bill) return;
+    const headers = ["Unit", "Tenant", "Sq Ft", "Occupants", "Share %", "Amount"];
+    const rows = bill.allocations.map((a) => [
+      a.unitName, a.tenant, a.sqft.toString(), a.occupants.toString(),
+      (a.share * 100).toFixed(1), a.amount.toFixed(2),
+    ]);
+    const totalAmount = bill.allocations.reduce((sum, a) => sum + a.amount, 0);
+    rows.push(["TOTAL", "", "", "", "100.0", totalAmount.toFixed(2)]);
+    const csv = [
+      `# ${bill.propertyName} - ${bill.meterType.toUpperCase()} - ${bill.month}`,
+      `# Total Bill: $${bill.totalAmount.toFixed(2)}`,
+      "",
+      headers.join(","),
+      ...rows.map((r) => r.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rubs-${bill.propertyName.replace(/\s/g, "-")}-${bill.meterType}-${bill.month}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // Derived data
@@ -113,17 +143,24 @@ export default function RubsPage() {
         onBack={() => setSelected(null)}
         onPost={() => handlePostBill(selected)}
         onExport={() => handleExport(selected.id)}
-        onRecalculate={async (method: SplitMethod) => {
-          const res = await fetch("/api/rubs/calculate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ billId: selected.id, splitMethod: method, units }),
+        onRecalculate={(method: SplitMethod) => {
+          const mapping = getMeterMappingById(selected.mappingId);
+          if (!mapping) return;
+          const allocs = calculateAllocations({
+            totalAmount: selected.totalAmount,
+            mapping,
+            units,
+            splitMethod: method,
           });
-          const data = await res.json();
-          if (data.ok && data.bill) {
-            setBills((prev) => prev.map((b) => (b.id === data.bill.id ? data.bill : b)));
-            setSelected(data.bill);
-          }
+          const updated: RubsBill = {
+            ...selected,
+            allocations: allocs,
+            status: "calculated",
+            updatedAt: new Date().toISOString(),
+          };
+          saveBillToStorage(updated);
+          setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
+          setSelected(updated);
         }}
       />
     );
@@ -316,8 +353,6 @@ function CreateBillForm({
   const [meterType, setMeterType] = useState<MeterType>("water");
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [totalAmount, setTotalAmount] = useState<number>(0);
-  const [saving, setSaving] = useState(false);
-
   // Find matching mapping
   const mapping = mappings.find(
     (m) => m.propertyName === propertyName && m.meterType === meterType
@@ -328,9 +363,8 @@ function CreateBillForm({
     .filter((m) => m.propertyName === propertyName)
     .map((m) => m.meterType);
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!propertyName || totalAmount <= 0 || !mapping) return;
-    setSaving(true);
 
     const bill: RubsBill = {
       id: `bill-${Date.now()}`,
@@ -345,13 +379,7 @@ function CreateBillForm({
       updatedAt: new Date().toISOString(),
     };
 
-    await fetch("/api/rubs/bills", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bill }),
-    });
-
-    setSaving(false);
+    saveBillToStorage(bill);
     onCreated(bill);
   }
 
@@ -415,10 +443,10 @@ function CreateBillForm({
       )}
       <button
         onClick={handleCreate}
-        disabled={!propertyName || totalAmount <= 0 || !mapping || saving}
+        disabled={!propertyName || totalAmount <= 0 || !mapping}
         className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
       >
-        {saving ? "Creating..." : "Create Bill"}
+        Create Bill
       </button>
     </div>
   );
@@ -437,7 +465,7 @@ function BillDetailView({
   onBack: () => void;
   onPost: () => void;
   onExport: () => void;
-  onRecalculate: (method: SplitMethod) => Promise<void>;
+  onRecalculate: (method: SplitMethod) => void;
 }) {
   const [recalcMethod, setRecalcMethod] = useState<SplitMethod | "">("");
   const [recalculating, setRecalculating] = useState(false);
@@ -498,10 +526,10 @@ function BillDetailView({
             ))}
           </select>
           <button
-            onClick={async () => {
+            onClick={() => {
               if (!recalcMethod) return;
               setRecalculating(true);
-              await onRecalculate(recalcMethod);
+              onRecalculate(recalcMethod);
               setRecalculating(false);
               setRecalcMethod("");
             }}

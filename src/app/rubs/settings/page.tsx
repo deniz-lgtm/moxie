@@ -9,6 +9,11 @@ import {
   SPLIT_METHOD_LABELS,
   METERING_METHOD_LABELS,
 } from "@/lib/rubs-types";
+import {
+  getMeterMappings,
+  saveMeterMapping,
+  deleteMeterMapping,
+} from "@/lib/rubs-db";
 
 export default function RubsSettingsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -19,12 +24,9 @@ export default function RubsSettingsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [unitsRes, mappingsRes] = await Promise.all([
-        fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] })),
-        fetch("/api/rubs/mappings").then((r) => r.json()),
-      ]);
+      const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
-      setMappings(mappingsRes.mappings || []);
+      setMappings(getMeterMappings());
     } catch {
       // ignore
     } finally {
@@ -45,19 +47,15 @@ export default function RubsSettingsPage() {
     mappingsByProperty[m.propertyName].push(m);
   }
 
-  async function handleSave(mapping: MeterMapping) {
-    await fetch("/api/rubs/mappings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mapping }),
-    });
-    await loadData();
+  function handleSave(mapping: MeterMapping) {
+    saveMeterMapping(mapping);
+    setMappings(getMeterMappings());
     setShowForm(false);
     setEditMapping(null);
   }
 
-  async function handleDelete(id: string) {
-    await fetch(`/api/rubs/mappings?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  function handleDelete(id: string) {
+    deleteMeterMapping(id);
     setMappings((prev) => prev.filter((m) => m.id !== id));
   }
 
