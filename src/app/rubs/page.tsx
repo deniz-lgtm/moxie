@@ -9,6 +9,8 @@ import type {
   MeterType,
   SplitMethod,
   BillStatus,
+  ParsedBill,
+  ImportFileInfo,
 } from "@/lib/rubs-types";
 import { METER_TYPE_LABELS, SPLIT_METHOD_LABELS } from "@/lib/rubs-types";
 import {
@@ -29,6 +31,7 @@ export default function RubsPage() {
   const [mappings, setMappings] = useState<MeterMapping[]>([]);
   const [selected, setSelected] = useState<RubsBill | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [loading, setLoading] = useState(true);
   const [seeded, setSeeded] = useState(true);
   const [filterMonth, setFilterMonth] = useState("");
@@ -185,7 +188,13 @@ export default function RubsPage() {
             Settings
           </Link>
           <button
-            onClick={() => setShowCreateForm(!showCreateForm)}
+            onClick={() => { setShowImport(!showImport); setShowCreateForm(false); }}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            {showImport ? "Cancel Import" : "Import Bills"}
+          </button>
+          <button
+            onClick={() => { setShowCreateForm(!showCreateForm); setShowImport(false); }}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
           >
             {showCreateForm ? "Cancel" : "+ New Bill"}
@@ -218,6 +227,18 @@ export default function RubsPage() {
             setBills((prev) => [...prev, bill]);
             setShowCreateForm(false);
             setSelected(bill);
+          }}
+        />
+      )}
+
+      {/* Import Flow */}
+      {showImport && (
+        <ImportBillsFlow
+          propertyNames={propertyNames}
+          mappings={mappings}
+          onImported={(newBills) => {
+            setBills((prev) => [...prev, ...newBills]);
+            setShowImport(false);
           }}
         />
       )}
@@ -602,6 +623,346 @@ function BillDetailView({
             Export CSV
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Import Bills Flow ───────────────────────────────────────
+
+type ImportStep = "scan" | "parsing" | "preview";
+
+function ImportBillsFlow({
+  propertyNames,
+  mappings,
+  onImported,
+}: {
+  propertyNames: string[];
+  mappings: MeterMapping[];
+  onImported: (bills: RubsBill[]) => void;
+}) {
+  const [step, setStep] = useState<ImportStep>("scan");
+  const [files, setFiles] = useState<ImportFileInfo[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [parsedBills, setParsedBills] = useState<ParsedBill[]>([]);
+  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
+  const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+
+  async function scanFolder() {
+    setScanLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/rubs/import");
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setFiles(data.files || []);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to scan folder");
+    } finally {
+      setScanLoading(false);
+    }
+  }
+
+  async function triggerDownload() {
+    setDownloading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/rubs/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: "all" }) });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        // Wait a moment then rescan
+        setTimeout(() => { scanFolder(); setDownloading(false); }, 3000);
+        return;
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to trigger download");
+    }
+    setDownloading(false);
+  }
+
+  async function parseSelected() {
+    const filesToParse = Array.from(selectedFiles);
+    if (filesToParse.length === 0) return;
+
+    setStep("parsing");
+    setParseProgress({ current: 0, total: filesToParse.length });
+    const allParsed: ParsedBill[] = [];
+
+    for (let i = 0; i < filesToParse.length; i++) {
+      setParseProgress({ current: i + 1, total: filesToParse.length });
+      try {
+        const res = await fetch("/api/rubs/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: filesToParse[i], knownProperties: propertyNames }),
+        });
+        const data = await res.json();
+        if (data.results) {
+          allParsed.push(...data.results);
+        } else if (data.error) {
+          allParsed.push({
+            utilityProvider: "Error",
+            serviceAddress: data.error,
+            matchedProperty: null,
+            totalAmount: 0,
+            billingPeriod: "",
+            meterType: "water",
+            accountNumber: "",
+            confidence: 0,
+            sourceFile: filesToParse[i],
+          });
+        }
+      } catch {
+        // skip failed files
+      }
+    }
+
+    setParsedBills(allParsed);
+    setStep("preview");
+  }
+
+  function handleSaveImported() {
+    const validBills = parsedBills.filter((p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod);
+    const newBills: RubsBill[] = validBills.map((p) => {
+      const mapping = mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
+      const bill: RubsBill = {
+        id: `bill-import-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        propertyName: p.matchedProperty!,
+        month: p.billingPeriod,
+        meterType: p.meterType,
+        totalAmount: p.totalAmount,
+        mappingId: mapping?.id || "",
+        status: "draft",
+        allocations: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      saveBillToStorage(bill);
+      return bill;
+    });
+    onImported(newBills);
+  }
+
+  function toggleFile(name: string) {
+    setSelectedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  function updateParsedBill(index: number, field: keyof ParsedBill, value: string | number) {
+    setParsedBills((prev) => prev.map((p, i) => i === index ? { ...p, [field]: value } : p));
+  }
+
+  // ─── Scan Step ──────────────────────────────────────────
+  if (step === "scan") {
+    return (
+      <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+        <h2 className="font-semibold">Import Utility Bills</h2>
+        <p className="text-sm text-muted-foreground">
+          Scan your bills folder for PDFs, then AI will extract billing data automatically.
+        </p>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={scanFolder}
+            disabled={scanLoading}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+          >
+            {scanLoading ? "Scanning..." : "Scan Folder"}
+          </button>
+          <button
+            onClick={triggerDownload}
+            disabled={downloading}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            {downloading ? "Downloading..." : "Download New Bills"}
+          </button>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-500">{error}</p>
+        )}
+
+        {files.length > 0 && (
+          <>
+            <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
+              {files.map((f) => (
+                <label
+                  key={f.name}
+                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedFiles.has(f.name)}
+                    onChange={() => toggleFile(f.name)}
+                    className="rounded"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{f.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {(f.size / 1024).toFixed(0)} KB &middot; {new Date(f.modified).toLocaleDateString()}
+                    </p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setSelectedFiles(new Set(files.map((f) => f.name)))}
+                className="text-xs text-accent hover:underline"
+              >
+                Select All ({files.length})
+              </button>
+              <button
+                onClick={parseSelected}
+                disabled={selectedFiles.size === 0}
+                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+              >
+                Parse {selectedFiles.size} File{selectedFiles.size !== 1 ? "s" : ""} with AI
+              </button>
+            </div>
+          </>
+        )}
+
+        {files.length === 0 && !scanLoading && !error && (
+          <p className="text-sm text-muted-foreground">
+            Click &quot;Scan Folder&quot; to find PDF bills, or &quot;Download New Bills&quot; to fetch from utility portals.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Parsing Step ───────────────────────────────────────
+  if (step === "parsing") {
+    return (
+      <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+        <h2 className="font-semibold">Parsing Bills with AI...</h2>
+        <div className="w-full bg-muted rounded-full h-2">
+          <div
+            className="bg-accent h-2 rounded-full transition-all duration-500"
+            style={{ width: `${(parseProgress.current / parseProgress.total) * 100}%` }}
+          />
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Processing {parseProgress.current} of {parseProgress.total} files...
+        </p>
+      </div>
+    );
+  }
+
+  // ─── Preview Step ───────────────────────────────────────
+  const validCount = parsedBills.filter((p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod).length;
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border">
+        <h2 className="font-semibold">Review Extracted Bills ({parsedBills.length} found)</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Verify and edit the extracted data before importing. Rows with missing property matches will be skipped.
+        </p>
+      </div>
+      {parsedBills.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted">
+                <th className="text-left px-4 py-3 font-medium">Source File</th>
+                <th className="text-left px-4 py-3 font-medium">Provider</th>
+                <th className="text-left px-4 py-3 font-medium">Property</th>
+                <th className="text-left px-4 py-3 font-medium">Utility</th>
+                <th className="text-left px-4 py-3 font-medium">Month</th>
+                <th className="text-right px-4 py-3 font-medium">Amount</th>
+                <th className="text-left px-4 py-3 font-medium">Account #</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parsedBills.map((p, i) => {
+                const hasMatch = Boolean(p.matchedProperty);
+                return (
+                  <tr key={i} className={`border-b border-border last:border-0 ${!hasMatch ? "bg-amber-50" : ""}`}>
+                    <td className="px-4 py-2 text-xs text-muted-foreground max-w-32 truncate">{p.sourceFile}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{p.utilityProvider}</td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={p.matchedProperty || ""}
+                        onChange={(e) => updateParsedBill(i, "matchedProperty", e.target.value)}
+                        className={`text-xs border rounded px-2 py-1 w-full ${hasMatch ? "border-green-300 bg-green-50" : "border-amber-300 bg-amber-50"}`}
+                      >
+                        <option value="">No match</option>
+                        {propertyNames.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                      {p.serviceAddress && (
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate" title={p.serviceAddress}>
+                          {p.serviceAddress}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={p.meterType}
+                        onChange={(e) => updateParsedBill(i, "meterType", e.target.value)}
+                        className="text-xs border border-border rounded px-2 py-1"
+                      >
+                        {(Object.entries(METER_TYPE_LABELS) as [MeterType, string][]).map(([k, v]) => (
+                          <option key={k} value={k}>{v}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="month"
+                        value={p.billingPeriod}
+                        onChange={(e) => updateParsedBill(i, "billingPeriod", e.target.value)}
+                        className="text-xs border border-border rounded px-2 py-1"
+                      />
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <input
+                        type="number"
+                        value={p.totalAmount || ""}
+                        onChange={(e) => updateParsedBill(i, "totalAmount", parseFloat(e.target.value) || 0)}
+                        className="text-xs border border-border rounded px-2 py-1 w-24 text-right"
+                      />
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">{p.accountNumber}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-5 text-sm text-muted-foreground">
+          No billing data could be extracted from the selected files.
+        </div>
+      )}
+      <div className="p-4 border-t border-border flex items-center justify-between">
+        <button
+          onClick={() => setStep("scan")}
+          className="text-sm text-accent hover:underline"
+        >
+          &larr; Back to file selection
+        </button>
+        <button
+          onClick={handleSaveImported}
+          disabled={validCount === 0}
+          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+        >
+          Import {validCount} Bill{validCount !== 1 ? "s" : ""}
+        </button>
       </div>
     </div>
   );

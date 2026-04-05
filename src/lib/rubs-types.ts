@@ -60,3 +60,23 @@ export const METERING_METHOD_LABELS: Record<MeteringMethod, string> = {
   master: "Master Metered",
   sub_metered: "Sub-Metered",
 };
+
+// ─── Bill Import / AI Parsing ──────────────────────────────────
+
+export interface ParsedBill {
+  utilityProvider: string;
+  serviceAddress: string;
+  matchedProperty: string | null;
+  totalAmount: number;
+  billingPeriod: string; // YYYY-MM
+  meterType: MeterType;
+  accountNumber: string;
+  confidence: number; // 0–1
+  sourceFile: string;
+}
+
+export interface ImportFileInfo {
+  name: string;
+  size: number;
+  modified: string;
+}
