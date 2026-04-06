@@ -144,11 +144,23 @@ function runPowerShell(script) {
     encoding: "buffer",
     timeout: 30000,
   });
+  if (result.status !== 0) {
+    const stderr = result.stderr ? result.stderr.toString("utf-8") : "";
+    const stdout = result.stdout ? result.stdout.toString("utf-8") : "";
+    log(`PowerShell exit ${result.status}: stderr=${stderr.slice(0, 500)} stdout=${stdout.slice(0, 200)}`);
+  }
+  if (result.error) {
+    log(`PowerShell spawn error: ${result.error.message}`);
+  }
   return result;
 }
 
 function takeScreenshot() {
   const tmpFile = path.join(__dirname, `screenshot-${Date.now()}.png`);
+  // PowerShell single-quoted strings are literal — backslashes don't need escaping.
+  // BUT single quotes inside the path need to be doubled. Use forward slashes
+  // which .NET also accepts on Windows to be extra safe.
+  const psPath = tmpFile.replace(/\\/g, "/");
   const ps = `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -156,13 +168,16 @@ $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-$bmp.Save('${tmpFile.replace(/\\/g, "\\\\")}', [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Save('${psPath}', [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose()
 $bmp.Dispose()
+Write-Output "screenshot saved: ${psPath}"
 `;
-  runPowerShell(ps);
+  const result = runPowerShell(ps);
   if (!fs.existsSync(tmpFile)) {
-    throw new Error("Screenshot failed");
+    const stderr = result.stderr ? result.stderr.toString("utf-8") : "";
+    const stdout = result.stdout ? result.stdout.toString("utf-8") : "";
+    throw new Error(`Screenshot failed (exit=${result.status}). stderr=${stderr.slice(0, 300)} stdout=${stdout.slice(0, 200)}`);
   }
   const buf = fs.readFileSync(tmpFile);
   try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
@@ -354,7 +369,7 @@ async function runAgentLoop(provider, jobId) {
   ];
 
   let iterations = 0;
-  const maxIterations = 100;
+  const maxIterations = parseInt(process.env.MAX_ITERATIONS || "300");
 
   while (iterations < maxIterations) {
     iterations++;
