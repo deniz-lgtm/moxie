@@ -3,58 +3,62 @@ import fs from "fs";
 import path from "path";
 import { parseBillPdf } from "@/lib/rubs-bill-parser";
 
-const BILLS_FOLDER = process.env.RUBS_BILLS_FOLDER || "";
+const DOWNLOADER_URL = process.env.RUBS_DOWNLOADER_URL || "";
+const DOWNLOADER_TOKEN = process.env.RUBS_DOWNLOADER_TOKEN || "";
+const LOCAL_BILLS_FOLDER = process.env.RUBS_BILLS_FOLDER || "";
 
 export const dynamic = "force-dynamic";
 
-// GET — Scan folder for PDF files
+// GET — List PDFs (from remote downloader tunnel, or local folder fallback)
 export async function GET() {
-  if (!BILLS_FOLDER) {
+  // Prefer the remote downloader service if configured
+  if (DOWNLOADER_URL && DOWNLOADER_TOKEN) {
+    try {
+      const res = await fetch(`${DOWNLOADER_URL.replace(/\/$/, "")}/files`, {
+        headers: { Authorization: `Bearer ${DOWNLOADER_TOKEN}` },
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      return NextResponse.json(data, { status: res.status });
+    } catch (error: any) {
+      return NextResponse.json(
+        { error: `Could not reach downloader service: ${error.message}` },
+        { status: 502 }
+      );
+    }
+  }
+
+  // Local filesystem fallback (for dev on the same machine as the bills folder)
+  if (!LOCAL_BILLS_FOLDER) {
     return NextResponse.json(
-      { error: "RUBS_BILLS_FOLDER environment variable not configured" },
+      {
+        error:
+          "Bills source not configured. Set RUBS_DOWNLOADER_URL + RUBS_DOWNLOADER_TOKEN (for Railway) or RUBS_BILLS_FOLDER (for local dev).",
+      },
       { status: 500 }
     );
   }
 
   try {
-    if (!fs.existsSync(BILLS_FOLDER)) {
-      return NextResponse.json(
-        { error: `Folder not found: ${BILLS_FOLDER}` },
-        { status: 404 }
-      );
+    if (!fs.existsSync(LOCAL_BILLS_FOLDER)) {
+      return NextResponse.json({ error: `Folder not found: ${LOCAL_BILLS_FOLDER}` }, { status: 404 });
     }
-
-    const entries = fs.readdirSync(BILLS_FOLDER);
+    const entries = fs.readdirSync(LOCAL_BILLS_FOLDER);
     const files = entries
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
       .map((name) => {
-        const stat = fs.statSync(path.join(BILLS_FOLDER, name));
-        return {
-          name,
-          size: stat.size,
-          modified: stat.mtime.toISOString(),
-        };
+        const stat = fs.statSync(path.join(LOCAL_BILLS_FOLDER, name));
+        return { name, size: stat.size, modified: stat.mtime.toISOString() };
       })
-      .sort((a, b) => b.modified.localeCompare(a.modified)); // newest first
-
-    return NextResponse.json({ folder: BILLS_FOLDER, files });
+      .sort((a, b) => b.modified.localeCompare(a.modified));
+    return NextResponse.json({ folder: LOCAL_BILLS_FOLDER, files });
   } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || "Failed to scan folder" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message || "Failed to scan folder" }, { status: 500 });
   }
 }
 
 // POST — Parse a specific PDF with AI
 export async function POST(request: Request) {
-  if (!BILLS_FOLDER) {
-    return NextResponse.json(
-      { error: "RUBS_BILLS_FOLDER environment variable not configured" },
-      { status: 500 }
-    );
-  }
-
   try {
     const body = await request.json();
     const { filename, knownProperties } = body as {
@@ -66,21 +70,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing filename" }, { status: 400 });
     }
 
-    // Prevent path traversal
     const safeName = path.basename(filename);
-    const filePath = path.join(BILLS_FOLDER, safeName);
+    let pdfBase64: string;
 
-    if (!fs.existsSync(filePath)) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
+    // Fetch the PDF bytes: either from the remote downloader or from local disk
+    if (DOWNLOADER_URL && DOWNLOADER_TOKEN) {
+      const res = await fetch(
+        `${DOWNLOADER_URL.replace(/\/$/, "")}/files/${encodeURIComponent(safeName)}`,
+        { headers: { Authorization: `Bearer ${DOWNLOADER_TOKEN}` } }
+      );
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        return NextResponse.json(
+          { error: `Could not fetch PDF from downloader: ${res.status} ${errText}` },
+          { status: 502 }
+        );
+      }
+      const arrayBuf = await res.arrayBuffer();
+      pdfBase64 = Buffer.from(arrayBuf).toString("base64");
+    } else if (LOCAL_BILLS_FOLDER) {
+      const filePath = path.join(LOCAL_BILLS_FOLDER, safeName);
+      if (!fs.existsSync(filePath)) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
+      pdfBase64 = fs.readFileSync(filePath).toString("base64");
+    } else {
+      return NextResponse.json(
+        { error: "Bills source not configured" },
+        { status: 500 }
+      );
     }
 
-    // Read PDF and convert to base64
-    const pdfBuffer = fs.readFileSync(filePath);
-    const pdfBase64 = pdfBuffer.toString("base64");
-
-    // Parse with AI
     const results = await parseBillPdf(pdfBase64, knownProperties || [], safeName);
-
     return NextResponse.json({ results });
   } catch (error: any) {
     return NextResponse.json(

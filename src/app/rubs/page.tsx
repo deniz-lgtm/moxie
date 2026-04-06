@@ -648,6 +648,7 @@ function ImportBillsFlow({
   const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [downloadStatus, setDownloadStatus] = useState("");
   const [scanLoading, setScanLoading] = useState(false);
 
   async function scanFolder() {
@@ -671,20 +672,56 @@ function ImportBillsFlow({
   async function triggerDownload() {
     setDownloading(true);
     setError("");
+    setDownloadStatus("Starting download job...");
     try {
-      const res = await fetch("/api/rubs/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: "all" }) });
+      const res = await fetch("/api/rubs/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "all" }),
+      });
       const data = await res.json();
       if (data.error) {
         setError(data.error);
-      } else {
-        // Wait a moment then rescan
-        setTimeout(() => { scanFolder(); setDownloading(false); }, 3000);
+        setDownloading(false);
+        setDownloadStatus("");
         return;
       }
+
+      // Poll status every 3 seconds until the job finishes
+      const pollStart = Date.now();
+      const pollInterval = setInterval(async () => {
+        // Timeout after 10 minutes
+        if (Date.now() - pollStart > 600000) {
+          clearInterval(pollInterval);
+          setDownloading(false);
+          setDownloadStatus("");
+          setError("Download timed out after 10 minutes");
+          return;
+        }
+        try {
+          const sRes = await fetch("/api/rubs/download");
+          const sData = await sRes.json();
+          if (sData.progress) setDownloadStatus(sData.progress);
+          if (sData.running === false) {
+            clearInterval(pollInterval);
+            setDownloading(false);
+            setDownloadStatus("");
+            if (sData.lastError) {
+              setError(`Download failed: ${sData.lastError}`);
+            } else {
+              // Auto-rescan to show the new files
+              scanFolder();
+            }
+          }
+        } catch {
+          // ignore transient errors, keep polling
+        }
+      }, 3000);
     } catch (err: any) {
       setError(err.message || "Failed to trigger download");
+      setDownloading(false);
+      setDownloadStatus("");
     }
-    setDownloading(false);
   }
 
   async function parseSelected() {
@@ -788,6 +825,13 @@ function ImportBillsFlow({
             {downloading ? "Downloading..." : "Download New Bills"}
           </button>
         </div>
+
+        {downloading && downloadStatus && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+            <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
+            <span>{downloadStatus}</span>
+          </div>
+        )}
 
         {error && (
           <p className="text-sm text-red-500">{error}</p>

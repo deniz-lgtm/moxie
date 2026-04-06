@@ -1,0 +1,5 @@
+node_modules/
+.env
+status.json
+*.log
+downloader.log
