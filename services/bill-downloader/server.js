@@ -60,6 +60,21 @@ function requireAuth(req, res, next) {
 
 // ─── Routes ────────────────────────────────────────────────────
 
+// Root — friendly landing page
+app.get("/", (_req, res) => {
+  res.json({
+    service: "moxie-bill-downloader",
+    status: "running",
+    endpoints: [
+      "GET /health (no auth)",
+      "GET /status (auth required)",
+      "POST /download-bills (auth required)",
+      "GET /files (auth required)",
+      "GET /files/:name (auth required)",
+    ],
+  });
+});
+
 // Health check (no auth)
 app.get("/health", (_req, res) => {
   res.json({
