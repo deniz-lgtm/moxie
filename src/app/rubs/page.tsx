@@ -679,9 +679,9 @@ function ImportBillsFlow({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: "all" }),
       });
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setError(data.error || `Download service returned ${res.status}. Check that RUBS_DOWNLOADER_URL and RUBS_DOWNLOADER_TOKEN are set in Railway and the Windows bill-downloader service is running.`);
         setDownloading(false);
         setDownloadStatus("");
         return;
@@ -689,18 +689,36 @@ function ImportBillsFlow({
 
       // Poll status every 3 seconds until the job finishes
       const pollStart = Date.now();
+      let consecutiveFailures = 0;
       const pollInterval = setInterval(async () => {
         // Timeout after 10 minutes
         if (Date.now() - pollStart > 600000) {
           clearInterval(pollInterval);
           setDownloading(false);
           setDownloadStatus("");
-          setError("Download timed out after 10 minutes");
+          setError("Download timed out after 10 minutes. Check the bill-downloader service logs on the Windows machine.");
           return;
         }
         try {
           const sRes = await fetch("/api/rubs/download");
-          const sData = await sRes.json();
+          const sData = await sRes.json().catch(() => ({}));
+
+          // Surface errors from the status endpoint
+          if (!sRes.ok || sData.error) {
+            consecutiveFailures++;
+            if (consecutiveFailures >= 3) {
+              clearInterval(pollInterval);
+              setDownloading(false);
+              setDownloadStatus("");
+              setError(
+                sData.error ||
+                `Status check failed (${sRes.status}). The downloader service may be unreachable.`
+              );
+            }
+            return;
+          }
+          consecutiveFailures = 0;
+
           if (sData.progress) setDownloadStatus(sData.progress);
           if (sData.running === false) {
             clearInterval(pollInterval);
@@ -713,8 +731,14 @@ function ImportBillsFlow({
               scanFolder();
             }
           }
-        } catch {
-          // ignore transient errors, keep polling
+        } catch (pollErr: any) {
+          consecutiveFailures++;
+          if (consecutiveFailures >= 3) {
+            clearInterval(pollInterval);
+            setDownloading(false);
+            setDownloadStatus("");
+            setError(`Lost connection to downloader service: ${pollErr.message || "network error"}`);
+          }
         }
       }, 3000);
     } catch (err: any) {
