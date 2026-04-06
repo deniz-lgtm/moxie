@@ -24,6 +24,8 @@ async function tunnelFetch(path: string, init?: RequestInit): Promise<{ ok: bool
       headers: {
         ...(init?.headers || {}),
         Authorization: `Bearer ${DOWNLOADER_TOKEN}`,
+        // Bypass ngrok free-tier browser warning interstitial
+        "ngrok-skip-browser-warning": "1",
       },
       cache: "no-store",
     });

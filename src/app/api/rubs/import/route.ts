@@ -15,14 +15,34 @@ export async function GET() {
   if (DOWNLOADER_URL && DOWNLOADER_TOKEN) {
     try {
       const res = await fetch(`${DOWNLOADER_URL.replace(/\/$/, "")}/files`, {
-        headers: { Authorization: `Bearer ${DOWNLOADER_TOKEN}` },
+        headers: {
+          Authorization: `Bearer ${DOWNLOADER_TOKEN}`,
+          "ngrok-skip-browser-warning": "1",
+        },
         cache: "no-store",
       });
-      const data = await res.json().catch(() => ({}));
-      return NextResponse.json(data, { status: res.status });
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        return NextResponse.json(
+          {
+            error: `Downloader service returned non-JSON (status ${res.status}). The tunnel URL may be invalid, offline, or pointing to the wrong server. First 200 chars: ${text.slice(0, 200)}`,
+          },
+          { status: 502 }
+        );
+      }
+      if (!res.ok) {
+        return NextResponse.json(
+          { error: data.error || `Downloader service returned ${res.status}` },
+          { status: res.status }
+        );
+      }
+      return NextResponse.json(data);
     } catch (error: any) {
       return NextResponse.json(
-        { error: `Could not reach downloader service: ${error.message}` },
+        { error: `Could not reach downloader service at ${DOWNLOADER_URL}: ${error.message}` },
         { status: 502 }
       );
     }
@@ -77,7 +97,12 @@ export async function POST(request: Request) {
     if (DOWNLOADER_URL && DOWNLOADER_TOKEN) {
       const res = await fetch(
         `${DOWNLOADER_URL.replace(/\/$/, "")}/files/${encodeURIComponent(safeName)}`,
-        { headers: { Authorization: `Bearer ${DOWNLOADER_TOKEN}` } }
+        {
+          headers: {
+            Authorization: `Bearer ${DOWNLOADER_TOKEN}`,
+            "ngrok-skip-browser-warning": "1",
+          },
+        }
       );
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
