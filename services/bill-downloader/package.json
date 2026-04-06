@@ -1,23 +1,21 @@
 {
   "name": "moxie-bill-downloader",
-  "version": "1.0.0",
-  "description": "Local service that uses Claude Computer Use to download utility bills from LADWP and SoCal Gas for the Moxie RUBS system",
+  "version": "2.0.0",
+  "description": "Local service that uses Playwright to download utility bills from LADWP and SoCal Gas for the Moxie RUBS system",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "install-windows-service": "node install-service.js",
-    "uninstall-windows-service": "node uninstall-service.js"
+    "record-ladwp": "playwright codegen --target=javascript --output=flows/ladwp.recorded.js https://myaccount.ladwp.com/",
+    "record-socalgas": "playwright codegen --target=javascript --output=flows/socalgas.recorded.js https://myaccount.socalgas.com/",
+    "install-browsers": "playwright install chromium"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.65.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.1"
-  },
-  "optionalDependencies": {
-    "node-windows": "^1.0.0-beta.8"
+    "express": "^4.21.1",
+    "playwright": "^1.49.1"
   },
   "engines": {
     "node": ">=20.0.0"

@@ -1,29 +1,21 @@
 # Moxie Bill Downloader
 
-A local Node.js service that runs on an always-on Windows computer. It uses the Anthropic Claude Computer Use API to log into LADWP and SoCal Gas web portals in Chrome, download the most recent utility bills, and save them to a Dropbox folder. The Moxie webapp (hosted on Railway) triggers this service via a public tunnel.
+A local Node.js service that runs on an always-on Windows computer. It uses **Playwright** (browser automation) to log into LADWP and SoCal Gas web portals, download the most recent utility bills, and save them to a Dropbox folder. The Moxie webapp (hosted on Railway) triggers this service via a public tunnel.
 
-## What This Does
-
-1. Listens for HTTP requests from the Moxie webapp
-2. When triggered, spawns a background job that calls Claude (via the Anthropic Messages API with the `computer-use-2025-01-24` beta) and tells it to download bills for all configured accounts
-3. Claude drives Chrome on the local machine: takes screenshots, moves the mouse, types passwords, clicks download buttons
-4. PDFs land in the configured bills folder (typically a Dropbox-synced folder)
-5. The Moxie webapp then fetches those PDFs through the same tunnel and runs AI extraction on them
+> **Why Playwright instead of Claude Computer Use?** Reliable, fast (~2 min for all 4 accounts vs 20+ min), free (no API costs), works headless (no visible desktop required), and doesn't take over your screen while running.
 
 ## Architecture
 
 ```
-[Moxie webapp on Railway] 
+[Moxie webapp on Railway]
          ↓ HTTPS + bearer token
 [ngrok/Cloudflare tunnel]
          ↓
-[bill-downloader Express server on Windows box :4401]
+[bill-downloader Express server on Windows :4401]
          ↓
-[Anthropic Messages API — Claude Sonnet 4.5 with Computer Use]
+[Playwright orchestrator]
          ↓
-[Windows PowerShell tool executor — screenshot / click / type]
-         ↓
-[Chrome on local desktop]
+[Headless Chromium] → [LADWP / SoCal Gas portals]
          ↓
 [PDFs saved to Dropbox folder]
 ```
@@ -31,148 +23,182 @@ A local Node.js service that runs on an always-on Windows computer. It uses the 
 ## One-time Setup (Windows)
 
 ### 1. Install Node.js
-Download and install Node.js 20 or later from https://nodejs.org/
+Install Node.js 20+ from https://nodejs.org/
 
-### 2. Clone the Moxie repo
+### 2. Clone the repo
 ```powershell
 cd C:\Users\deniz
 git clone <moxie-repo-url> moxie
 cd moxie\services\bill-downloader
 ```
 
-### 3. Install dependencies
+### 3. Install dependencies + Playwright browser
 ```powershell
 npm install
+npm run install-browsers
 ```
+The second command downloads Chromium (~150MB) which Playwright uses.
 
-### 4. Create your `.env` file
-Copy `.env.example` to `.env` and fill in all the values:
-
+### 4. Create your `.env`
 ```powershell
 copy .env.example .env
 notepad .env
 ```
-
-**Required fields:**
-- `RUBS_DOWNLOADER_TOKEN` — a long random string. Generate one with:
+Fill in:
+- `RUBS_DOWNLOADER_TOKEN` — generate a long random string:
   ```powershell
   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   ```
-- `ANTHROPIC_API_KEY` — from https://console.anthropic.com/ (must have Computer Use beta access)
-- `BILLS_FOLDER` — the Dropbox path where bills should be saved, e.g.
-  `C:\Users\deniz\Simpatico Systems Dropbox\Brad Management\MOXIE MANAGEMENT\AI\RUBs\Utility Bills`
-- `LADWP_USER_1` / `LADWP_PASSWORD_1` — your primary LADWP login
-- `LADWP_USER_2` / `LADWP_PASSWORD_2` — your Barrett LADWP login
-- `SOCALGAS_USER_1` / `SOCALGAS_PASSWORD_1` — your primary SoCal Gas login
-- `SOCALGAS_USER_2` / `SOCALGAS_PASSWORD_2` — your Dorr Holdings SoCal Gas login
+- `BILLS_FOLDER` — full path to your Dropbox bills folder
+- All 4 utility credentials (LADWP_USER_1/2 + LADWP_PASSWORD_1/2, SOCALGAS_USER_1/2 + SOCALGAS_PASSWORD_1/2)
+- `HEADLESS=true` (or `false` if you want to watch the browser run during testing)
 
-### 5. Install and start ngrok (or another tunnel)
-Download ngrok from https://ngrok.com/ and sign up for a free account. Install it and run:
+### 5. Record the LADWP flow (one-time, ~5 min)
+
+This is the key step that replaces hand-written automation. Playwright Codegen will open a real browser and watch you click — every click and field fill becomes code.
+
+```powershell
+npm run record-ladwp
+```
+
+A browser opens to `https://myaccount.ladwp.com/`. **Click through the entire flow ONE time:**
+1. Click the "Log In" button
+2. Type your username and password
+3. Click "Sign In"
+4. Navigate to the bill/billing history page
+5. Click "Download PDF" (or whatever the link is) on the most recent bill
+6. When the PDF download dialog appears, save it (anywhere — we'll change this in code)
+
+When you're done, **close the browser**. Playwright Codegen will save the recorded clicks to `flows/ladwp.recorded.js`.
+
+Then **copy the relevant lines from `flows/ladwp.recorded.js` into the `downloadBill()` function in `flows/ladwp.js`**, replacing the `// TODO` placeholders. The structure to follow:
+- Login section: copy the `await page.fill(...)` and `await page.click(...)` lines for entering credentials
+- Navigation section: copy the clicks that go from the dashboard to the bill history page
+- Download section: copy the click that triggers the PDF download
+
+The download saving is already handled by the orchestrator — your recorded `download.saveAs(...)` line should be removed and replaced with the existing pattern in `flows/ladwp.js`.
+
+### 6. Record the SoCal Gas flow (same process)
+
+```powershell
+npm run record-socalgas
+```
+
+Same routine: click through the login → bill download flow once, then copy the steps into `flows/socalgas.js`.
+
+### 7. Test the flows manually
+
+Set `HEADLESS=false` in `.env` so you can watch the browser, then:
+
+```powershell
+npm start
+```
+
+In another terminal, trigger a download for a single provider to verify:
+```powershell
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" -d "{\"provider\":\"ladwp\"}" http://localhost:4401/download-bills
+```
+
+Watch the browser do its thing. Check `downloader.log` and `status.json` for progress.
+
+Once both flows work reliably, set `HEADLESS=true` in `.env` and restart `npm start`.
+
+### 8. Start ngrok and configure Railway
 
 ```powershell
 ngrok http 4401
 ```
 
-You'll see output like:
-```
-Forwarding  https://abc123-def456.ngrok-free.app -> http://localhost:4401
-```
+Copy the `https://...ngrok-free.dev` URL. In your Railway project → Variables, set:
+- `RUBS_DOWNLOADER_URL` = the ngrok URL
+- `RUBS_DOWNLOADER_TOKEN` = the same token from your local `.env`
 
-Copy that `https://...ngrok-free.app` URL — you'll use it in Railway.
+### 9. Use it from the Moxie webapp
 
-**Tip:** For a stable URL that doesn't change on restart, use ngrok paid plan, Cloudflare Tunnel, or Tailscale Funnel.
+Open the Moxie webapp → `/rubs` → **Import Bills → Download New Bills**. Watch progress in the UI. When the job completes, click **Scan Folder** → select PDFs → **Parse with AI** → confirm import.
 
-### 6. Start the bill downloader service
-In a new PowerShell window:
-```powershell
-cd C:\Users\deniz\moxie\services\bill-downloader
-npm start
-```
+## How the recorded flows work
 
-You should see:
-```
-[bill-downloader] Listening on http://localhost:4401
-[bill-downloader] Bills folder: C:\...\Utility Bills
-```
+After recording, your `flows/ladwp.js` should look something like this (the exact selectors depend on what LADWP shows you):
 
-### 7. Configure Railway
-Go to your Railway project → Variables and add:
-- `RUBS_DOWNLOADER_URL` = the ngrok URL from step 5 (e.g. `https://abc123.ngrok-free.app`)
-- `RUBS_DOWNLOADER_TOKEN` = the same random string from step 4
+```js
+export async function downloadBill(page, options) {
+  const { user, password, downloadDir, accountLabel, onProgress } = options;
+  try {
+    onProgress(`[${accountLabel}] Navigating to LADWP...`);
+    await page.goto("https://myaccount.ladwp.com/");
 
-Railway will auto-redeploy.
+    // ── Login (from your recording) ──
+    await page.getByRole('textbox', { name: 'Username' }).fill(user);
+    await page.getByRole('textbox', { name: 'Password' }).fill(password);
+    await page.getByRole('button', { name: 'Log In' }).click();
 
-### 8. Test the connection
-Open your Moxie webapp in a browser, go to `/rubs`, click "Import Bills". You should see:
-- "Scan Folder" shows any PDFs already in the Dropbox folder
-- "Download New Bills" triggers Claude to start the download flow
+    // ── Navigate to bills (from your recording) ──
+    await page.getByRole('link', { name: 'Billing & Payment' }).click();
+    await page.getByRole('link', { name: 'Bill History' }).click();
 
-## Prep Chrome before running
+    // ── Trigger PDF download ──
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('link', { name: 'Download PDF' }).first().click();
+    const download = await downloadPromise;
 
-Before clicking "Download New Bills" for the first time, open Chrome on the Windows machine and make sure:
-- Chrome is already running and visible on screen
-- You're NOT logged into any utility portal (Claude will log in fresh)
-- No other windows are blocking Chrome
-
-Claude will take screenshots of your primary monitor and click on it, so keep the Chrome window maximized and don't move your mouse during a download job.
-
-## Running as a Windows Service (auto-start on boot)
-
-For true "always-on" operation, install as a Windows service so it starts automatically and runs in the background:
-
-```powershell
-npm run install-windows-service
+    const filename = `ladwp-${accountLabel}-${monthStamp()}.pdf`;
+    await download.saveAs(`${downloadDir}/${filename}`);
+    return { success: true, savedTo: `${downloadDir}/${filename}` };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
 ```
 
-This uses the `node-windows` package. After installation, the service appears in `services.msc` and will restart on reboot.
+The key insight: **the orchestrator handles credentials, browser launching, and saving PDFs**. Your flow just needs to drive the page from login to "click download."
 
-To uninstall:
-```powershell
-npm run uninstall-windows-service
-```
+## Re-recording when portals change
 
-**Note:** Running as a service means there's no visible desktop session for Computer Use to interact with. You'll need to either:
-- Keep the user logged in and use a regular process via Task Scheduler instead, OR
-- Use a separate tool like NSSM to run `npm start` as a service in the user's session
+LADWP and SoCal Gas update their websites occasionally. When a flow stops working:
+1. Run `npm run record-ladwp` (or socalgas) again
+2. Copy the new selectors into the corresponding `flows/*.js`
+3. Restart the service
 
-For most users, the simplest approach is to add a Task Scheduler entry that runs `npm start` on login:
-1. Open Task Scheduler
-2. Create Basic Task → Trigger: "When I log on"
-3. Action: Start a program → `C:\Program Files\nodejs\node.exe`
-4. Arguments: `C:\Users\deniz\moxie\services\bill-downloader\server.js`
-5. Start in: `C:\Users\deniz\moxie\services\bill-downloader`
+Total time per portal: ~5 minutes.
 
-And do the same for ngrok (or use `ngrok service install`).
+## Persistent browser profile
 
-## Testing endpoints manually
+The orchestrator uses `browser-profile/` as a persistent Chromium profile directory. This means cookies, saved logins, and "remember this device" tokens survive between runs. After the first successful login, future runs may skip the login step entirely (depending on the portal's session length).
 
-```powershell
-# Health check (no auth)
-curl http://localhost:4401/health
+If a flow gets stuck due to a stale cookie, just delete `browser-profile/` and the next run will start fresh.
 
-# List files (requires token)
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:4401/files
+## Endpoints (unchanged from v1)
 
-# Check status
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:4401/status
-
-# Trigger download
-curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" -d "{\"provider\":\"all\"}" http://localhost:4401/download-bills
-```
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/health` | none | Health check |
+| GET | `/` | none | Service info |
+| GET | `/status` | bearer | Current job status |
+| POST | `/download-bills` | bearer | Trigger download (body: `{ provider: "all"|"ladwp"|"socalgas" }`) |
+| GET | `/files` | bearer | List PDFs in BILLS_FOLDER |
+| GET | `/files/:name` | bearer | Stream a specific PDF |
 
 ## Logs
 
-- `downloader.log` in this folder — all agent actions and Claude's responses
-- `status.json` in this folder — current job status (read by the `/status` endpoint)
+- `downloader.log` — every action and progress message
+- `status.json` — current job state (read by `/status`)
 
 ## Troubleshooting
 
-**"Screenshot failed"** — PowerShell permissions issue. Make sure Node is not being blocked by antivirus or Windows Defender from invoking PowerShell.
+**"Account 1/4: ladwp-acct1" then immediate failure**
+The recorded selectors don't match what LADWP is showing. Re-record with `npm run record-ladwp` and update `flows/ladwp.js`.
 
-**Claude clicks the wrong spot** — The display dimensions in `.env` (`DISPLAY_WIDTH`, `DISPLAY_HEIGHT`) must match your actual primary monitor resolution. Check Windows Display Settings.
+**Login works but bill download fails**
+The portal probably changed the bill download link. Re-record just the bill download step and update the relevant section in your flow file.
 
-**2FA / CAPTCHA blocks the flow** — Claude will pause and report this. You'll need to disable 2FA on the utility account or pre-authorize the browser session.
+**Browser keeps asking for 2FA code**
+The persistent profile should remember "trusted device" tokens. If 2FA is mandatory every session, you'll need to handle the SMS/email code interactively — Playwright can't read your phone. Options:
+- Disable 2FA on the utility account if possible
+- Use a TOTP authenticator app and have the flow read codes from a shared file/env var
 
-**Railway returns "downloader not reachable"** — ngrok tunnel probably died. Restart ngrok and update `RUBS_DOWNLOADER_URL` in Railway.
+**"BILLS_FOLDER does not exist"**
+Make sure Dropbox is fully synced and the path in `.env` matches exactly (Windows backslashes are fine).
 
-**Service runs but Claude does nothing** — Make sure `ANTHROPIC_API_KEY` has computer use beta access. Check `downloader.log` for API errors.
+**`npm start` works but Railway can't reach it**
+ngrok URL changed. Update `RUBS_DOWNLOADER_URL` in Railway with the current ngrok URL. Consider Cloudflare Tunnel for a permanent URL.

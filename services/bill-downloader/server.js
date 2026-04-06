@@ -28,11 +28,6 @@ if (!BILLS_FOLDER) {
   console.error("[bill-downloader] FATAL: BILLS_FOLDER not set in .env");
   process.exit(1);
 }
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("[bill-downloader] FATAL: ANTHROPIC_API_KEY not set in .env");
-  process.exit(1);
-}
-
 // Ensure the bills folder exists
 if (!fs.existsSync(BILLS_FOLDER)) {
   console.warn(`[bill-downloader] Bills folder does not exist, creating: ${BILLS_FOLDER}`);

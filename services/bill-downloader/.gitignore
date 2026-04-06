@@ -3,3 +3,5 @@ node_modules/
 status.json
 *.log
 downloader.log
+browser-profile/
+flows/*.recorded.js
