@@ -14,7 +14,7 @@ import {
   saveMeterMapping,
   deleteMeterMapping,
 } from "@/lib/rubs-db";
-import { parseCsvText, transformRowsToMappings, type ImportResult } from "@/lib/rubs-csv-import";
+import { parseImportFile, transformRowsToMappings, type ImportResult } from "@/lib/rubs-csv-import";
 
 export default function RubsSettingsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -72,13 +72,12 @@ export default function RubsSettingsPage() {
     if (!file) return;
     setImportError("");
     try {
-      const text = await file.text();
-      const parsed = parseCsvText(text);
+      const parsed = await parseImportFile(file);
       const result = transformRowsToMappings(parsed);
       setImportFilename(file.name);
       setImportPreview(result);
     } catch (err: any) {
-      setImportError(err.message || "Failed to parse CSV file");
+      setImportError(err.message || "Failed to parse file");
     }
   }
 
@@ -131,7 +130,7 @@ export default function RubsSettingsPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+            accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,.xlsb,text/csv,text/tab-separated-values,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12"
             onChange={handleCsvSelected}
             className="hidden"
           />
@@ -139,7 +138,7 @@ export default function RubsSettingsPage() {
             onClick={() => fileInputRef.current?.click()}
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
-            Import CSV
+            Import Spreadsheet
           </button>
           <button
             onClick={() => { setShowForm(!showForm); setEditMapping(null); }}

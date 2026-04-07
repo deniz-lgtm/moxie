@@ -18,11 +18,80 @@
 // that the unit appears in. At billing time, the unit's total for that
 // utility type is the sum of its allocations from each meter.
 
+import * as XLSX from "xlsx";
 import type { MeterMapping, MeterType } from "./rubs-types";
 
 export interface CsvParseResult {
   headers: string[];
   rows: Record<string, string>[];
+}
+
+// ─── Excel (xlsx / xlsm / xls) Parser ──────────────────────────
+
+/**
+ * Parse an Excel workbook (binary ArrayBuffer) into the same shape as parseCsvText.
+ * Reads the first sheet that contains a `Property Name` (or similar) column,
+ * falling back to the first sheet in the workbook if none match.
+ */
+export function parseExcelBuffer(buffer: ArrayBuffer): CsvParseResult {
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: false, cellNF: false });
+
+  // Find the best sheet — prefer one with a recognizable header
+  let bestSheetName = workbook.SheetNames[0];
+  for (const name of workbook.SheetNames) {
+    const sheet = workbook.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, blankrows: false, defval: "" });
+    if (rows.length === 0) continue;
+    const headerRow = (rows[0] as any[]).map((v) => String(v).toLowerCase());
+    if (headerRow.some((h) => h.includes("property") || h.includes("unit id"))) {
+      bestSheetName = name;
+      break;
+    }
+  }
+
+  const sheet = workbook.Sheets[bestSheetName];
+  // header: 1 → array-of-arrays so we control header parsing
+  // raw: false → string conversion (avoids scientific notation on long numbers)
+  // defval: "" → empty cells become empty strings instead of undefined
+  const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, {
+    header: 1,
+    blankrows: false,
+    defval: "",
+    raw: false,
+  });
+
+  if (rawRows.length === 0) return { headers: [], rows: [] };
+
+  const headers = (rawRows[0] as any[]).map((v) => String(v ?? "").trim());
+  const rows: Record<string, string>[] = [];
+  for (let i = 1; i < rawRows.length; i++) {
+    const values = rawRows[i] as any[];
+    if (!values || values.length === 0) continue;
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => {
+      const cell = values[idx];
+      // Convert everything to string, normalize whitespace
+      row[h] = cell === null || cell === undefined ? "" : String(cell).trim();
+    });
+    rows.push(row);
+  }
+
+  return { headers, rows };
+}
+
+/**
+ * Detect the file type by extension and dispatch to the right parser.
+ * Returns a normalized CsvParseResult regardless of source format.
+ */
+export async function parseImportFile(file: File): Promise<CsvParseResult> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xlsm") || name.endsWith(".xls") || name.endsWith(".xlsb")) {
+    const buf = await file.arrayBuffer();
+    return parseExcelBuffer(buf);
+  }
+  // Default: treat as text (CSV / TSV / plain)
+  const text = await file.text();
+  return parseCsvText(text);
 }
 
 export interface ImportResult {
