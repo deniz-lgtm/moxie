@@ -34,6 +34,7 @@ export default function RubsSettingsPage() {
   const [filterMeterType, setFilterMeterType] = useState<MeterType | "">("");
   const [sortKey, setSortKey] = useState<"property" | "meterType" | "meteringMethod" | "splitMethod" | "units">("property");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
     try {
@@ -119,6 +120,36 @@ export default function RubsSettingsPage() {
     const updated = { ...existing, ...patch };
     saveMeterMapping(updated);
     setMappings((prev) => prev.map((m) => (m.id === id ? updated : m)));
+  }
+
+  function handleBulkUpdate(patch: Partial<MeterMapping>) {
+    if (selectedIds.size === 0) return;
+    const updates = mappings.map((m) => {
+      if (!selectedIds.has(m.id)) return m;
+      const updated = { ...m, ...patch };
+      saveMeterMapping(updated);
+      return updated;
+    });
+    setMappings(updates);
+  }
+
+  function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} mapping${selectedIds.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    for (const id of selectedIds) {
+      deleteMeterMapping(id);
+    }
+    setMappings((prev) => prev.filter((m) => !selectedIds.has(m.id)));
+    setSelectedIds(new Set());
+  }
+
+  function toggleRowSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function toggleSort(key: typeof sortKey) {
@@ -294,6 +325,63 @@ export default function RubsSettingsPage() {
         </div>
       )}
 
+      {/* Bulk Action Toolbar (only when something is selected) */}
+      {selectedIds.size > 0 && (
+        <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium">
+            {selectedIds.size} mapping{selectedIds.size !== 1 ? "s" : ""} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground">Set split:</label>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkUpdate({ splitMethod: e.target.value as SplitMethod });
+                  e.target.value = "";
+                }
+              }}
+              className="text-xs border border-border rounded px-2 py-1 bg-card"
+            >
+              <option value="">— choose —</option>
+              {(Object.entries(SPLIT_METHOD_LABELS) as [SplitMethod, string][]).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground">Set metering:</label>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkUpdate({ meteringMethod: e.target.value as MeteringMethod });
+                  e.target.value = "";
+                }
+              }}
+              className="text-xs border border-border rounded px-2 py-1 bg-card"
+            >
+              <option value="">— choose —</option>
+              {(Object.entries(METERING_METHOD_LABELS) as [MeteringMethod, string][]).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleBulkDelete}
+            className="px-3 py-1 text-xs border border-red-300 text-red-600 rounded hover:bg-red-50 transition-colors"
+          >
+            Delete {selectedIds.size}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-accent hover:underline ml-auto"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
+
       {/* Mappings Table */}
       {sortedMappings.length > 0 ? (
         <div className="bg-card rounded-xl border border-border overflow-hidden">
@@ -301,6 +389,29 @@ export default function RubsSettingsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted">
+                  <th className="px-3 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={sortedMappings.length > 0 && sortedMappings.every((m) => selectedIds.has(m.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          // Select all currently visible (filtered) rows
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            for (const m of sortedMappings) next.add(m.id);
+                            return next;
+                          });
+                        } else {
+                          // Deselect all currently visible rows
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            for (const m of sortedMappings) next.delete(m.id);
+                            return next;
+                          });
+                        }
+                      }}
+                    />
+                  </th>
                   <SortHeader label="Property" sortKey="property" current={sortKey} dir={sortDir} onClick={toggleSort} />
                   <SortHeader label="Utility" sortKey="meterType" current={sortKey} dir={sortDir} onClick={toggleSort} />
                   <SortHeader label="Metering" sortKey="meteringMethod" current={sortKey} dir={sortDir} onClick={toggleSort} />
@@ -312,7 +423,17 @@ export default function RubsSettingsPage() {
               </thead>
               <tbody>
                 {sortedMappings.map((m) => (
-                  <tr key={m.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                  <tr
+                    key={m.id}
+                    className={`border-b border-border last:border-0 hover:bg-muted/30 ${selectedIds.has(m.id) ? "bg-accent/5" : ""}`}
+                  >
+                    <td className="px-3 py-2 w-8">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(m.id)}
+                        onChange={() => toggleRowSelected(m.id)}
+                      />
+                    </td>
                     <td className="px-4 py-2 font-medium max-w-xs truncate" title={m.propertyName}>
                       {m.propertyName}
                     </td>

@@ -35,12 +35,22 @@ export function calculateAllocations(input: CalcInput): RubsAllocation[] {
       break;
     }
     case "occupancy": {
-      // Each unit counts as 1 occupant by default (no per-unit occupancy data in AppFolio)
-      const totalOccupants = assignedUnits.length;
-      rawShares = assignedUnits.map((u) => ({
-        unit: u,
-        share: 1 / totalOccupants,
-      }));
+      // Count real tenants per unit: primary tenant + comma-separated additionalTenants.
+      // Vacant units (no tenant) get 0 share.
+      const occupants = assignedUnits.map((u) => ({ unit: u, count: countOccupants(u) }));
+      const totalOccupants = occupants.reduce((sum, o) => sum + o.count, 0);
+      if (totalOccupants > 0) {
+        rawShares = occupants.map((o) => ({
+          unit: o.unit,
+          share: o.count / totalOccupants,
+        }));
+      } else {
+        // All units vacant — fall back to equal split so the bill still gets allocated
+        rawShares = assignedUnits.map((u) => ({
+          unit: u,
+          share: 1 / assignedUnits.length,
+        }));
+      }
       break;
     }
     case "custom": {
@@ -100,8 +110,24 @@ function applyPennyRounding(
     unitName: r.unit.unitName || r.unit.number,
     tenant: r.unit.tenant || "Vacant",
     sqft: r.unit.sqft || 0,
-    occupants: 1,
+    occupants: countOccupants(r.unit),
     share: Math.round(r.share * 10000) / 10000,
     amount: finalCents[i] / 100,
   }));
+}
+
+// ─── Tenant Counting ───────────────────────────────────────────
+
+/**
+ * Count the actual number of tenants on a unit:
+ * primary tenant + comma-separated additionalTenants.
+ * Returns 0 for vacant units.
+ */
+function countOccupants(unit: Unit): number {
+  const primary = unit.tenant && unit.tenant.toLowerCase() !== "vacant" ? 1 : 0;
+  if (!primary) return 0;
+  const additional = unit.additionalTenants
+    ? unit.additionalTenants.split(",").map((s) => s.trim()).filter(Boolean).length
+    : 0;
+  return primary + additional;
 }

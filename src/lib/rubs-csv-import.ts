@@ -257,8 +257,10 @@ export function transformRowsToMappings(parseResult: CsvParseResult): ImportResu
   const mappings: MeterMapping[] = Array.from(groups.values()).map((g) => {
     const unitIds = Array.from(g.unitIds);
     const meteringMethod = unitIds.length > 1 ? "master" : "sub_metered";
-    // Default split: sqft for water/gas, equal for electric (typically sub-metered or even split)
-    const splitMethod = g.meterType === "electric" ? "equal" : "sqft";
+    // Default split: occupancy (weighted by actual tenant count per unit).
+    // User can bulk-update later via the settings page if a different
+    // method is preferred for specific meters.
+    const splitMethod = "occupancy";
     return {
       id: `mapping-csv-${slug(g.propertyName)}-${g.meterType}-${slug(g.meterId)}`,
       propertyName: g.propertyName,
