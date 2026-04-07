@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { Unit } from "@/lib/types";
 import type { MeterMapping, MeterType, MeteringMethod, SplitMethod } from "@/lib/rubs-types";
@@ -14,6 +14,7 @@ import {
   saveMeterMapping,
   deleteMeterMapping,
 } from "@/lib/rubs-db";
+import { parseCsvText, transformRowsToMappings, type ImportResult } from "@/lib/rubs-csv-import";
 
 export default function RubsSettingsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
@@ -21,6 +22,11 @@ export default function RubsSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editMapping, setEditMapping] = useState<MeterMapping | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportResult | null>(null);
+  const [importFilename, setImportFilename] = useState("");
+  const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
+  const [importError, setImportError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -59,6 +65,46 @@ export default function RubsSettingsPage() {
     setMappings((prev) => prev.filter((m) => m.id !== id));
   }
 
+  async function handleCsvSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset the input so the same file can be selected again later
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!file) return;
+    setImportError("");
+    try {
+      const text = await file.text();
+      const parsed = parseCsvText(text);
+      const result = transformRowsToMappings(parsed);
+      setImportFilename(file.name);
+      setImportPreview(result);
+    } catch (err: any) {
+      setImportError(err.message || "Failed to parse CSV file");
+    }
+  }
+
+  function handleConfirmImport() {
+    if (!importPreview) return;
+    if (importMode === "replace") {
+      // Delete all existing mappings first
+      for (const m of mappings) {
+        deleteMeterMapping(m.id);
+      }
+    }
+    for (const m of importPreview.mappings) {
+      saveMeterMapping(m);
+    }
+    setMappings(getMeterMappings());
+    setImportPreview(null);
+    setImportFilename("");
+    setImportMode("merge");
+  }
+
+  function handleCancelImport() {
+    setImportPreview(null);
+    setImportFilename("");
+    setImportError("");
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -81,13 +127,48 @@ export default function RubsSettingsPage() {
             Configure which meters serve which units at each property
           </p>
         </div>
-        <button
-          onClick={() => { setShowForm(!showForm); setEditMapping(null); }}
-          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
-        >
-          {showForm ? "Cancel" : "+ Add Mapping"}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+            onChange={handleCsvSelected}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            Import CSV
+          </button>
+          <button
+            onClick={() => { setShowForm(!showForm); setEditMapping(null); }}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+          >
+            {showForm ? "Cancel" : "+ Add Mapping"}
+          </button>
+        </div>
       </div>
+
+      {/* CSV Import Error */}
+      {importError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+          {importError}
+        </div>
+      )}
+
+      {/* CSV Import Preview */}
+      {importPreview && (
+        <CsvImportPreview
+          preview={importPreview}
+          filename={importFilename}
+          existingCount={mappings.length}
+          mode={importMode}
+          onModeChange={setImportMode}
+          onConfirm={handleConfirmImport}
+          onCancel={handleCancelImport}
+        />
+      )}
 
       {/* Add/Edit Form */}
       {(showForm || editMapping) && (
@@ -351,6 +432,171 @@ function MappingForm({
         >
           Cancel
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── CSV Import Preview ─────────────────────────────────────
+
+function CsvImportPreview({
+  preview,
+  filename,
+  existingCount,
+  mode,
+  onModeChange,
+  onConfirm,
+  onCancel,
+}: {
+  preview: ImportResult;
+  filename: string;
+  existingCount: number;
+  mode: "merge" | "replace";
+  onModeChange: (m: "merge" | "replace") => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  // Stats
+  const byType: Record<string, number> = {};
+  for (const m of preview.mappings) {
+    byType[m.meterType] = (byType[m.meterType] || 0) + 1;
+  }
+  const propertyCount = new Set(preview.mappings.map((m) => m.propertyName)).size;
+  const unitCount = new Set(preview.mappings.flatMap((m) => m.unitIds)).size;
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border">
+        <h2 className="font-semibold">Import Preview</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          {filename} &middot; {preview.rowsProcessed} row{preview.rowsProcessed !== 1 ? "s" : ""} processed
+          {preview.rowsSkipped > 0 ? `, ${preview.rowsSkipped} skipped` : ""}
+        </p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-5 border-b border-border">
+        <div>
+          <p className="text-xs text-muted-foreground">Mappings</p>
+          <p className="text-2xl font-bold mt-1">{preview.mappings.length}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Properties</p>
+          <p className="text-2xl font-bold mt-1">{propertyCount}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Unique Units</p>
+          <p className="text-2xl font-bold mt-1">{unitCount}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">By Utility</p>
+          <p className="text-sm mt-1">
+            {Object.entries(byType).map(([type, count]) => (
+              <span key={type} className="inline-block mr-2">
+                {type}: <strong>{count}</strong>
+              </span>
+            ))}
+          </p>
+        </div>
+      </div>
+
+      {/* Warnings */}
+      {preview.warnings.length > 0 && (
+        <div className="p-4 bg-amber-50 border-b border-border">
+          <p className="text-xs font-semibold text-amber-900 mb-1">Warnings</p>
+          <ul className="text-xs text-amber-800 list-disc list-inside space-y-0.5">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Sample mappings */}
+      {preview.mappings.length > 0 ? (
+        <div className="overflow-x-auto max-h-96">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0">
+              <tr className="border-b border-border bg-muted">
+                <th className="text-left px-4 py-3 font-medium">Property</th>
+                <th className="text-left px-4 py-3 font-medium">Utility</th>
+                <th className="text-left px-4 py-3 font-medium">Account #</th>
+                <th className="text-left px-4 py-3 font-medium">Method</th>
+                <th className="text-right px-4 py-3 font-medium">Units</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.mappings.map((m) => (
+                <tr key={m.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2 font-medium">{m.propertyName}</td>
+                  <td className="px-4 py-2 capitalize text-muted-foreground">{m.meterType}</td>
+                  <td className="px-4 py-2 text-xs font-mono text-muted-foreground">{m.meterId}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">
+                    {METERING_METHOD_LABELS[m.meteringMethod]}
+                  </td>
+                  <td className="px-4 py-2 text-right">{m.unitIds.length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-5 text-sm text-muted-foreground">
+          No mappings could be extracted from this file. Check that the column headers match
+          the expected format (Unit ID - RR, Property Name, LADWP Electric Account #, etc.).
+        </div>
+      )}
+
+      {/* Mode + Actions */}
+      <div className="p-5 border-t border-border space-y-4">
+        <div>
+          <p className="text-xs text-muted-foreground mb-2">Import mode</p>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="import-mode"
+                checked={mode === "merge"}
+                onChange={() => onModeChange("merge")}
+              />
+              <span>
+                <strong>Merge</strong> with existing ({existingCount} current)
+                <span className="text-xs text-muted-foreground ml-1">
+                  — overwrites mappings with the same ID, keeps the rest
+                </span>
+              </span>
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="import-mode"
+                checked={mode === "replace"}
+                onChange={() => onModeChange("replace")}
+              />
+              <span>
+                <strong>Replace all</strong>
+                <span className="text-xs text-muted-foreground ml-1">
+                  — deletes all existing mappings first
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onConfirm}
+            disabled={preview.mappings.length === 0}
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+          >
+            Import {preview.mappings.length} Mapping{preview.mappings.length !== 1 ? "s" : ""}
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
