@@ -647,13 +647,13 @@ function ImportBillsFlow({
   const [parsedBills, setParsedBills] = useState<ParsedBill[]>([]);
   const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState("");
-  const [downloading, setDownloading] = useState(false);
-  const [downloadStatus, setDownloadStatus] = useState("");
+  const [showCoworkInstructions, setShowCoworkInstructions] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
 
   async function scanFolder() {
     setScanLoading(true);
     setError("");
+    setShowCoworkInstructions(false);
     try {
       const res = await fetch("/api/rubs/import");
       const data = await res.json();
@@ -666,85 +666,6 @@ function ImportBillsFlow({
       setError(err.message || "Failed to scan folder");
     } finally {
       setScanLoading(false);
-    }
-  }
-
-  async function triggerDownload() {
-    setDownloading(true);
-    setError("");
-    setDownloadStatus("Starting download job...");
-    try {
-      const res = await fetch("/api/rubs/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "all" }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) {
-        setError(data.error || `Download service returned ${res.status}. Check that RUBS_DOWNLOADER_URL and RUBS_DOWNLOADER_TOKEN are set in Railway and the Windows bill-downloader service is running.`);
-        setDownloading(false);
-        setDownloadStatus("");
-        return;
-      }
-
-      // Poll status every 3 seconds until the job finishes
-      const pollStart = Date.now();
-      let consecutiveFailures = 0;
-      const pollInterval = setInterval(async () => {
-        // Timeout after 10 minutes
-        if (Date.now() - pollStart > 600000) {
-          clearInterval(pollInterval);
-          setDownloading(false);
-          setDownloadStatus("");
-          setError("Download timed out after 10 minutes. Check the bill-downloader service logs on the Windows machine.");
-          return;
-        }
-        try {
-          const sRes = await fetch("/api/rubs/download");
-          const sData = await sRes.json().catch(() => ({}));
-
-          // Surface errors from the status endpoint
-          if (!sRes.ok || sData.error) {
-            consecutiveFailures++;
-            if (consecutiveFailures >= 3) {
-              clearInterval(pollInterval);
-              setDownloading(false);
-              setDownloadStatus("");
-              setError(
-                sData.error ||
-                `Status check failed (${sRes.status}). The downloader service may be unreachable.`
-              );
-            }
-            return;
-          }
-          consecutiveFailures = 0;
-
-          if (sData.progress) setDownloadStatus(sData.progress);
-          if (sData.running === false) {
-            clearInterval(pollInterval);
-            setDownloading(false);
-            setDownloadStatus("");
-            if (sData.lastError) {
-              setError(`Download failed: ${sData.lastError}`);
-            } else {
-              // Auto-rescan to show the new files
-              scanFolder();
-            }
-          }
-        } catch (pollErr: any) {
-          consecutiveFailures++;
-          if (consecutiveFailures >= 3) {
-            clearInterval(pollInterval);
-            setDownloading(false);
-            setDownloadStatus("");
-            setError(`Lost connection to downloader service: ${pollErr.message || "network error"}`);
-          }
-        }
-      }, 3000);
-    } catch (err: any) {
-      setError(err.message || "Failed to trigger download");
-      setDownloading(false);
-      setDownloadStatus("");
     }
   }
 
@@ -839,21 +760,51 @@ function ImportBillsFlow({
             disabled={scanLoading}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
           >
-            {scanLoading ? "Scanning..." : "Scan Folder"}
+            {scanLoading ? "Scanning..." : "Scan Folder for New Bills"}
           </button>
           <button
-            onClick={triggerDownload}
-            disabled={downloading}
-            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+            onClick={() => setShowCoworkInstructions(!showCoworkInstructions)}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
-            {downloading ? "Downloading..." : "Download New Bills"}
+            Need to download new bills?
           </button>
         </div>
 
-        {downloading && downloadStatus && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-            <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
-            <span>{downloadStatus}</span>
+        {showCoworkInstructions && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+            <h3 className="font-semibold text-sm text-blue-900">Download bills with Cowork</h3>
+            <ol className="text-sm text-blue-900 space-y-2 list-decimal list-inside">
+              <li>
+                Open <strong>Cowork</strong> on the always-on Windows computer.
+              </li>
+              <li>
+                Mount this folder when starting the session:
+                <code className="block mt-1 px-2 py-1 bg-blue-100 rounded text-xs font-mono break-all">
+                  C:\Users\deniz\Simpatico Systems Dropbox\Brad Management\MOXIE MANAGEMENT\AI\RUBs\Utility Bills
+                </code>
+              </li>
+              <li>
+                Tell Cowork: <em>&quot;Download this month&apos;s LADWP and SoCal Gas bills for all
+                accounts and save them to the mounted folder.&quot;</em>
+              </li>
+              <li>
+                Wait for Cowork to finish (usually a few minutes). Bills will sync to Dropbox
+                automatically.
+              </li>
+              <li>
+                Click <strong>I&apos;ve Downloaded the Bills</strong> below to scan the folder and
+                continue with AI parsing.
+              </li>
+            </ol>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={scanFolder}
+                disabled={scanLoading}
+                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+              >
+                {scanLoading ? "Scanning..." : "I've Downloaded the Bills — Scan Now"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -902,9 +853,10 @@ function ImportBillsFlow({
           </>
         )}
 
-        {files.length === 0 && !scanLoading && !error && (
+        {files.length === 0 && !scanLoading && !error && !showCoworkInstructions && (
           <p className="text-sm text-muted-foreground">
-            Click &quot;Scan Folder&quot; to find PDF bills, or &quot;Download New Bills&quot; to fetch from utility portals.
+            Click &quot;Scan Folder for New Bills&quot; if Cowork has already downloaded bills, or
+            click &quot;Need to download new bills?&quot; for instructions.
           </p>
         )}
       </div>

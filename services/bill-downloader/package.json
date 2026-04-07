@@ -1,21 +1,17 @@
 {
   "name": "moxie-bill-downloader",
-  "version": "2.0.0",
-  "description": "Local service that uses Playwright to download utility bills from LADWP and SoCal Gas for the Moxie RUBS system",
+  "version": "3.0.0",
+  "description": "Local file-server that exposes the Dropbox utility bills folder to the Moxie webapp via a public tunnel",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
-    "record-ladwp": "playwright codegen --target=javascript --output=flows/ladwp.recorded.js https://myaccount.ladwp.com/",
-    "record-socalgas": "playwright codegen --target=javascript --output=flows/socalgas.recorded.js https://myaccount.socalgas.com/",
-    "install-browsers": "playwright install chromium"
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.1",
-    "playwright": "^1.49.1"
+    "express": "^4.21.1"
   },
   "engines": {
     "node": ">=20.0.0"
