@@ -28,6 +28,13 @@ export default function RubsSettingsPage() {
   const [importError, setImportError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Table filter / sort state
+  const [search, setSearch] = useState("");
+  const [filterProperty, setFilterProperty] = useState("");
+  const [filterMeterType, setFilterMeterType] = useState<MeterType | "">("");
+  const [sortKey, setSortKey] = useState<"property" | "meterType" | "meteringMethod" | "splitMethod" | "units">("property");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   const loadData = useCallback(async () => {
     try {
       const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
@@ -45,19 +52,82 @@ export default function RubsSettingsPage() {
   }, [loadData]);
 
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))].sort();
+  const mappingPropertyNames = [...new Set(mappings.map((m) => m.propertyName))].sort();
+  const allPropertyNames = [...new Set([...propertyNames, ...mappingPropertyNames])].sort();
 
-  // Group mappings by property
+  // Group mappings by property (still used for the unconfigured-properties section)
   const mappingsByProperty: Record<string, MeterMapping[]> = {};
   for (const m of mappings) {
     if (!mappingsByProperty[m.propertyName]) mappingsByProperty[m.propertyName] = [];
     mappingsByProperty[m.propertyName].push(m);
   }
 
+  // Filter + sort mappings for the table view
+  const searchLower = search.toLowerCase();
+  const filteredMappings = mappings.filter((m) => {
+    if (filterProperty && m.propertyName !== filterProperty) return false;
+    if (filterMeterType && m.meterType !== filterMeterType) return false;
+    if (search) {
+      const haystack = `${m.propertyName} ${m.meterType} ${m.meterId}`.toLowerCase();
+      if (!haystack.includes(searchLower)) return false;
+    }
+    return true;
+  });
+
+  const sortedMappings = [...filteredMappings].sort((a, b) => {
+    let av: string | number = "";
+    let bv: string | number = "";
+    switch (sortKey) {
+      case "property":
+        av = a.propertyName;
+        bv = b.propertyName;
+        break;
+      case "meterType":
+        av = a.meterType;
+        bv = b.meterType;
+        break;
+      case "meteringMethod":
+        av = a.meteringMethod;
+        bv = b.meteringMethod;
+        break;
+      case "splitMethod":
+        av = a.splitMethod;
+        bv = b.splitMethod;
+        break;
+      case "units":
+        av = a.unitIds.length;
+        bv = b.unitIds.length;
+        break;
+    }
+    if (av < bv) return sortDir === "asc" ? -1 : 1;
+    if (av > bv) return sortDir === "asc" ? 1 : -1;
+    // Tiebreaker by property name then meter type
+    if (a.propertyName !== b.propertyName) return a.propertyName.localeCompare(b.propertyName);
+    return a.meterType.localeCompare(b.meterType);
+  });
+
   function handleSave(mapping: MeterMapping) {
     saveMeterMapping(mapping);
     setMappings(getMeterMappings());
     setShowForm(false);
     setEditMapping(null);
+  }
+
+  function handleInlineUpdate(id: string, patch: Partial<MeterMapping>) {
+    const existing = mappings.find((m) => m.id === id);
+    if (!existing) return;
+    const updated = { ...existing, ...patch };
+    saveMeterMapping(updated);
+    setMappings((prev) => prev.map((m) => (m.id === id ? updated : m)));
+  }
+
+  function toggleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   }
 
   function handleDelete(id: string) {
@@ -180,72 +250,132 @@ export default function RubsSettingsPage() {
         />
       )}
 
-      {/* Property Cards */}
-      {Object.keys(mappingsByProperty).length > 0 ? (
-        <div className="space-y-6">
-          {Object.entries(mappingsByProperty)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([propName, propMappings]) => {
-              const propUnits = units.filter((u) => u.propertyName === propName);
-              const mappedUnitIds = new Set(propMappings.flatMap((m) => m.unitIds));
-              const unmappedUnits = propUnits.filter((u) => !mappedUnitIds.has(u.id));
+      {/* Filter Bar */}
+      {mappings.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search property, utility, meter #..."
+            className="text-sm border border-border rounded-lg px-3 py-2 bg-card flex-1 min-w-[200px]"
+          />
+          <select
+            value={filterProperty}
+            onChange={(e) => setFilterProperty(e.target.value)}
+            className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          >
+            <option value="">All Properties</option>
+            {mappingPropertyNames.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          <select
+            value={filterMeterType}
+            onChange={(e) => setFilterMeterType(e.target.value as MeterType | "")}
+            className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          >
+            <option value="">All Utilities</option>
+            {(Object.entries(METER_TYPE_LABELS) as [MeterType, string][]).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          {(search || filterProperty || filterMeterType) && (
+            <button
+              onClick={() => { setSearch(""); setFilterProperty(""); setFilterMeterType(""); }}
+              className="text-xs text-accent hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            {sortedMappings.length} of {mappings.length} mapping{mappings.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+      )}
 
-              return (
-                <div key={propName} className="bg-card rounded-xl border border-border overflow-hidden">
-                  <div className="p-5 border-b border-border flex items-center justify-between">
-                    <div>
-                      <h2 className="font-semibold">{propName}</h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {propUnits.length} units &middot; {propMappings.length} meter{propMappings.length !== 1 ? "s" : ""}
-                      </p>
-                    </div>
-                    {unmappedUnits.length > 0 && (
-                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
-                        {unmappedUnits.length} unmapped unit{unmappedUnits.length !== 1 ? "s" : ""}
+      {/* Mappings Table */}
+      {sortedMappings.length > 0 ? (
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted">
+                  <SortHeader label="Property" sortKey="property" current={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader label="Utility" sortKey="meterType" current={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader label="Metering" sortKey="meteringMethod" current={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <SortHeader label="Split Method" sortKey="splitMethod" current={sortKey} dir={sortDir} onClick={toggleSort} />
+                  <th className="text-left px-4 py-3 font-medium">Meter #</th>
+                  <SortHeader label="Units" sortKey="units" current={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
+                  <th className="text-right px-4 py-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedMappings.map((m) => (
+                  <tr key={m.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-4 py-2 font-medium max-w-xs truncate" title={m.propertyName}>
+                      {m.propertyName}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="text-base leading-none">
+                          {m.meterType === "water" ? "💧" : m.meterType === "gas" ? "🔥" : m.meterType === "electric" ? "⚡" : "🗑️"}
+                        </span>
+                        <span className="capitalize">{m.meterType}</span>
                       </span>
-                    )}
-                  </div>
-                  <div className="divide-y divide-border">
-                    {propMappings.map((m) => (
-                      <div key={m.id} className="p-4 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center text-lg">
-                            {m.meterType === "water" ? "💧" : m.meterType === "gas" ? "🔥" : m.meterType === "electric" ? "⚡" : "🗑️"}
-                          </div>
-                          <div>
-                            <p className="font-medium">{METER_TYPE_LABELS[m.meterType]}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {METERING_METHOD_LABELS[m.meteringMethod]} &middot;{" "}
-                              {SPLIT_METHOD_LABELS[m.splitMethod]} &middot;{" "}
-                              {m.unitIds.length} unit{m.unitIds.length !== 1 ? "s" : ""} &middot;{" "}
-                              Meter #{m.meterId}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => { setEditMapping(m); setShowForm(false); }}
-                            className="text-xs text-accent hover:underline"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(m.id)}
-                            className="text-xs text-red-500 hover:underline"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+                    </td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={m.meteringMethod}
+                        onChange={(e) => handleInlineUpdate(m.id, { meteringMethod: e.target.value as MeteringMethod })}
+                        className="text-xs border border-border rounded px-2 py-1 bg-card"
+                      >
+                        {(Object.entries(METERING_METHOD_LABELS) as [MeteringMethod, string][]).map(([k, v]) => (
+                          <option key={k} value={k}>{v}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2">
+                      <select
+                        value={m.splitMethod}
+                        onChange={(e) => handleInlineUpdate(m.id, { splitMethod: e.target.value as SplitMethod })}
+                        className="text-xs border border-border rounded px-2 py-1 bg-card"
+                      >
+                        {(Object.entries(SPLIT_METHOD_LABELS) as [SplitMethod, string][]).map(([k, v]) => (
+                          <option key={k} value={k}>{v}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono text-muted-foreground">{m.meterId}</td>
+                    <td className="px-4 py-2 text-right">{m.unitIds.length}</td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => { setEditMapping(m); setShowForm(false); }}
+                        className="text-xs text-accent hover:underline mr-3"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(m.id)}
+                        className="text-xs text-red-500 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : mappings.length > 0 ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">
+          No mappings match the current filters.
         </div>
       ) : (
         <div className="text-center py-12 text-muted-foreground">
-          No meter mappings configured. Click &quot;+ Add Mapping&quot; to get started.
+          No meter mappings configured. Click &quot;Import Spreadsheet&quot; to bulk-load,
+          or &quot;+ Add Mapping&quot; to add one manually.
         </div>
       )}
 
@@ -598,5 +728,34 @@ function CsvImportPreview({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Sortable column header ─────────────────────────────────
+
+function SortHeader<K extends string>({
+  label,
+  sortKey,
+  current,
+  dir,
+  onClick,
+  align = "left",
+}: {
+  label: string;
+  sortKey: K;
+  current: K;
+  dir: "asc" | "desc";
+  onClick: (k: K) => void;
+  align?: "left" | "right";
+}) {
+  const active = current === sortKey;
+  const arrow = active ? (dir === "asc" ? "▲" : "▼") : "";
+  return (
+    <th
+      onClick={() => onClick(sortKey)}
+      className={`px-4 py-3 font-medium cursor-pointer select-none hover:bg-muted/80 ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      {label} <span className="text-xs text-muted-foreground">{arrow}</span>
+    </th>
   );
 }
