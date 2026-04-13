@@ -5,10 +5,11 @@
 // All RUBS CRUD goes through here.
 
 import { loadFromStorage, saveToStorage } from "./storage";
-import type { MeterMapping, RubsBill } from "./rubs-types";
+import type { MeterMapping, RubsBill, OccupancyData } from "./rubs-types";
 
 const MAPPINGS_KEY = "rubs_mappings";
 const BILLS_KEY = "rubs_bills";
+const OCCUPANCY_KEY = "rubs_occupancy";
 
 // ─── Meter Mappings ────────────────────────────────────────────
 
@@ -75,6 +76,20 @@ export function saveBill(bill: RubsBill): void {
 export function deleteBill(id: string): void {
   const all = getBills().filter((b) => b.id !== id);
   saveToStorage(BILLS_KEY, all);
+}
+
+// ─── Occupancy Data (AppFolio Template) ────────────────────────
+
+export function getOccupancyData(): OccupancyData | null {
+  return loadFromStorage<OccupancyData | null>(OCCUPANCY_KEY, null);
+}
+
+export function saveOccupancyData(data: OccupancyData): void {
+  saveToStorage(OCCUPANCY_KEY, data);
+}
+
+export function clearOccupancyData(): void {
+  saveToStorage(OCCUPANCY_KEY, null);
 }
 
 // ─── Seed helpers ──────────────────────────────────────────────

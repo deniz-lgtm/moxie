@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { Unit } from "@/lib/types";
 import type {
@@ -11,6 +11,8 @@ import type {
   BillStatus,
   ParsedBill,
   ImportFileInfo,
+  OccupancyData,
+  ReconciliationIssue,
 } from "@/lib/rubs-types";
 import { METER_TYPE_LABELS, SPLIT_METHOD_LABELS } from "@/lib/rubs-types";
 import {
@@ -19,9 +21,17 @@ import {
   getBills,
   saveBill as saveBillToStorage,
   deleteBill as deleteBillFromStorage,
+  getOccupancyData,
+  saveOccupancyData,
 } from "@/lib/rubs-db";
 import { seedRubsData, isSeeded as checkIsSeeded } from "@/lib/rubs-seed";
 import { calculateAllocations } from "@/lib/rubs-calc";
+import {
+  parseAppFolioTemplate,
+  reconcile,
+  generateAppFolioExport,
+  getExportTotal,
+} from "@/lib/rubs-appfolio-export";
 
 // ─── Main Page ─────────────────────────────────────────────────
 
@@ -36,6 +46,8 @@ export default function RubsPage() {
   const [seeded, setSeeded] = useState(true);
   const [filterMonth, setFilterMonth] = useState("");
   const [filterProperty, setFilterProperty] = useState("");
+  const [occupancy, setOccupancy] = useState<OccupancyData | null>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -45,8 +57,10 @@ export default function RubsPage() {
 
       const localBills = getBills();
       const localMappings = getMeterMappings();
+      const localOccupancy = getOccupancyData();
       setBills(localBills);
       setMappings(localMappings);
+      setOccupancy(localOccupancy);
       setSeeded(localBills.length > 0 || localMappings.length > 0);
     } catch {
       // ignore
@@ -80,6 +94,19 @@ export default function RubsPage() {
     saveBillToStorage(updated);
     setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
     setSelected(updated);
+  }
+
+  async function handleTemplateUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (templateInputRef.current) templateInputRef.current.value = "";
+    if (!file) return;
+    try {
+      const data = await parseAppFolioTemplate(file);
+      saveOccupancyData(data);
+      setOccupancy(data);
+    } catch (err: any) {
+      alert(`Failed to parse AppFolio template: ${err.message}`);
+    }
   }
 
   function handleExport(billId: string) {
@@ -143,6 +170,8 @@ export default function RubsPage() {
     return (
       <BillDetailView
         bill={selected}
+        bills={bills}
+        occupancy={occupancy}
         onBack={() => setSelected(null)}
         onPost={() => handlePostBill(selected)}
         onExport={() => handleExport(selected.id)}
@@ -200,6 +229,48 @@ export default function RubsPage() {
             {showCreateForm ? "Cancel" : "+ New Bill"}
           </button>
         </div>
+      </div>
+
+      {/* AppFolio Template Status */}
+      <input
+        ref={templateInputRef}
+        type="file"
+        accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls"
+        onChange={handleTemplateUpload}
+        className="hidden"
+      />
+      <div className={`rounded-lg px-4 py-3 flex items-center justify-between text-sm ${
+        occupancy
+          ? Math.floor((Date.now() - new Date(occupancy.importedAt).getTime()) / 86400000) > 30
+            ? "bg-amber-50 border border-amber-200"
+            : "bg-green-50 border border-green-200"
+          : "bg-slate-50 border border-border"
+      }`}>
+        <div className="flex items-center gap-3">
+          <span className={`w-2 h-2 rounded-full ${occupancy ? "bg-green-500" : "bg-slate-400"}`} />
+          <span>
+            {occupancy ? (
+              <>
+                <strong>AppFolio template loaded:</strong> {occupancy.records.length} tenants from{" "}
+                <em>{occupancy.filename}</em> &middot; Imported{" "}
+                {new Date(occupancy.importedAt).toLocaleDateString()}
+                {Math.floor((Date.now() - new Date(occupancy.importedAt).getTime()) / 86400000) > 30 && (
+                  <span className="text-amber-700 ml-2">(stale — refresh recommended)</span>
+                )}
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                No AppFolio template loaded. Upload the Bulk Charges template to enable export.
+              </span>
+            )}
+          </span>
+        </div>
+        <button
+          onClick={() => templateInputRef.current?.click()}
+          className="px-3 py-1 text-xs border border-border rounded hover:bg-white transition-colors whitespace-nowrap"
+        >
+          {occupancy ? "Refresh Template" : "Upload Template"}
+        </button>
       </div>
 
       {/* Stats Cards */}
@@ -477,12 +548,16 @@ function CreateBillForm({
 
 function BillDetailView({
   bill,
+  bills,
+  occupancy,
   onBack,
   onPost,
   onExport,
   onRecalculate,
 }: {
   bill: RubsBill;
+  bills: RubsBill[];
+  occupancy: OccupancyData | null;
   onBack: () => void;
   onPost: () => void;
   onExport: () => void;
@@ -490,6 +565,7 @@ function BillDetailView({
 }) {
   const [recalcMethod, setRecalcMethod] = useState<SplitMethod | "">("");
   const [recalculating, setRecalculating] = useState(false);
+  const [showAppFolioExport, setShowAppFolioExport] = useState(false);
 
   const totalAllocated = bill.allocations.reduce((s, a) => s + a.amount, 0);
 
@@ -609,10 +685,10 @@ function BillDetailView({
       <div className="flex items-center gap-3">
         {bill.status === "calculated" && (
           <button
-            onClick={onPost}
+            onClick={() => setShowAppFolioExport(!showAppFolioExport)}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
           >
-            Post to Tenant Ledgers
+            {showAppFolioExport ? "Hide Export" : "Export for AppFolio"}
           </button>
         )}
         {bill.allocations.length > 0 && (
@@ -620,10 +696,27 @@ function BillDetailView({
             onClick={onExport}
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
-            Export CSV
+            Export Raw CSV
+          </button>
+        )}
+        {bill.status === "calculated" && (
+          <button
+            onClick={onPost}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            Mark as Posted
           </button>
         )}
       </div>
+
+      {/* AppFolio Export Panel */}
+      {showAppFolioExport && (
+        <AppFolioExportPanel
+          bill={bill}
+          bills={bills}
+          occupancy={occupancy}
+        />
+      )}
     </div>
   );
 }
@@ -983,6 +1076,157 @@ function ImportBillsFlow({
         >
           Import {validCount} Bill{validCount !== 1 ? "s" : ""}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── AppFolio Export Panel ────────────────────────────────────
+
+function AppFolioExportPanel({
+  bill,
+  bills,
+  occupancy,
+}: {
+  bill: RubsBill;
+  bills: RubsBill[];
+  occupancy: OccupancyData | null;
+}) {
+  const recon = reconcile([bill], occupancy);
+  const errors = recon.issues.filter((i) => i.severity === "error");
+  const warnings = recon.issues.filter((i) => i.severity === "warning");
+
+  function downloadExport() {
+    if (!occupancy) return;
+    const { csv, rows, errors: exportErrors } = generateAppFolioExport(
+      [bill],
+      bill.meterType,
+      occupancy,
+      bill.month
+    );
+    if (exportErrors.length > 0) {
+      const proceed = confirm(
+        `${exportErrors.length} allocation(s) could not be matched:\n\n${exportErrors.join("\n")}\n\nDownload anyway (unmatched entries will be skipped)?`
+      );
+      if (!proceed) return;
+    }
+    if (rows.length === 0) {
+      alert("No rows to export. Fix the issues above first.");
+      return;
+    }
+    const total = getExportTotal(rows);
+    const blob = new Blob([csv], { type: "text/tab-separated-values" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `appfolio-${bill.meterType}-${bill.propertyName.replace(/\s/g, "-")}-${bill.month}.tsv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadAllUtilities() {
+    if (!occupancy) return;
+    const types: MeterType[] = ["water", "gas", "electric", "trash"];
+    let downloadCount = 0;
+    for (const type of types) {
+      const { csv, rows } = generateAppFolioExport(bills, type, occupancy, bill.month);
+      if (rows.length === 0) continue;
+      const blob = new Blob([csv], { type: "text/tab-separated-values" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `appfolio-${type}-all-properties-${bill.month}.tsv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      downloadCount++;
+    }
+    if (downloadCount === 0) alert("No calculated bills found to export.");
+  }
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border">
+        <h2 className="font-semibold">Export for AppFolio</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Generates the Bulk Charges upload file matching AppFolio&apos;s template format.
+        </p>
+      </div>
+
+      {/* Reconciliation */}
+      <div className="p-5 space-y-3">
+        {!occupancy && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            No AppFolio template loaded. Upload the Bulk Charges template at the top of the RUBs page first.
+          </div>
+        )}
+
+        {occupancy && (
+          <>
+            {/* Stats */}
+            <div className="flex items-center gap-6 text-sm">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-green-500 rounded-full" />
+                {recon.matchedCount} matched
+              </span>
+              {recon.unmatchedAllocations.length > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 bg-red-500 rounded-full" />
+                  {recon.unmatchedAllocations.length} unmatched
+                </span>
+              )}
+              {warnings.length > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 bg-amber-500 rounded-full" />
+                  {warnings.length} warning{warnings.length !== 1 ? "s" : ""}
+                </span>
+              )}
+              <span className="text-xs text-muted-foreground">
+                Template: {recon.templateAge < 999 ? `${recon.templateAge} day${recon.templateAge !== 1 ? "s" : ""} old` : "not loaded"}
+              </span>
+            </div>
+
+            {/* Errors */}
+            {errors.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-red-900 mb-1">Errors — these tenants will be MISSING from the export</p>
+                <ul className="text-xs text-red-700 list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+                  {errors.map((e, i) => (
+                    <li key={i}>{e.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Warnings */}
+            {warnings.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-amber-900 mb-1">Warnings</p>
+                <ul className="text-xs text-amber-700 list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+                  {warnings.map((w, i) => (
+                    <li key={i}>{w.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Export Actions */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={downloadExport}
+                disabled={recon.matchedCount === 0}
+                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+              >
+                Download {METER_TYPE_LABELS[bill.meterType]} Upload ({recon.matchedCount} tenant{recon.matchedCount !== 1 ? "s" : ""})
+              </button>
+              <button
+                onClick={downloadAllUtilities}
+                className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+              >
+                Download All Utilities ({bill.month})
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

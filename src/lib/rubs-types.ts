@@ -80,3 +80,41 @@ export interface ImportFileInfo {
   size: number;
   modified: string;
 }
+
+// ─── AppFolio Occupancy Mapping ────────────────────────────────
+// Parsed from the AppFolio "Bulk Charges and Credits" template CSV.
+// Maps each tenant-on-unit to an Occupancy UID for posting charges.
+
+export interface OccupancyRecord {
+  propertyName: string;
+  unitName: string;
+  occupancyUid: string; // e.g. "#2405955681019495333"
+  tenantName: string;
+  occupancyId: string; // numeric e.g. "1342"
+}
+
+export interface OccupancyData {
+  records: OccupancyRecord[];
+  importedAt: string; // ISO timestamp
+  filename: string;
+}
+
+// ─── AppFolio Export / Reconciliation ──────────────────────────
+
+export interface ReconciliationIssue {
+  type: "missing_occupancy" | "missing_mapping" | "name_mismatch" | "stale_template";
+  severity: "error" | "warning";
+  message: string;
+  property?: string;
+  unit?: string;
+}
+
+export interface AppFolioExportRow {
+  propertyName: string;
+  unitName: string;
+  occupancyUid: string;
+  tenantName: string;
+  occupancyId: string;
+  amount: string; // formatted to 2 decimal places
+  description: string;
+}
