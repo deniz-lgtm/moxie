@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2, Globe } from "lucide-react";
-import { validateImage, compressImage, compressDataUrl, isHeicFile, convertHeicToJpeg, validatePanorama, compressPanorama, isLikelyEquirectangular } from "@/lib/image-utils";
+import { validateImage, compressImage, compressDataUrl, isHeicFile, convertHeicToJpeg, validatePanorama, compressPanorama, isLikelyEquirectangular, stampPhoto } from "@/lib/image-utils";
 import { PanoramaViewer } from "@/components/PanoramaViewer";
 
 export interface CameraPhoto {
@@ -142,7 +142,8 @@ export function InspectionCamera({
     }
   }
 
-  // Capture photo from camera (capped at 1920px width)
+  // Capture photo from camera (capped at 1920px width), then burn a time/room
+  // stamp into the image so the timestamp travels with the file.
   async function capturePhoto() {
     if (!videoRef.current || !canvasRef.current || !currentRoom) return;
     const video = videoRef.current;
@@ -162,8 +163,17 @@ export function InspectionCamera({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, w, h);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-    addPhotoToRoom(dataUrl);
+    const rawDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    try {
+      const stamped = await stampPhoto(rawDataUrl, {
+        label: "Moxie Management",
+        secondary: currentRoom.name,
+      });
+      addPhotoToRoom(stamped);
+    } catch {
+      // If stamping fails for any reason, fall back to the raw capture.
+      addPhotoToRoom(rawDataUrl);
+    }
   }
 
   // Handle file upload (gallery picker, no camera) with validation + compression + HEIC
@@ -193,7 +203,17 @@ export function InspectionCamera({
         } else {
           dataUrl = await compressImage(file, 1920, 0.8);
         }
-        addPhotoToRoom(dataUrl);
+        // Burn timestamp + room onto the photo (uses file's lastModified if available).
+        try {
+          const stamped = await stampPhoto(dataUrl, {
+            label: "Moxie Management",
+            secondary: currentRoom.name,
+            date: file.lastModified ? new Date(file.lastModified) : new Date(),
+          });
+          addPhotoToRoom(stamped);
+        } catch {
+          addPhotoToRoom(dataUrl);
+        }
       } catch (err) {
         console.error("[Camera] Failed to process photo:", err);
       }
@@ -356,7 +376,13 @@ export function InspectionCamera({
   if (!currentRoom) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+    <div
+      className="fixed inset-0 z-50 bg-black flex flex-col overscroll-contain touch-manipulation"
+      style={{
+        paddingTop: "env(safe-area-inset-top)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
+    >
       {/* Hidden elements */}
       <canvas ref={canvasRef} className="hidden" />
       {/* File input WITHOUT capture attribute — opens gallery/file picker */}
@@ -377,39 +403,39 @@ export function InspectionCamera({
         className="hidden"
       />
 
-      {/* Top bar */}
-      <div className="bg-black/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between text-white">
+      {/* Top bar — large tap targets for mobile */}
+      <div className="bg-black/80 backdrop-blur-sm px-3 py-2.5 flex items-center justify-between text-white">
         <button
           onClick={() => { stopCamera(); onCancel?.(); }}
           disabled={isBatchAnalyzing}
-          className="text-white/80 hover:text-white text-sm flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="text-white/80 hover:text-white text-sm flex items-center gap-1 px-2 py-2 -ml-2 min-h-[44px] disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <X size={18} /> Exit
+          <X size={20} /> <span className="hidden sm:inline">Exit</span>
         </button>
-        <div className="text-center">
-          <p className="text-xs text-white/60 uppercase tracking-wider">{title}</p>
-          <p className="text-xs text-white/40">
-            Room {currentRoomIdx + 1} of {rooms.length} &middot; {totalPhotos} total photos
+        <div className="text-center min-w-0 flex-1 px-2">
+          <p className="text-[10px] text-white/60 uppercase tracking-wider truncate">{title}</p>
+          <p className="text-[11px] text-white/40">
+            Room {currentRoomIdx + 1}/{rooms.length} &middot; {totalPhotos} photo{totalPhotos !== 1 ? "s" : ""}
             {isBatchAnalyzing && analyzingCount > 0 && (
               <span className="ml-2 text-yellow-400">
                 <Loader2 size={10} className="inline animate-spin mr-1" />
-                Analyzing {analyzingCount} remaining...
+                {analyzingCount} left
               </span>
             )}
           </p>
         </div>
         <button
           onClick={goToNextRoom}
-          className="text-sm font-medium text-green-400 hover:text-green-300"
+          className="text-sm font-semibold text-green-400 hover:text-green-300 px-2 py-2 -mr-2 min-h-[44px]"
         >
           {isLastRoom ? "Finish" : "Skip"}
         </button>
       </div>
 
-      {/* Room name - large, prominent */}
-      <div className="bg-gradient-to-b from-black/80 to-transparent px-4 py-4">
-        <h2 className="text-2xl font-bold text-white text-center">{currentRoom.name}</h2>
-        <p className="text-white/50 text-center text-sm mt-1">
+      {/* Room name - large, prominent, mobile-tight */}
+      <div className="bg-gradient-to-b from-black/80 to-transparent px-4 pt-3 pb-2 sm:pt-4 sm:pb-4">
+        <h2 className="text-xl sm:text-2xl font-bold text-white text-center">{currentRoom.name}</h2>
+        <p className="text-white/50 text-center text-xs mt-0.5">
           {currentRoom.photos.length} photo{currentRoom.photos.length !== 1 ? "s" : ""} taken
           {currentRoom.panoramaUrl ? (
             <span className="ml-2 text-blue-400">· 360° captured</span>
@@ -428,30 +454,37 @@ export function InspectionCamera({
               muted
               className="w-full h-full object-cover"
             />
-            {/* Capture button overlay */}
-            <div className="absolute bottom-6 left-0 right-0 flex items-center justify-center gap-6">
-              {/* Photo count badge */}
-              {currentRoom.photos.length > 0 && (
+            {/* Capture button overlay — safe-area inset on the bottom for notched phones */}
+            <div
+              className="absolute left-0 right-0 flex items-center justify-center gap-8 sm:gap-10"
+              style={{ bottom: "max(1.5rem, env(safe-area-inset-bottom))" }}
+            >
+              {/* Photo count / exit capture */}
+              {currentRoom.photos.length > 0 ? (
                 <button
                   onClick={stopCamera}
-                  className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-white text-sm font-bold border border-white/30"
+                  className="w-14 h-14 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-white text-base font-bold border border-white/30 active:scale-95 transition-all"
                 >
                   {currentRoom.photos.length}
                 </button>
+              ) : (
+                <div className="w-14 h-14" aria-hidden />
               )}
-              {/* Shutter button */}
+              {/* Shutter button — bigger for thumb reach */}
               <button
                 onClick={capturePhoto}
-                className="w-20 h-20 rounded-full border-4 border-white bg-white/20 hover:bg-white/30 active:scale-95 transition-all flex items-center justify-center"
+                className="w-24 h-24 rounded-full border-4 border-white bg-white/20 hover:bg-white/30 active:scale-90 transition-all flex items-center justify-center"
+                aria-label="Capture photo"
               >
-                <div className="w-14 h-14 rounded-full bg-white" />
+                <div className="w-[72px] h-[72px] rounded-full bg-white" />
               </button>
               {/* Flip to gallery */}
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center border border-white/30"
+                className="w-14 h-14 rounded-full bg-white/20 backdrop-blur flex items-center justify-center border border-white/30 active:scale-95 transition-all"
+                aria-label="Choose from gallery"
               >
-                <Image size={18} className="text-white" />
+                <Image size={20} className="text-white" />
               </button>
             </div>
           </>
@@ -486,29 +519,25 @@ export function InspectionCamera({
                 </button>
               </div>
             )}
-            {/* Photo thumbnails grid */}
+            {/* Photo thumbnails grid — larger tiles on mobile for easier review */}
             {currentRoom.photos.length > 0 ? (
-              <div className="w-full max-w-lg overflow-y-auto max-h-[60vh] px-2">
-                <div className="grid grid-cols-3 gap-2">
+              <div className="w-full max-w-lg overflow-y-auto max-h-[55vh] px-2 -webkit-overflow-scrolling-touch">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {currentRoom.photos.map((photo) => (
-                    <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group">
+                    <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group bg-black">
                       <img src={photo.url} alt="" className="w-full h-full object-cover" />
                       <button
                         onClick={() => removePhoto(photo.id)}
-                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-1.5 right-1.5 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-md active:scale-95 transition-all"
+                        aria-label="Remove photo"
                       >
-                        <X size={12} className="text-white" />
+                        <X size={16} className="text-white" />
                       </button>
                       {photo.aiAnalysis && (
                         <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-white text-[10px] px-1.5 py-1">
                           <p className="font-medium truncate">{photo.aiAnalysis.item}</p>
                           <p className="text-yellow-300">{photo.aiAnalysis.condition} {photo.aiAnalysis.estimatedCost > 0 ? `· $${photo.aiAnalysis.estimatedCost}` : ""}</p>
                         </div>
-                      )}
-                      {!photo.aiAnalysis && (
-                        <span className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">
-                          {new Date(photo.timestamp).toLocaleTimeString()}
-                        </span>
                       )}
                     </div>
                   ))}
@@ -538,26 +567,26 @@ export function InspectionCamera({
         </div>
       )}
 
-      {/* Bottom controls */}
-      <div className="bg-black/90 backdrop-blur-sm px-4 py-4 space-y-3">
+      {/* Bottom controls — mobile-first, big tap targets */}
+      <div className="bg-black/90 backdrop-blur-sm px-3 sm:px-4 py-3 sm:py-4 space-y-2.5">
         {/* Camera / Upload buttons — only show when not capturing */}
         {!isCapturing && (
-          <div className="flex items-center justify-center gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:justify-center sm:gap-3">
             <button
               onClick={startCamera}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#9d1535] text-white rounded-lg text-sm font-medium hover:bg-[#b91c42] transition-colors"
+              className="col-span-3 sm:col-auto flex items-center justify-center gap-2 px-4 py-3 sm:py-2.5 bg-[#9d1535] text-white rounded-xl text-sm font-semibold hover:bg-[#b91c42] active:scale-[0.98] transition-all min-h-[48px]"
             >
-              <Camera size={18} /> Open Camera
+              <Camera size={20} /> Open Camera
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white/10 text-white rounded-lg text-sm hover:bg-white/20"
+              className="flex items-center justify-center gap-1.5 px-3 py-3 sm:py-2.5 bg-white/10 text-white rounded-xl text-xs sm:text-sm hover:bg-white/20 active:scale-[0.98] transition-all min-h-[48px]"
             >
-              <Image size={18} /> Upload Photos
+              <Image size={18} /> <span className="hidden xs:inline sm:inline">Gallery</span><span className="xs:hidden sm:hidden">Upload</span>
             </button>
             <button
               onClick={() => panoramaInputRef.current?.click()}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600/30 text-blue-300 rounded-lg text-sm hover:bg-blue-600/50 border border-blue-500/30"
+              className="col-span-2 flex items-center justify-center gap-1.5 px-3 py-3 sm:py-2.5 bg-blue-600/30 text-blue-300 rounded-xl text-xs sm:text-sm hover:bg-blue-600/50 border border-blue-500/30 active:scale-[0.98] transition-all min-h-[48px]"
             >
               <Globe size={18} /> Upload 360°
             </button>
@@ -565,17 +594,17 @@ export function InspectionCamera({
         )}
 
         {/* Navigation */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <button
             onClick={goToPrevRoom}
             disabled={isFirstRoom}
-            className="flex items-center gap-1 px-4 py-2 text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed text-sm"
+            className="flex items-center gap-1 px-2.5 sm:px-4 py-2.5 text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed text-xs sm:text-sm min-h-[44px]"
           >
-            <ChevronLeft size={18} /> Previous Room
+            <ChevronLeft size={20} /> <span className="hidden sm:inline">Previous Room</span><span className="sm:hidden">Prev</span>
           </button>
 
           {allowAddRoom && !isCapturing && (
-            <div className="flex items-center">
+            <div className="flex items-center min-w-0">
               {showAddRoom ? (
                 <div className="flex items-center gap-1">
                   <input
@@ -584,18 +613,18 @@ export function InspectionCamera({
                     onChange={(e) => setNewRoomName(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && addNewRoom()}
                     placeholder="Room name..."
-                    className="bg-white/10 text-white text-xs rounded px-2 py-1.5 w-28 placeholder-white/30 border border-white/10"
+                    className="bg-white/10 text-white text-xs rounded px-2 py-1.5 w-24 sm:w-28 placeholder-white/30 border border-white/10"
                     autoFocus
                   />
-                  <button onClick={addNewRoom} className="text-green-400 text-xs font-medium px-2">Add</button>
-                  <button onClick={() => setShowAddRoom(false)} className="text-white/40 text-xs px-1">Cancel</button>
+                  <button onClick={addNewRoom} className="text-green-400 text-xs font-medium px-2 py-1.5">Add</button>
+                  <button onClick={() => setShowAddRoom(false)} className="text-white/40 text-xs px-1 py-1.5">Cancel</button>
                 </div>
               ) : (
                 <button
                   onClick={() => setShowAddRoom(true)}
-                  className="flex items-center gap-1 text-white/50 hover:text-white/80 text-xs"
+                  className="flex items-center gap-1 text-white/50 hover:text-white/80 text-[11px] sm:text-xs px-2 py-2"
                 >
-                  <Plus size={14} /> Add Room
+                  <Plus size={14} /> <span className="hidden sm:inline">Add </span>Room
                 </button>
               )}
             </div>
@@ -603,24 +632,26 @@ export function InspectionCamera({
 
           <button
             onClick={goToNextRoom}
-            className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-500"
+            className="flex items-center gap-1 px-3 sm:px-4 py-2.5 bg-green-600 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-green-500 active:scale-[0.98] transition-all min-h-[44px]"
           >
-            {isLastRoom ? "Finish Walk" : "Next Room"} <ChevronRight size={18} />
+            <span className="hidden sm:inline">{isLastRoom ? "Finish Walk" : "Next Room"}</span>
+            <span className="sm:hidden">{isLastRoom ? "Finish" : "Next"}</span>
+            <ChevronRight size={20} />
           </button>
         </div>
 
-        {/* Room dots indicator */}
-        <div className="flex justify-center gap-1.5 pt-1">
+        {/* Room dots indicator — larger taps */}
+        <div className="flex justify-center gap-1.5 pt-1 flex-wrap">
           {rooms.map((room, i) => (
             <button
               key={room.id}
               onClick={() => { if (!isBatchAnalyzing) { stopCamera(); setCurrentRoomIdx(i); } }}
-              className={`h-1.5 rounded-full transition-all ${
+              className={`h-2 rounded-full transition-all ${
                 i === currentRoomIdx
-                  ? "w-6 bg-white"
+                  ? "w-7 bg-white"
                   : room.photos.length > 0
-                  ? "w-1.5 bg-green-500"
-                  : "w-1.5 bg-white/30"
+                  ? "w-2 bg-green-500"
+                  : "w-2 bg-white/30"
               }`}
               title={`${room.name} (${room.photos.length} photos)`}
             />

@@ -16,7 +16,14 @@ export function isAIConfigured(): boolean {
 }
 
 export type PhotoAnalysisResult = {
+  /** Technical forensic description (internal reference — not shown to tenants). */
   description: string;
+  /**
+   * Professional tenant-facing review written in the voice of a Moxie inspector.
+   * Describes potential damage in clear, courteous language suitable for sending
+   * directly to tenants in the deposit disposition statement.
+   */
+  inspector_review: string;
   condition: "excellent" | "good" | "fair" | "poor" | "damaged";
   damage_items: { item: string; estimated_cost: number; description: string }[];
   total_estimated_cost: number;
@@ -25,7 +32,14 @@ export type PhotoAnalysisResult = {
 
 // ── Forensic Damage Assessor System Prompt ──────────
 
-const FORENSIC_SYSTEM_PROMPT = `You are the automated forensic inspection AI for Moxie Management, a residential property management company in Los Angeles, CA. Your function is to analyze visual data from rental unit turnovers and generate strictly objective, legally defensible damage assessments compliant with California Civil Code Section 1950.5.
+const FORENSIC_SYSTEM_PROMPT = `You are the automated inspection AI for Moxie Management, a residential property management company in Los Angeles, CA. Your function is to analyze visual data from rental unit turnovers and generate two parallel outputs for every photo:
+
+  A) A technical forensic description (internal reference, never shown to tenants).
+  B) A professional "Inspector Review" written in the first-person voice of a Moxie Management inspector, addressed to the tenant. This is the text that goes on the itemized statement the tenant receives.
+
+=============================================
+OUTPUT A — TECHNICAL FORENSIC DESCRIPTION
+=============================================
 
 CORE DIRECTIVES:
 1. ZERO SUBJECTIVITY — You are strictly forbidden from using emotional, qualitative, or subjective adjectives (e.g., "ruined," "disgusting," "huge," "messy," "dirty," "excessive").
@@ -39,21 +53,44 @@ CORE DIRECTIVES:
    - Unauthorized Alteration
    - Excessive Particulate/Surface Accumulation
 
-GOLDEN FORMULA (required for every damage finding):
+GOLDEN FORMULA (required for every damage finding in the technical description):
 [Estimated Measurement/Quantity] + [Visual Finding] located on/at [Specific Location] exhibiting [Mechanism of Defect mapped to Glossary]. Condition is inconsistent with standard depreciation and constitutes [Glossary Term], requiring [Objective Remediation].
 
-REFERENCE EXAMPLES:
+REFERENCE EXAMPLES (technical description):
 - "Puncture measuring approximately 4x4 inches located on the interior primary bedroom door exhibiting fractured wood core. Condition is inconsistent with standard depreciation and constitutes Impact/Blunt Force Trauma, requiring full door slab replacement."
 - "Torn drywall paper and primer removal measuring approximately 48 inches in length located on the upper living room perimeter. Condition is inconsistent with standard depreciation and constitutes Adhesive/Mounting Damage, requiring skim coating and full-wall repaint."
-- "Accumulation of surface particulate and biological residue covering approximately 60% of kitchen surfaces. Condition is inconsistent with standard depreciation and constitutes Excessive Particulate/Surface Accumulation, requiring professional remediation to restore to documented move-in baseline."
 - "Non-water-soluble discoloration measuring approximately 8x10 inches located on the master bedroom carpet. Condition cannot be remediated via standard hot-water extraction and constitutes Negligence-Induced Deterioration, requiring targeted carpet panel replacement."
-- "Uric acid saturation detected across approximately 12 square feet of subflooring in the hallway adjacent to the rear entry. Condition is inconsistent with standard depreciation and constitutes Biological/Hazardous Contamination, requiring enzyme treatment and targeted sealing."
+
+=============================================
+OUTPUT B — INSPECTOR REVIEW (TENANT-FACING)
+=============================================
+
+This output is written as if a Moxie Management inspector is speaking directly to the tenant in a professional, respectful, and factual tone. It will be sent to the tenant as part of the official Security Deposit Disposition.
+
+STYLE RULES:
+1. Start with a plain-English summary of the finding in 1–2 sentences (what it is and where it is).
+2. Describe only potential damage beyond normal wear and tear. If the photo shows no damage, return an empty string for inspector_review.
+3. Use clear, everyday language — never use forensic glossary jargon (no "Adhesive/Mounting Damage", "Negligence-Induced Deterioration", etc.).
+4. Use approximate measurements when relevant ("approximately 4 inches", "about 2 feet"), but do not speculate about cause or intent.
+5. Close with a short, courteous note about the required repair or remediation.
+6. Maintain a professional, neutral, respectful tone. No accusations, no emotional language, no "you" blaming. Prefer phrasing such as "This area will require…" rather than "You damaged…".
+7. Keep it short — 2 to 4 sentences, at most 60 words.
+
+INSPECTOR REVIEW EXAMPLES:
+- "There is a puncture approximately 4 inches wide on the interior bedroom door, with visible damage to the wood core. This damage is beyond normal wear and tear and will require a full door replacement."
+- "The drywall along the upper living room wall shows torn paper and missing primer over approximately 48 inches. Restoring the wall will require patching, skim coating, and a full-wall repaint."
+- "A dark, non-water-soluble stain approximately 8 by 10 inches is visible on the master bedroom carpet. The staining cannot be removed with standard carpet cleaning, so the affected carpet panel will need to be replaced."
+- "Kitchen surfaces show heavy residue accumulation that is not consistent with normal daily use. Professional cleaning will be required to return the unit to its move-in condition."
+
+=============================================
+SHARED RULES
+=============================================
 
 HANDLING AMBIGUITY:
-If the visual data is obscured, blurry, or lacks sufficient lighting to make a definitive classification, indicate: "INSUFFICIENT DATA: Manual human inspection required to verify condition." Do not describe damage that cannot be clearly evidenced by the pixel data.
+If the visual data is obscured, blurry, or lacks sufficient lighting to make a definitive classification, set condition to "fair", return an empty damage_items list, leave inspector_review empty, and set description to "INSUFFICIENT DATA: Manual human inspection required to verify condition." Do not describe damage that cannot be clearly evidenced by the pixel data.
 
 WEAR AND TEAR STANDARD:
-Normal wear and tear means gradual deterioration occurring through expected, intended, and reasonable daily use, absent negligence, carelessness, accident, or abuse. Standard sparse thumbtack or finishing-nail pinholes are normal wear. Everything you flag must clearly exceed this threshold.`;
+Normal wear and tear means gradual deterioration occurring through expected, intended, and reasonable daily use, absent negligence, carelessness, accident, or abuse. Standard sparse thumbtack or finishing-nail pinholes are normal wear. Everything you flag must clearly exceed this threshold. If a photo only shows normal wear and tear, return an empty inspector_review and empty damage_items.`;
 
 /**
  * Analyze a photo using Claude Vision API with forensic damage assessment methodology.
@@ -67,62 +104,54 @@ export async function analyzePhoto(
   if (!ANTHROPIC_API_KEY) {
     return {
       description: "AI analysis not available — add ANTHROPIC_API_KEY to .env.local",
+      inspector_review: "",
       condition: "fair",
       damage_items: [],
       total_estimated_cost: 0,
     };
   }
 
+  const jsonSchema = `{
+  "detected_item": "Wall condition",
+  "description": "Torn drywall paper and primer removal measuring approximately 36 inches in length located on the upper bedroom wall perimeter exhibiting adhesive residue consistent with LED light strip removal. Condition is inconsistent with standard depreciation and constitutes Adhesive/Mounting Damage, requiring skim coating and full-wall repaint.",
+  "inspector_review": "The upper bedroom wall shows torn drywall paper and missing primer along a roughly 36-inch stretch, with adhesive residue likely from removed wall-mounted items. Restoring this area will require patching, skim coating, and a full-wall repaint.",
+  "condition": "poor",
+  "damage_items": [
+    {
+      "item": "Drywall repair — Adhesive/Mounting Damage",
+      "estimated_cost": 150,
+      "description": "Torn drywall paper and primer removal measuring approximately 36 inches in length located on the upper bedroom wall perimeter. Condition is inconsistent with standard depreciation and constitutes Adhesive/Mounting Damage, requiring skim coating and full-wall repaint."
+    }
+  ],
+  "total_estimated_cost": 150
+}`;
+
+  const sharedRules = `IMPORTANT:
+- "description" is the technical forensic text (Golden Formula, internal use only).
+- "inspector_review" is the short, professional, tenant-facing summary (2–4 sentences, everyday language, no glossary jargon). This text will be shown to the tenant.
+- Each damage_items[].item should be: "[Repair type] — [Glossary Category]"
+- Each damage_items[].description MUST follow the Golden Formula exactly
+- Use Los Angeles market rates for cost estimates
+- If no damage beyond normal wear and tear is present: return empty damage_items, total 0, and an empty string for inspector_review
+- Do NOT flag normal wear and tear (minor scuffs in traffic areas, sparse pinholes, minor fading)
+- Respond with ONLY the JSON object. No prose before or after.`;
+
   const userPrompt = itemName === "auto-detect"
     ? `You are inspecting a rental unit for move-out. This photo is from the "${roomName}" area.
 
 Auto-detect what this photo shows. Identify the main item/feature visible (e.g., "Wall condition", "Flooring", "Kitchen appliances", "Bathroom fixtures", "Ceiling", "Window", "Door", "HVAC unit", etc.).
 
-Analyze using the Forensic Damage Assessor methodology and respond in this exact JSON format:
-{
-  "detected_item": "Wall condition",
-  "description": "Brief factual description using only objective, measurable language",
-  "condition": "good",
-  "damage_items": [
-    {
-      "item": "Drywall repair — Adhesive/Mounting Damage",
-      "estimated_cost": 150,
-      "description": "Torn drywall paper and primer removal measuring approximately 36 inches in length located on the upper bedroom wall perimeter exhibiting adhesive residue consistent with LED light strip removal. Condition is inconsistent with standard depreciation and constitutes Adhesive/Mounting Damage, requiring skim coating and full-wall repaint."
-    }
-  ],
-  "total_estimated_cost": 150
-}
+Respond with a single JSON object in this exact shape:
+${jsonSchema}
 
-IMPORTANT:
-- Each damage_items[].item should be: "[Repair type] — [Glossary Category]"
-- Each damage_items[].description MUST follow the Golden Formula exactly
-- Use Los Angeles market rates for cost estimates
-- If no damage beyond normal wear and tear is present, return empty damage_items and 0 total
-- Do NOT flag normal wear and tear (minor scuffs in traffic areas, sparse pinholes, minor fading)`
+${sharedRules}`
 
     : `You are inspecting a rental unit for move-out. This photo is from the "${roomName}" area, specifically the "${itemName}" item.
 
-Analyze using the Forensic Damage Assessor methodology and respond in this exact JSON format:
-{
-  "detected_item": "${itemName}",
-  "description": "Brief factual description using only objective, measurable language",
-  "condition": "good",
-  "damage_items": [
-    {
-      "item": "Drywall repair — Adhesive/Mounting Damage",
-      "estimated_cost": 150,
-      "description": "Torn drywall paper and primer removal measuring approximately 36 inches in length located on the upper bedroom wall perimeter exhibiting adhesive residue consistent with LED light strip removal. Condition is inconsistent with standard depreciation and constitutes Adhesive/Mounting Damage, requiring skim coating and full-wall repaint."
-    }
-  ],
-  "total_estimated_cost": 150
-}
+Respond with a single JSON object in this exact shape (use "${itemName}" as the detected_item):
+${jsonSchema}
 
-IMPORTANT:
-- Each damage_items[].item should be: "[Repair type] — [Glossary Category]"
-- Each damage_items[].description MUST follow the Golden Formula exactly
-- Use Los Angeles market rates for cost estimates
-- If no damage beyond normal wear and tear is present, return empty damage_items and 0 total
-- Do NOT flag normal wear and tear (minor scuffs in traffic areas, sparse pinholes, minor fading)`;
+${sharedRules}`;
 
   // 30-second timeout per photo analysis
   const controller = new AbortController();
@@ -168,6 +197,7 @@ IMPORTANT:
     if (err?.name === "AbortError") {
       return {
         description: "AI analysis timed out (30s). Manual inspection recommended.",
+        inspector_review: "",
         condition: "fair" as const,
         damage_items: [],
         total_estimated_cost: 0,
@@ -183,6 +213,7 @@ IMPORTANT:
     console.error("[AI Analysis] API error:", err);
     return {
       description: `AI analysis failed: ${response.status}`,
+      inspector_review: "",
       condition: "fair",
       damage_items: [],
       total_estimated_cost: 0,
@@ -196,7 +227,15 @@ IMPORTANT:
     // Extract JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as PhotoAnalysisResult;
+      const parsed = JSON.parse(jsonMatch[0]) as Partial<PhotoAnalysisResult>;
+      return {
+        description: parsed.description || "",
+        inspector_review: parsed.inspector_review || "",
+        condition: parsed.condition || "fair",
+        damage_items: parsed.damage_items || [],
+        total_estimated_cost: parsed.total_estimated_cost || 0,
+        detected_item: parsed.detected_item,
+      };
     }
   } catch {
     console.error("[AI Analysis] Failed to parse response:", text);
@@ -204,6 +243,7 @@ IMPORTANT:
 
   return {
     description: text.slice(0, 200),
+    inspector_review: "",
     condition: "fair",
     damage_items: [],
     total_estimated_cost: 0,

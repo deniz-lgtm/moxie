@@ -14,7 +14,7 @@ import type { DbRoom } from "./supabase";
 
 // ── Brand colors ────────────────────────────────────
 const BRAND = {
-  maroon: [139, 26, 26] as [number, number, number],
+  maroon: [157, 21, 53] as [number, number, number], // #9d1535 — matches in-app accent
   black: [25, 25, 25] as [number, number, number],
   darkGray: [60, 60, 60] as [number, number, number],
   medGray: [130, 130, 130] as [number, number, number],
@@ -55,21 +55,31 @@ function addBrandedHeader(
   const margin = 20;
   let y = startY;
 
-  // Logo (if available)
+  // Logo (if available) — rendered larger for a more intentional, branded feel.
   if (data.logoBase64) {
     try {
-      doc.addImage(data.logoBase64, "PNG", margin, y - 5, 40, 16);
-      // Company info to the right of logo
+      const logoW = 55;
+      const logoH = 22;
+      doc.addImage(data.logoBase64, "PNG", margin, y - 5, logoW, logoH);
+
+      // Contact block right-aligned to the logo baseline.
       doc.setFontSize(8);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(...BRAND.darkGray);
       doc.text(data.companyAddress, pageWidth - margin, y, { align: "right" });
-      y += 4;
       const contactLine = [data.companyPhone, data.companyEmail].filter(Boolean).join("  |  ");
       if (contactLine) {
-        doc.text(contactLine, pageWidth - margin, y, { align: "right" });
+        doc.text(contactLine, pageWidth - margin, y + 4, { align: "right" });
       }
-      y += 14;
+
+      // Small wordmark beneath the logo as a fallback signal if the PNG ever
+      // renders empty — keeps brand identity visible either way.
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...BRAND.medGray);
+      doc.text(data.companyName.toUpperCase(), margin, y + logoH + 1);
+
+      y += logoH + 4;
     } catch {
       // Fall back to text header if image fails
       y = addTextHeader(doc, data, y);
@@ -94,22 +104,31 @@ function addTextHeader(doc: jsPDF, data: InvoiceData, startY: number): number {
   const margin = 20;
   let y = startY;
 
-  doc.setFontSize(20);
+  // Company name — larger and paired with a short maroon underline bar so the
+  // logo-less rendering still feels deliberate.
+  doc.setFontSize(22);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BRAND.black);
-  doc.text(data.companyName.toUpperCase(), margin, y);
-  y += 6;
+  doc.text(data.companyName.toUpperCase(), margin, y + 4);
 
+  // Right-aligned contact info on the same visual row.
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...BRAND.darkGray);
-  doc.text(data.companyAddress, margin, y);
+  doc.text(data.companyAddress, pageWidth - margin, y, { align: "right" });
   const contactLine = [data.companyPhone, data.companyEmail].filter(Boolean).join("  |  ");
   if (contactLine) {
-    y += 4;
-    doc.text(contactLine, margin, y);
+    doc.text(contactLine, pageWidth - margin, y + 4, { align: "right" });
   }
-  y += 6;
+
+  y += 7;
+
+  // Maroon underline bar under the wordmark.
+  doc.setDrawColor(...BRAND.maroon);
+  doc.setLineWidth(1.2);
+  doc.line(margin, y, margin + 40, y);
+  doc.setLineWidth(0.2);
+  y += 5;
 
   return y;
 }
@@ -229,7 +248,8 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
   const methodText = doc.splitTextToSize(
     "All findings documented below were obtained through a standardized forensic visual inspection conducted at the time of unit turnover. " +
     "Each assessment is strictly quantified and classified per the Standardized Glossary of Assessment Terms. " +
-    "Deductions represent conditions inconsistent with normal wear and tear as defined by California Civil Code Section 1950.5.",
+    "Deductions represent conditions inconsistent with normal wear and tear as defined by California Civil Code Section 1950.5. " +
+    "Photographic documentation accompanies each assessed condition below; full-resolution files are maintained and available upon written request.",
     contentWidth
   );
   for (const line of methodText) {
@@ -265,12 +285,21 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
 
   const allRooms: DbRoom[] = inspection.rooms || [];
 
-  // Helper to render a single deduction line
-  function renderDeductionLine(roomName: string, description: string, cost: number, aiOrigCost?: number) {
+  // Helper to render a single deduction line. When `photoDataUrl` is provided
+  // the photo is embedded beneath the description as visual evidence.
+  function renderDeductionLine(
+    roomName: string,
+    description: string,
+    cost: number,
+    aiOrigCost?: number,
+    photoDataUrl?: string,
+  ) {
     itemNum++;
     totalDeductions += cost;
 
-    checkNewPage(22);
+    // Reserve enough room for header line + optional photo (~42mm) + trailing padding.
+    const photoBlockH = photoDataUrl ? 46 : 0;
+    checkNewPage(22 + photoBlockH);
 
     if (itemNum % 2 === 0) {
       doc.setFillColor(250, 250, 250);
@@ -306,10 +335,27 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
       doc.setFont("helvetica", "italic");
       doc.setTextColor(...BRAND.medGray);
       doc.text(
-        `Original AI assessment: $${aiOrigCost.toFixed(2)} — adjusted to $${cost.toFixed(2)} by inspector`,
+        `Original assessment: $${aiOrigCost.toFixed(2)} — adjusted to $${cost.toFixed(2)} by inspector`,
         margin + 48, y
       );
       y += 4;
+    }
+
+    // Embedded photo thumbnail — only drawn for photo-level deductions that
+    // have been pre-fetched into a base64 data URL by buildPdfData.
+    if (photoDataUrl) {
+      checkNewPage(46);
+      try {
+        const imgW = 60;
+        const imgH = 42;
+        doc.addImage(photoDataUrl, "JPEG", margin + 48, y, imgW, imgH);
+        // Subtle border for legibility against white pages.
+        doc.setDrawColor(...BRAND.lightGray);
+        doc.rect(margin + 48, y, imgW, imgH);
+        y += imgH + 3;
+      } catch {
+        // Bad/unsupported data URL — skip silently, document stays valid.
+      }
     }
 
     y += 2;
@@ -325,10 +371,18 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
       );
 
       if (photoDeductions.length > 0) {
-        // Render each deductible photo as its own line
+        // Render each deductible photo as its own line. Description uses only
+        // the inspector-written notes — AI analysis text is never included in
+        // tenant-facing documents.
         for (const photo of photoDeductions) {
-          const desc = `${item.name}${photo.notes ? ` — ${photo.notes}` : photo.ai_analysis ? ` — ${photo.ai_analysis}` : ""}`;
-          renderDeductionLine(room.name, desc, photo.cost_estimate || 0, photo.ai_original_cost);
+          const desc = `${item.name}${photo.notes ? ` — ${photo.notes}` : ""}`;
+          renderDeductionLine(
+            room.name,
+            desc,
+            photo.cost_estimate || 0,
+            photo.ai_original_cost,
+            photo.data_url,
+          );
         }
       } else if (item.is_deduction && item.cost_estimate > 0) {
         // Item-level deduction (no per-photo deductions)
@@ -469,14 +523,22 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
     }
   }
 
-  function addWrapped(text: string, x: number, fontSize: number, maxWidth: number, style: "normal" | "bold" | "italic" = "normal") {
+  function addWrapped(
+    text: string,
+    x: number,
+    fontSize: number,
+    maxWidth: number,
+    style: "normal" | "bold" | "italic" = "normal",
+  ) {
     doc.setFontSize(fontSize);
     doc.setFont("helvetica", style);
+    // Slightly tighter single-spacing — 0.5 felt airy for 10pt body copy.
+    const lineHeight = fontSize * 0.45;
     const lines = doc.splitTextToSize(text, maxWidth);
     for (const line of lines) {
-      checkNewPage(fontSize * 0.6);
+      checkNewPage(fontSize * 0.55);
       doc.text(line, x, y);
-      y += fontSize * 0.5;
+      y += lineHeight;
     }
   }
 
@@ -526,20 +588,26 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
   y += 10;
 
   // ── Subject line ──
+  const subjectBoxH = 22;
   doc.setFillColor(...BRAND.bgGray);
   doc.setDrawColor(...BRAND.lightGray);
-  doc.rect(margin, y - 4, contentWidth, 18, "FD");
+  doc.rect(margin, y - 4, contentWidth, subjectBoxH, "FD");
+  // Maroon accent bar on the left edge.
+  doc.setFillColor(...BRAND.maroon);
+  doc.rect(margin, y - 4, 1.2, subjectBoxH, "F");
 
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...BRAND.black);
-  doc.text("RE: SECURITY DEPOSIT DISPOSITION", margin + 5, y + 1);
-  y += 6;
+  doc.text("RE: SECURITY DEPOSIT DISPOSITION", margin + 6, y + 2);
+  y += 8;
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
   const moveOutDate = inspection.completed_date || inspection.scheduled_date || "N/A";
-  doc.text(`Unit: ${inspection.unit_name}  |  Move-Out Date: ${moveOutDate}`, margin + 5, y + 1);
-  y += 12;
+  doc.text(`Unit: ${inspection.unit_name}  |  Move-Out Date: ${moveOutDate}`, margin + 6, y + 1);
+  doc.setTextColor(...BRAND.black);
+  y += 14;
 
   // ── Salutation ──
   const salutation = tenantNames.length > 2
@@ -683,9 +751,17 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
     "If you believe your security deposit has been wrongfully withheld, you may pursue remedies under California Civil Code Section 1950.5(l), which may include recovery of up to twice the amount of the security deposit in addition to actual damages.",
   ];
 
+  // Bulleted list with proper hanging indent — bullet stays flush while the
+  // wrapped text body aligns cleanly under itself.
+  const bulletX = margin + 2;
+  const textX = margin + 7;
   for (const right of rights) {
     checkNewPage(12);
-    addWrapped(`  •  ${right}`, margin, 9, contentWidth - 5);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.black);
+    doc.text("•", bulletX, y);
+    addWrapped(right, textX, 9, contentWidth - 7);
     y += 2;
   }
 
@@ -724,13 +800,21 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
   doc.text("Enclosures:", margin, y);
   y += 4;
   doc.setFont("helvetica", "normal");
-  doc.text("1.  Itemized Statement of Security Deposit Deductions", margin + 3, y);
-  y += 4;
+
+  // Counter-based numbering so future enclosure types can be added without
+  // desyncing the list.
+  const enclosures: string[] = [
+    "Itemized Statement of Security Deposit Deductions (with photographic evidence)",
+  ];
   if (refundAmount > 0) {
-    doc.text(`2.  Refund check — $${refundAmount.toFixed(2)}`, margin + 3, y);
-    y += 4;
+    enclosures.push(`Refund check — $${refundAmount.toFixed(2)}`);
   }
-  doc.text(`${refundAmount > 0 ? "3" : "2"}.  Photographic documentation available upon written request`, margin + 3, y);
+  enclosures.push("Full-resolution photographic documentation available upon written request");
+
+  enclosures.forEach((text, idx) => {
+    doc.text(`${idx + 1}.  ${text}`, margin + 3, y);
+    y += 4;
+  });
 
   if (tenantEmails.length > 0) {
     y += 8;
