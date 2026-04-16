@@ -1159,19 +1159,19 @@ function MoveOutInspectionContent() {
 
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between">
           <div>
-            <Link href="/inspections" className="text-xs font-medium text-accent hover:underline">
+            <Link href="/inspections" className="inline-flex items-center min-h-[44px] text-xs font-medium text-accent hover:underline">
               &larr; All Inspections
             </Link>
-            <h1 className="text-2xl font-bold tracking-tight mt-1">Move-Out Inspections</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              July 31, 2026 move-outs &mdash; full walk with floor plan, photos, AI analysis, and deposit deduction invoice
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Move-Out Inspections</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+              Full walk with photos, AI analysis &amp; deposit deduction invoice
             </p>
           </div>
           <button
             onClick={() => { setShowList(false); setStep("select_unit"); }}
-            className="px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
           >
             + Start Inspection
           </button>
@@ -1193,18 +1193,18 @@ function MoveOutInspectionContent() {
                 }}
               />
             </div>
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <button onClick={() => setStatusFilter(statusFilter === "completed" ? "all" : "completed")} className={`rounded-xl py-2 transition-colors ${statusFilter === "completed" ? "bg-green-50 ring-1 ring-green-200" : "hover:bg-muted/50"}`}>
-                <p className="text-2xl font-bold tracking-tight text-green-600">{completedCount}</p>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Completed</p>
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
+              <button onClick={() => setStatusFilter(statusFilter === "completed" ? "all" : "completed")} className={`rounded-xl py-2.5 min-h-[44px] transition-colors ${statusFilter === "completed" ? "bg-green-50 ring-1 ring-green-200" : "hover:bg-muted/50"}`}>
+                <p className="text-xl sm:text-2xl font-bold tracking-tight text-green-600">{completedCount}</p>
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Done</p>
               </button>
-              <button onClick={() => setStatusFilter(statusFilter === "in_progress" ? "all" : "in_progress")} className={`rounded-xl py-2 transition-colors ${statusFilter === "in_progress" ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-muted/50"}`}>
-                <p className="text-2xl font-bold tracking-tight text-blue-600">{inProgressCount}</p>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">In Progress</p>
+              <button onClick={() => setStatusFilter(statusFilter === "in_progress" ? "all" : "in_progress")} className={`rounded-xl py-2.5 min-h-[44px] transition-colors ${statusFilter === "in_progress" ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-muted/50"}`}>
+                <p className="text-xl sm:text-2xl font-bold tracking-tight text-blue-600">{inProgressCount}</p>
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Active</p>
               </button>
-              <button onClick={() => setStatusFilter(statusFilter === "not_started" ? "all" : "not_started")} className={`rounded-xl py-2 transition-colors ${statusFilter === "not_started" ? "bg-slate-100 ring-1 ring-slate-300" : "hover:bg-muted/50"}`}>
-                <p className="text-2xl font-bold tracking-tight text-slate-500">{notStartedCount}</p>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Not Started</p>
+              <button onClick={() => setStatusFilter(statusFilter === "not_started" ? "all" : "not_started")} className={`rounded-xl py-2.5 min-h-[44px] transition-colors ${statusFilter === "not_started" ? "bg-slate-100 ring-1 ring-slate-300" : "hover:bg-muted/50"}`}>
+                <p className="text-xl sm:text-2xl font-bold tracking-tight text-slate-500">{notStartedCount}</p>
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Pending</p>
               </button>
             </div>
           </div>
@@ -1212,39 +1212,41 @@ function MoveOutInspectionContent() {
 
         {/* Search and filters */}
         {totalCount > 0 && (
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-[200px]">
+          <div className="space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+            <div className="w-full sm:flex-1 sm:min-w-[200px]">
               <input
                 type="text"
                 placeholder="Search unit, tenant, or property..."
                 value={listSearch}
                 onChange={(e) => setListSearch(e.target.value)}
-                className="w-full text-sm border border-border rounded-xl px-3.5 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 min-h-[44px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
               />
             </div>
-            {propertyNames.length > 1 && (
-              <select
-                value={propertyFilter}
-                onChange={(e) => setPropertyFilter(e.target.value)}
-                className="text-sm border border-border rounded-xl px-3 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
-              >
-                <option value="all">All Properties</option>
-                {propertyNames.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            )}
-            {(statusFilter !== "all" || propertyFilter !== "all" || listSearch) && (
-              <button
-                onClick={() => { setStatusFilter("all"); setPropertyFilter("all"); setListSearch(""); }}
-                className="text-xs font-medium text-accent hover:underline"
-              >
-                Clear filters
-              </button>
-            )}
-            <span className="text-xs text-muted-foreground">
-              {sortedInspections.length} of {totalCount}
-            </span>
+            <div className="flex items-center gap-2 sm:gap-3">
+              {propertyNames.length > 1 && (
+                <select
+                  value={propertyFilter}
+                  onChange={(e) => setPropertyFilter(e.target.value)}
+                  className="flex-1 sm:flex-none text-sm border border-border rounded-xl px-3 py-2.5 min-h-[44px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                >
+                  <option value="all">All Properties</option>
+                  {propertyNames.map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              )}
+              {(statusFilter !== "all" || propertyFilter !== "all" || listSearch) && (
+                <button
+                  onClick={() => { setStatusFilter("all"); setPropertyFilter("all"); setListSearch(""); }}
+                  className="min-h-[44px] px-3 text-xs font-medium text-accent hover:underline"
+                >
+                  Clear
+                </button>
+              )}
+              <span className="text-xs text-muted-foreground shrink-0">
+                {sortedInspections.length}/{totalCount}
+              </span>
+            </div>
           </div>
         )}
 
@@ -1411,7 +1413,7 @@ function MoveOutInspectionContent() {
   if (step === "select_unit") {
     return (
       <div className="space-y-6 max-w-2xl">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-xs font-medium text-accent hover:underline">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="inline-flex items-center min-h-[44px] text-xs font-medium text-accent hover:underline">
           &larr; Back to list
         </button>
         <div>
@@ -1436,8 +1438,8 @@ function MoveOutInspectionContent() {
               ? units.filter((u) => u.propertyName === selectedProperty)
               : [];
             return (
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Property *</label>
                   <select
                     value={selectedProperty}
@@ -1445,7 +1447,7 @@ function MoveOutInspectionContent() {
                       setSelectedProperty(e.target.value);
                       setNewForm({ ...newForm, unitId: "", depositAmount: 0 });
                     }}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
                   >
                     <option value="">Select a property...</option>
                     {propertyNames.map((name) => (
@@ -1454,7 +1456,7 @@ function MoveOutInspectionContent() {
                   </select>
                 </div>
 
-                <div className="md:col-span-2">
+                <div className="sm:col-span-2">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Unit *</label>
                   <select
                     value={newForm.unitId}
@@ -1468,7 +1470,7 @@ function MoveOutInspectionContent() {
                       });
                     }}
                     disabled={!selectedProperty}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors disabled:opacity-40"
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors disabled:opacity-40"
                   >
                     <option value="">{selectedProperty ? "Select a unit..." : "Select a property first"}</option>
                     {filteredUnits.map((u) => (
@@ -1486,7 +1488,7 @@ function MoveOutInspectionContent() {
                     placeholder="Inspector name"
                     value={newForm.inspector}
                     onChange={(e) => { setNewForm({ ...newForm, inspector: e.target.value }); setFormErrors((prev) => { const n = { ...prev }; delete n.inspector; return n; }); }}
-                    className={`w-full text-sm border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors ${formErrors.inspector ? "border-red-300" : "border-border"}`}
+                    className={`w-full text-sm border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors ${formErrors.inspector ? "border-red-300" : "border-border"}`}
                   />
                   {formErrors.inspector && <p className="text-xs text-red-500 mt-1">{formErrors.inspector}</p>}
                 </div>
@@ -1497,7 +1499,7 @@ function MoveOutInspectionContent() {
                     type="date"
                     value={newForm.scheduledDate}
                     onChange={(e) => setNewForm({ ...newForm, scheduledDate: e.target.value })}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
                   />
                 </div>
 
@@ -1505,10 +1507,11 @@ function MoveOutInspectionContent() {
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Security Deposit ($)</label>
                   <input
                     type="number"
+                    inputMode="decimal"
                     placeholder="0"
                     value={newForm.depositAmount || ""}
                     onChange={(e) => setNewForm({ ...newForm, depositAmount: parseFloat(e.target.value) || 0 })}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-2.5 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                    className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
                   />
                 </div>
               </div>
@@ -1518,7 +1521,7 @@ function MoveOutInspectionContent() {
           <button
             onClick={startNewInspection}
             disabled={!newForm.unitId || !newForm.inspector}
-            className="px-5 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors disabled:opacity-40 shadow-sm"
+            className="w-full sm:w-auto min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors disabled:opacity-40 shadow-sm"
           >
             Continue to Floor Plan →
           </button>
@@ -1818,16 +1821,16 @@ function MoveOutInspectionContent() {
                       const name = prompt("Item name:");
                       if (name) addItemToRoom(selectedRoomIdx, name);
                     }}
-                    className="text-xs text-accent hover:underline"
+                    className="min-h-[44px] px-3 text-xs font-medium text-accent hover:underline"
                   >
                     + Add Item
                   </button>
                   {activeInspection.rooms.length > 1 && (
                     <button
                       onClick={() => removeRoom(selectedRoomIdx)}
-                      className="text-xs text-red-500 hover:underline"
+                      className="min-h-[44px] px-3 text-xs font-medium text-red-500 hover:underline"
                     >
-                      Remove Room
+                      Remove
                     </button>
                   )}
                 </div>
@@ -1840,18 +1843,18 @@ function MoveOutInspectionContent() {
                   {/* Item header */}
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium flex-1 min-w-0 truncate">{item.item}</p>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <select
                         value={item.condition}
                         onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "condition", e.target.value)}
-                        className="text-xs border border-border rounded-lg px-2 py-1.5 bg-card min-w-[90px]"
+                        className="text-xs border border-border rounded-lg px-2 py-2 bg-card min-w-[90px] min-h-[40px]"
                       >
                         <option value="">Condition</option>
                         {CONDITIONS.map((c) => (
                           <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                         ))}
                       </select>
-                      <label className="px-2.5 py-1.5 text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 transition-colors whitespace-nowrap">
+                      <label className="inline-flex items-center px-3 py-2 min-h-[40px] text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 active:bg-accent/15 transition-colors whitespace-nowrap">
                         + Photo
                         <input
                           type="file"
@@ -1870,7 +1873,7 @@ function MoveOutInspectionContent() {
                     placeholder="Item notes..."
                     value={item.notes}
                     onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "notes", e.target.value)}
-                    className="w-full text-xs border border-border rounded-lg px-2.5 py-2 bg-card"
+                    className="w-full text-sm border border-border rounded-lg px-3 py-2.5 min-h-[44px] bg-card"
                   />
 
                   {/* Per-photo cards — mobile-first, big photo, clearly separated AI vs inspector text */}
@@ -2000,7 +2003,7 @@ function MoveOutInspectionContent() {
                   {isReview && item.photos.length > 0 && !item.photos[0]?.aiAnalysis && failedAnalyses.some((f) => f.roomIdx === selectedRoomIdx && f.itemIdx === itemIdx) && (
                     <button
                       onClick={() => retryFailedAnalysis(selectedRoomIdx, itemIdx)}
-                      className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                      className="min-h-[44px] px-3 py-2 text-xs text-amber-600 hover:text-amber-700 font-medium bg-amber-50 rounded-lg active:bg-amber-100 transition-colors"
                     >
                       AI analysis failed — tap to retry
                     </button>
@@ -2008,23 +2011,24 @@ function MoveOutInspectionContent() {
 
                   {/* Item-level deduction (fallback when no per-photo deductions) */}
                   {isReview && !item.photos.some((p) => p.isDeduction) && (
-                    <div className="flex flex-wrap gap-2">
-                      <label className="flex items-center gap-1.5 px-2 py-1.5 border border-border rounded-lg cursor-pointer">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 px-3 py-2.5 min-h-[44px] border border-border rounded-lg cursor-pointer active:bg-muted/50 transition-colors">
                         <input
                           type="checkbox"
                           checked={item.isDeduction}
                           onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "isDeduction", e.target.checked)}
-                          className="rounded"
+                          className="w-4 h-4 rounded accent-accent"
                         />
-                        <span className="text-xs text-muted-foreground">Deduct (item-level)</span>
+                        <span className="text-sm text-muted-foreground">Deduct (item-level)</span>
                       </label>
                       {item.isDeduction && (
                         <input
                           type="number"
+                          inputMode="decimal"
                           placeholder="$0"
                           value={item.costEstimate || ""}
                           onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "costEstimate", parseFloat(e.target.value) || 0)}
-                          className="w-24 text-xs text-right border border-border rounded-lg px-2.5 py-2 bg-card"
+                          className="w-28 text-sm text-right border border-border rounded-lg px-3 py-2.5 min-h-[44px] bg-card"
                         />
                       )}
                     </div>
@@ -2077,7 +2081,7 @@ function MoveOutInspectionContent() {
 
     return (
       <div className="space-y-6">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="text-xs font-medium text-accent hover:underline">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="inline-flex items-center min-h-[44px] text-xs font-medium text-accent hover:underline">
           &larr; Back to list
         </button>
         <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
@@ -2092,22 +2096,22 @@ function MoveOutInspectionContent() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="bg-card rounded-2xl border border-border p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Total Deductions</p>
-            <p className="text-2xl font-bold mt-2 tracking-tight text-red-600">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4">
+          <div className="bg-card rounded-2xl border border-border p-3 sm:p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Deductions</p>
+            <p className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2 tracking-tight text-red-600">
               ${(activeInspection.invoiceTotal || totalDeductions).toLocaleString()}
             </p>
           </div>
-          <div className="bg-card rounded-2xl border border-border p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Deposit Held</p>
-            <p className="text-2xl font-bold mt-2 tracking-tight">
+          <div className="bg-card rounded-2xl border border-border p-3 sm:p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Deposit</p>
+            <p className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2 tracking-tight">
               ${(activeInspection.depositAmount || 0).toLocaleString()}
             </p>
           </div>
-          <div className="bg-card rounded-2xl border border-border p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Refund Due</p>
-            <p className="text-2xl font-bold mt-2 tracking-tight text-green-600">
+          <div className="bg-card rounded-2xl border border-border p-3 sm:p-5 text-center" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Refund</p>
+            <p className="text-lg sm:text-2xl font-bold mt-1 sm:mt-2 tracking-tight text-green-600">
               ${Math.max(0, (activeInspection.depositAmount || 0) - (activeInspection.invoiceTotal || totalDeductions)).toLocaleString()}
             </p>
           </div>
@@ -2133,14 +2137,14 @@ function MoveOutInspectionContent() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSelectedTenants(new Set(unitTenants.map((_, i) => i)))}
-                  className="text-xs font-medium text-accent hover:underline"
+                  className="min-h-[44px] px-2 text-xs font-medium text-accent hover:underline"
                 >
                   Select All
                 </button>
                 <span className="text-muted-foreground text-xs">&middot;</span>
                 <button
                   onClick={() => setSelectedTenants(new Set())}
-                  className="text-xs font-medium text-accent hover:underline"
+                  className="min-h-[44px] px-2 text-xs font-medium text-accent hover:underline"
                 >
                   Deselect All
                 </button>
@@ -2150,7 +2154,7 @@ function MoveOutInspectionContent() {
               </div>
               <div className="space-y-2">
                 {unitTenants.map((t, i) => (
-                  <label key={i} className={`flex items-center gap-3 px-4 py-3 border rounded-xl cursor-pointer transition-all ${selectedTenants.has(i) ? "border-accent/30 bg-accent-light" : "border-border hover:bg-muted/50"}`}>
+                  <label key={i} className={`flex items-center gap-3 px-4 py-3 min-h-[52px] border rounded-xl cursor-pointer active:scale-[0.99] transition-all ${selectedTenants.has(i) ? "border-accent/30 bg-accent-light" : "border-border hover:bg-muted/50"}`}>
                     <input
                       type="checkbox"
                       checked={selectedTenants.has(i)}
@@ -2160,7 +2164,7 @@ function MoveOutInspectionContent() {
                         else next.add(i);
                         setSelectedTenants(next);
                       }}
-                      className="rounded accent-accent"
+                      className="w-5 h-5 rounded accent-accent"
                     />
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium">{t.name}</span>
@@ -2193,7 +2197,7 @@ function MoveOutInspectionContent() {
               downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
             }}
             disabled={unitTenants.length > 0 && selectedTenants.size === 0}
-            className="group block w-full text-left px-4 py-3.5 border border-border rounded-xl hover:bg-muted/50 text-sm disabled:opacity-40 transition-colors"
+            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
             <span className="font-medium group-hover:text-accent transition-colors">Generate & Download Disposition Letter</span>
             <span className="block text-xs text-muted-foreground mt-0.5">
@@ -2213,7 +2217,7 @@ function MoveOutInspectionContent() {
               const deductionPdf = generateDepositDeductionPDF(pdfData);
               downloadPDF(deductionPdf, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
             }}
-            className="group block w-full text-left px-4 py-3.5 border border-border rounded-xl hover:bg-muted/50 text-sm transition-colors"
+            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
           >
             <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
             <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
@@ -2269,7 +2273,7 @@ function MoveOutInspectionContent() {
                 return (
                   <div key={room.id}>
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{room.name}</p>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
                       {roomPhotos.map(({ photo, item }) => (
                         <div key={photo.id} className="group relative">
                           <a href={photo.url} target="_blank" rel="noopener noreferrer">

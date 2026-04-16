@@ -343,9 +343,9 @@ export function InspectionCamera({
   }
 
   function goToNextRoom() {
-    stopCamera();
     setShowPanoramaViewer(false);
     if (isLastRoom) {
+      stopCamera();
       batchAnalyzeAndComplete();
     } else {
       setCurrentRoomIdx((i) => i + 1);
@@ -353,7 +353,6 @@ export function InspectionCamera({
   }
 
   function goToPrevRoom() {
-    stopCamera();
     setShowPanoramaViewer(false);
     if (!isFirstRoom) setCurrentRoomIdx((i) => i - 1);
   }
