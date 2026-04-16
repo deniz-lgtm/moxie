@@ -117,7 +117,7 @@ function StepProgressBar({
             <button
               onClick={() => isReachable ? onStepClick(s.key) : undefined}
               disabled={!isReachable}
-              className={`flex items-center gap-1.5 w-full px-2 py-2 rounded-lg text-xs font-medium transition-all ${
+              className={`flex items-center gap-1.5 w-full px-2 py-2.5 min-h-[44px] rounded-lg text-xs font-medium transition-all ${
                 isActive
                   ? "bg-accent text-white shadow-sm"
                   : isCompleted
@@ -1535,19 +1535,19 @@ function MoveOutInspectionContent() {
   if (step === "floor_plan" && activeInspection) {
     return (
       <div className="space-y-6">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="inline-flex items-center min-h-[44px] text-sm text-accent hover:underline">
           &larr; Back to list
         </button>
         <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">Upload Floor Plan</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Upload Floor Plan</h1>
           <SaveIndicator status={saveStatus} onRetry={retrySave} />
         </div>
-        <p className="text-muted-foreground">
-          {activeInspection.unitNumber} — Upload an architectural floor plan and AI will identify rooms automatically.
+        <p className="text-sm text-muted-foreground">
+          {activeInspection.unitNumber} — Upload a floor plan and AI will identify rooms automatically.
         </p>
 
-        <div className="bg-card rounded-xl border border-border p-6 text-center space-y-4">
+        <div className="bg-card rounded-xl border border-border p-4 sm:p-6 text-center space-y-4">
           {activeInspection.floorPlanUrl ? (
             <div>
               <img
@@ -1573,7 +1573,7 @@ function MoveOutInspectionContent() {
             </div>
           )}
 
-          <div className="flex justify-center gap-3">
+          <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-3">
             <input
               ref={fileInputRef}
               type="file"
@@ -1583,13 +1583,13 @@ function MoveOutInspectionContent() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 border border-border text-sm rounded-lg hover:bg-muted"
+              className="min-h-[48px] px-5 py-3 border border-border text-sm font-medium rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
             >
               {activeInspection.floorPlanUrl ? "Replace Floor Plan" : "Upload Floor Plan"}
             </button>
             <button
               onClick={activeInspection.rooms.length > 0 ? startWalk : skipFloorPlan}
-              className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90"
+              className="min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 active:scale-[0.98] transition-all"
             >
               {activeInspection.rooms.length > 0 ? "Start Walk →" : "Skip — Use Default Rooms →"}
             </button>
@@ -1847,14 +1847,14 @@ function MoveOutInspectionContent() {
                       <select
                         value={item.condition}
                         onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "condition", e.target.value)}
-                        className="text-xs border border-border rounded-lg px-2 py-2 bg-card min-w-[90px] min-h-[40px]"
+                        className="text-xs border border-border rounded-lg px-2 py-2 bg-card min-w-[90px] min-h-[44px]"
                       >
                         <option value="">Condition</option>
                         {CONDITIONS.map((c) => (
                           <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                         ))}
                       </select>
-                      <label className="inline-flex items-center px-3 py-2 min-h-[40px] text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 active:bg-accent/15 transition-colors whitespace-nowrap">
+                      <label className="inline-flex items-center px-3 py-2 min-h-[44px] text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 active:bg-accent/15 transition-colors whitespace-nowrap">
                         + Photo
                         <input
                           type="file"
@@ -1959,7 +1959,7 @@ function MoveOutInspectionContent() {
                                     <select
                                       value={photo.condition || ""}
                                       onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "condition", e.target.value)}
-                                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-card min-h-[40px]"
+                                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-card min-h-[44px]"
                                     >
                                       <option value="">Condition</option>
                                       {CONDITIONS.map((c) => (
@@ -1975,7 +1975,7 @@ function MoveOutInspectionContent() {
                                       placeholder="0"
                                       value={photo.costEstimate || ""}
                                       onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "costEstimate", parseFloat(e.target.value) || 0)}
-                                      className="w-full text-sm text-right border border-border rounded-lg px-2.5 py-2 bg-card min-h-[40px]"
+                                      className="w-full text-sm text-right border border-border rounded-lg px-2.5 py-2 bg-card min-h-[44px]"
                                     />
                                   </div>
                                   <label className="col-span-2 flex items-center gap-2 px-3 py-2.5 border border-border rounded-lg cursor-pointer min-h-[44px]">
