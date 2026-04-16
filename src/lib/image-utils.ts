@@ -156,6 +156,114 @@ export function compressPanorama(
   return compressImage(file, maxWidth, quality);
 }
 
+// ── Photo timestamp stamp ──────────────────────────
+
+export type PhotoStampOptions = {
+  /** Primary label rendered above the timestamp (e.g. "Moxie Management"). */
+  label?: string;
+  /** Secondary label rendered below the primary label (e.g. "Unit 12B – Kitchen"). */
+  secondary?: string;
+  /** Date used for the timestamp. Defaults to `new Date()`. */
+  date?: Date;
+};
+
+/**
+ * Burn a date/time stamp (and optional label) directly onto a photo.
+ *
+ * Draws a small translucent plaque in the bottom-left corner of the image so
+ * the timestamp travels with the file — it cannot be removed by copying or
+ * cropping the photo in a simple way. Used for chain-of-custody documentation
+ * on move-out inspection photos.
+ *
+ * Input/output are JPEG data URLs.
+ */
+export function stampPhoto(
+  dataUrl: string,
+  options: PhotoStampOptions = {},
+  quality: number = 0.85,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Failed to get canvas context"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+
+      // Stamp geometry — scale with the image so it reads well on any resolution.
+      const dim = Math.min(canvas.width, canvas.height);
+      const pad = Math.max(12, Math.round(dim * 0.015));
+      const primarySize = Math.max(14, Math.round(dim * 0.028));
+      const timeSize = Math.max(16, Math.round(dim * 0.034));
+      const secondarySize = Math.max(12, Math.round(dim * 0.022));
+
+      const date = options.date ?? new Date();
+      const timeLine = date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const primaryLine = options.label || "Moxie Management";
+      const secondaryLine = options.secondary || "";
+
+      // Measure widest line so the plaque fits snugly.
+      ctx.font = `600 ${primarySize}px -apple-system, system-ui, sans-serif`;
+      const primaryWidth = ctx.measureText(primaryLine).width;
+      ctx.font = `700 ${timeSize}px -apple-system, system-ui, sans-serif`;
+      const timeWidth = ctx.measureText(timeLine).width;
+      ctx.font = `400 ${secondarySize}px -apple-system, system-ui, sans-serif`;
+      const secondaryWidth = secondaryLine ? ctx.measureText(secondaryLine).width : 0;
+
+      const plaqueWidth =
+        Math.max(primaryWidth, timeWidth, secondaryWidth) + pad * 2;
+      const plaqueHeight =
+        pad * 2 +
+        primarySize +
+        6 +
+        timeSize +
+        (secondaryLine ? 6 + secondarySize : 0);
+      const x = pad;
+      const y = canvas.height - plaqueHeight - pad;
+
+      // Translucent dark plaque + subtle maroon accent bar for brand continuity.
+      ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+      ctx.fillRect(x, y, plaqueWidth, plaqueHeight);
+      ctx.fillStyle = "#9d1535";
+      ctx.fillRect(x, y, Math.max(3, Math.round(dim * 0.004)), plaqueHeight);
+
+      // Text: primary, then timestamp, then secondary.
+      ctx.fillStyle = "#ffffff";
+      ctx.textBaseline = "top";
+
+      let textY = y + pad;
+      ctx.font = `600 ${primarySize}px -apple-system, system-ui, sans-serif`;
+      ctx.fillText(primaryLine, x + pad, textY);
+      textY += primarySize + 6;
+
+      ctx.font = `700 ${timeSize}px -apple-system, system-ui, sans-serif`;
+      ctx.fillText(timeLine, x + pad, textY);
+      textY += timeSize + 6;
+
+      if (secondaryLine) {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+        ctx.font = `400 ${secondarySize}px -apple-system, system-ui, sans-serif`;
+        ctx.fillText(secondaryLine, x + pad, textY);
+      }
+
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => reject(new Error("Failed to load image for stamping"));
+    img.src = dataUrl;
+  });
+}
+
 /**
  * Compress a data URL string (e.g. from camera capture).
  * Returns a compressed JPEG data URL.

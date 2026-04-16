@@ -76,6 +76,12 @@ export type DbInspectionItem = {
 export type DbPhoto = {
   id: string;
   url: string; // Supabase storage URL or data URL
+  /**
+   * Transient base64 data URL snapshot of the photo used for PDF embedding.
+   * Populated just-in-time by the client before generating a document;
+   * never persisted to Supabase.
+   */
+  data_url?: string;
   ai_analysis: string | null;
   created_at: string;
   /** Per-photo deduction metadata */

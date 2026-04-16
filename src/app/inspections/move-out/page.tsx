@@ -10,7 +10,7 @@ import { useSaveQueue } from "@/hooks/useSaveQueue";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
-import { validateImage, compressImage, isHeicFile, convertHeicToJpeg } from "@/lib/image-utils";
+import { validateImage, compressImage, isHeicFile, convertHeicToJpeg, stampPhoto } from "@/lib/image-utils";
 import type {
   Inspection,
   InspectionRoom,
@@ -669,6 +669,20 @@ function MoveOutInspectionContent() {
       } else {
         dataUrl = await compressImage(file, 1920, 0.8);
       }
+
+      // Burn a timestamp + room/item stamp onto the photo for chain-of-custody.
+      const room = activeInspection.rooms[roomIdx];
+      const itemName = room?.items[itemIdx]?.item || "";
+      try {
+        dataUrl = await stampPhoto(dataUrl, {
+          label: "Moxie Management",
+          secondary: [room?.name, itemName].filter(Boolean).join(" — "),
+          date: file.lastModified ? new Date(file.lastModified) : new Date(),
+        });
+      } catch {
+        // If stamping fails, keep the unstamped image rather than aborting the upload.
+      }
+
       const photoId = newId();
 
       // Upload to storage
@@ -825,11 +839,14 @@ function MoveOutInspectionContent() {
 
         if (analysis.condition) {
           // Set per-photo metadata
+          // - `aiAnalysis` holds the technical forensic text (internal reference).
+          // - `notes` is pre-filled with the professional tenant-facing Inspector Review,
+          //   which the inspector can review/edit before it goes into the tenant documents.
           rooms[ri].items[ii].photos[pi] = {
             ...photo,
             aiAnalysis: analysis.description,
             condition: analysis.condition,
-            notes: analysis.description || "",
+            notes: analysis.inspector_review || "",
             costEstimate: analysis.total_estimated_cost || 0,
             isDeduction: (analysis.total_estimated_cost || 0) > 0,
             aiOriginalCondition: analysis.condition,
@@ -902,7 +919,7 @@ function MoveOutInspectionContent() {
             ...photo,
             aiAnalysis: analysis.description,
             condition: analysis.condition,
-            notes: analysis.description || "",
+            notes: analysis.inspector_review || "",
             costEstimate: analysis.total_estimated_cost || 0,
             isDeduction: (analysis.total_estimated_cost || 0) > 0,
             aiOriginalCondition: analysis.condition,
@@ -941,7 +958,7 @@ function MoveOutInspectionContent() {
       const { generateDepositDeductionPDF, generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
 
       const logo = await loadLogoBase64();
-      const pdfData = buildPdfData(activeInspection, logo);
+      const pdfData = await buildPdfData(activeInspection, logo);
       const pdfDataUri = generateDepositDeductionPDF(pdfData);
 
       const totalDed = calcDeductions(activeInspection);
@@ -968,8 +985,46 @@ function MoveOutInspectionContent() {
     setGeneratingPDF(false);
   }
 
-  // Build PDF data structure from inspection
-  function buildPdfData(insp: Inspection, logoBase64?: string | null): import("@/lib/pdf-invoice").InvoiceData {
+  /**
+   * Fetch an image URL and return its base64 data URL. Photos may already be
+   * data URLs (returned as-is) or remote storage URLs that need a fetch.
+   * Returns null if the image can't be loaded (network/CORS failure).
+   */
+  async function photoUrlToDataUrl(url: string): Promise<string | null> {
+    if (!url) return null;
+    if (url.startsWith("data:")) return url;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return await new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  // Build PDF data structure from inspection. Pre-fetches photos for the
+  // itemized statement so jsPDF can embed them inline.
+  async function buildPdfData(insp: Inspection, logoBase64?: string | null): Promise<import("@/lib/pdf-invoice").InvoiceData> {
+    // Collect every deductible photo so we can pre-fetch them in parallel.
+    const deductionPhotos = insp.rooms.flatMap((r) =>
+      r.items.flatMap((item) =>
+        item.photos.filter((p) => p.isDeduction && (p.costEstimate || 0) > 0)
+      )
+    );
+    const photoDataUrls = new Map<string, string>();
+    await Promise.all(
+      deductionPhotos.map(async (p) => {
+        const dataUrl = await photoUrlToDataUrl(p.url);
+        if (dataUrl) photoDataUrls.set(p.id, dataUrl);
+      })
+    );
+
     return {
       inspection: {
         ...insp as any,
@@ -986,6 +1041,8 @@ function MoveOutInspectionContent() {
             photos: item.photos.map((p) => ({
               id: p.id,
               url: p.url,
+              // Cached base64 version used by PDF embedding (undefined for non-deduction photos).
+              data_url: photoDataUrls.get(p.id),
               ai_analysis: p.aiAnalysis,
               created_at: p.createdAt,
               condition: p.condition,
@@ -1008,7 +1065,7 @@ function MoveOutInspectionContent() {
       companyName: "Moxie Management",
       companyAddress: "Los Angeles, CA",
       companyPhone: "",
-      companyEmail: "",
+      companyEmail: "hello@moxiemanagement.com",
       logoBase64: logoBase64 || null,
     };
   }
@@ -1546,7 +1603,10 @@ function MoveOutInspectionContent() {
     const currentRoom = activeInspection.rooms[selectedRoomIdx];
 
     return (
-      <div className="space-y-6">
+      <div
+        className="space-y-6 pb-[env(safe-area-inset-bottom)]"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         {showCamera && step === "walking" && (
           <InspectionCamera
             rooms={toCameraRooms(activeInspection.rooms)}
@@ -1559,7 +1619,10 @@ function MoveOutInspectionContent() {
         )}
         <div className="space-y-3">
           <div>
-            <button onClick={() => { setShowList(true); setActiveInspection(null); }} className="text-sm text-accent hover:underline">
+            <button
+              onClick={() => { setShowList(true); setActiveInspection(null); }}
+              className="inline-flex items-center min-h-[44px] text-sm text-accent hover:underline"
+            >
               &larr; Back to list
             </button>
             <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
@@ -1596,14 +1659,14 @@ function MoveOutInspectionContent() {
               <>
                 <button
                   onClick={() => setShowCamera(true)}
-                  className="flex-1 sm:flex-none px-4 py-2.5 bg-[#9d1535] text-white text-sm font-medium rounded-xl hover:bg-[#b91c42] flex items-center justify-center gap-1.5"
+                  className="flex-1 sm:flex-none min-h-[44px] px-4 py-2.5 bg-[#9d1535] text-white text-sm font-medium rounded-xl hover:bg-[#b91c42] flex items-center justify-center gap-1.5"
                 >
                   Camera Walk
                 </button>
                 <button
                   onClick={endWalkAndAnalyze}
                   disabled={analyzing}
-                  className="flex-1 sm:flex-none px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50"
+                  className="flex-1 sm:flex-none min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50"
                 >
                   {analyzing && analysisProgress
                     ? `Analyzing ${analysisProgress.current}/${analysisProgress.total}...`
@@ -1616,7 +1679,7 @@ function MoveOutInspectionContent() {
             {step === "ai_review" && (
               <button
                 onClick={moveToTeamReview}
-                className="w-full sm:w-auto px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
               >
                 Send to Team Review &rarr;
               </button>
@@ -1626,7 +1689,7 @@ function MoveOutInspectionContent() {
                 <button
                   onClick={() => { setPdfError(null); completeAndGeneratePDF(); }}
                   disabled={generatingPDF}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
+                  className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
                 >
                   {generatingPDF ? "Generating PDF..." : "Complete & Generate Invoice"}
                 </button>
@@ -1705,7 +1768,7 @@ function MoveOutInspectionContent() {
             <button
               key={room.id}
               onClick={() => setSelectedRoomIdx(idx)}
-              className={`shrink-0 px-3 py-2 text-xs sm:text-sm font-medium rounded-xl border transition-colors snap-start ${
+              className={`shrink-0 min-h-[44px] px-4 py-2 text-sm font-medium rounded-xl border transition-colors snap-start ${
                 selectedRoomIdx === idx
                   ? "bg-accent text-white border-accent shadow-sm"
                   : "border-border hover:bg-muted"
@@ -1723,7 +1786,7 @@ function MoveOutInspectionContent() {
                 const name = prompt("Room name:");
                 if (name) addRoom(name);
               }}
-              className="shrink-0 px-3 py-1.5 text-sm rounded-lg border border-dashed border-border hover:bg-muted text-muted-foreground"
+              className="shrink-0 min-h-[44px] px-4 py-2 text-sm rounded-xl border border-dashed border-border hover:bg-muted text-muted-foreground"
             >
               + Room
             </button>
@@ -1810,81 +1873,123 @@ function MoveOutInspectionContent() {
                     className="w-full text-xs border border-border rounded-lg px-2.5 py-2 bg-card"
                   />
 
-                  {/* Per-photo cards */}
+                  {/* Per-photo cards — mobile-first, big photo, clearly separated AI vs inspector text */}
                   {item.photos.length > 0 && (
-                    <div className="space-y-2 pl-2 border-l-2 border-border/50">
+                    <div className="space-y-3">
                       {item.photos.map((photo, photoIdx) => (
-                        <div key={photo.id} className={`rounded-lg border p-2 space-y-1.5 ${photo.isDeduction ? "border-red-200 bg-red-50/30" : "border-border bg-card"}`}>
-                          <div className="flex gap-2">
-                            {/* Thumbnail */}
-                            <a href={photo.url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                        <div
+                          key={photo.id}
+                          className={`rounded-xl border overflow-hidden ${
+                            photo.isDeduction ? "border-red-200 bg-red-50/30" : "border-border bg-card"
+                          }`}
+                        >
+                          {/* Large mobile-friendly thumbnail (tap to open full size) */}
+                          <div className="flex flex-col sm:flex-row">
+                            <a
+                              href={photo.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block relative shrink-0 bg-black/5 sm:w-40 md:w-48"
+                            >
                               <img
                                 src={photo.url}
                                 alt=""
-                                className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-md border border-border"
+                                className="w-full h-48 sm:h-full object-cover"
                               />
-                            </a>
-                            {/* Photo metadata */}
-                            <div className="flex-1 min-w-0 space-y-1">
-                              {/* AI analysis text */}
-                              {photo.aiAnalysis && (
-                                <p className="text-[10px] text-muted-foreground italic line-clamp-2">AI: {photo.aiAnalysis}</p>
+                              {photo.isDeduction && (photo.costEstimate || 0) > 0 && (
+                                <span className="absolute top-2 right-2 bg-red-600 text-white text-[11px] font-semibold px-2 py-1 rounded-full shadow">
+                                  ${photo.costEstimate}
+                                </span>
                               )}
-                              {/* Per-photo condition */}
-                              {isReview && (
-                                <select
-                                  value={photo.condition || ""}
-                                  onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "condition", e.target.value)}
-                                  className="text-[11px] border border-border rounded px-1.5 py-1 bg-card w-full"
+                              {!isReview && (
+                                <button
+                                  onClick={(e) => { e.preventDefault(); removePhoto(selectedRoomIdx, itemIdx, photoIdx); }}
+                                  className="absolute top-2 left-2 w-8 h-8 bg-black/60 rounded-full flex items-center justify-center active:scale-95 transition-all"
+                                  aria-label="Remove photo"
                                 >
-                                  <option value="">Condition</option>
-                                  {CONDITIONS.map((c) => (
-                                    <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
-                                  ))}
-                                </select>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                </button>
                               )}
-                              {/* Per-photo notes */}
-                              <input
-                                type="text"
-                                placeholder="Photo notes..."
-                                value={photo.notes || ""}
-                                onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", e.target.value)}
-                                className="w-full text-[11px] border border-border rounded px-1.5 py-1 bg-card"
-                              />
-                              {/* Per-photo deduction controls (review only) */}
+                            </a>
+
+                            {/* Photo metadata */}
+                            <div className="flex-1 min-w-0 p-3 sm:p-4 space-y-3">
+                              {/* AI forensic assessment — read-only, clearly labeled as internal reference */}
+                              {photo.aiAnalysis && (
+                                <div className="rounded-lg bg-muted/40 border border-border/60 p-2.5">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                    AI Forensic Assessment <span className="font-normal normal-case text-muted-foreground/70">· internal reference</span>
+                                  </p>
+                                  <p className="text-[11px] leading-snug text-muted-foreground italic">{photo.aiAnalysis}</p>
+                                </div>
+                              )}
+
+                              {/* Inspector review textarea — this is what goes to the tenant */}
+                              {isReview ? (
+                                <div>
+                                  <label className="text-[10px] font-semibold uppercase tracking-wider text-accent block mb-1">
+                                    Inspector Review <span className="font-normal normal-case text-muted-foreground">· goes to tenant</span>
+                                  </label>
+                                  <textarea
+                                    placeholder="Describe any potential damage in a professional voice the tenant will see on the disposition statement…"
+                                    value={photo.notes || ""}
+                                    onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", e.target.value)}
+                                    rows={3}
+                                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors resize-y min-h-[72px]"
+                                  />
+                                </div>
+                              ) : (
+                                <input
+                                  type="text"
+                                  placeholder="Photo notes..."
+                                  value={photo.notes || ""}
+                                  onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", e.target.value)}
+                                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                                />
+                              )}
+
+                              {/* Condition + deduction controls */}
                               {isReview && (
-                                <div className="flex items-center gap-1.5">
-                                  <label className="flex items-center gap-1 cursor-pointer">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Condition</label>
+                                    <select
+                                      value={photo.condition || ""}
+                                      onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "condition", e.target.value)}
+                                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-card min-h-[40px]"
+                                    >
+                                      <option value="">Condition</option>
+                                      {CONDITIONS.map((c) => (
+                                        <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Deduction ($)</label>
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      placeholder="0"
+                                      value={photo.costEstimate || ""}
+                                      onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "costEstimate", parseFloat(e.target.value) || 0)}
+                                      className="w-full text-sm text-right border border-border rounded-lg px-2.5 py-2 bg-card min-h-[40px]"
+                                    />
+                                  </div>
+                                  <label className="col-span-2 flex items-center gap-2 px-3 py-2.5 border border-border rounded-lg cursor-pointer min-h-[44px]">
                                     <input
                                       type="checkbox"
                                       checked={photo.isDeduction || false}
                                       onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "isDeduction", e.target.checked)}
-                                      className="rounded w-3 h-3"
+                                      className="w-4 h-4 rounded accent-accent"
                                     />
-                                    <span className="text-[10px] text-muted-foreground">Deduct</span>
+                                    <span className="text-sm">Include as deduction on statement</span>
+                                    {photo.aiOriginalCost !== undefined && (photo.costEstimate || 0) !== photo.aiOriginalCost && (
+                                      <span className="ml-auto text-[10px] text-amber-600">AI suggested ${photo.aiOriginalCost}</span>
+                                    )}
                                   </label>
-                                  <input
-                                    type="number"
-                                    placeholder="$0"
-                                    value={photo.costEstimate || ""}
-                                    onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "costEstimate", parseFloat(e.target.value) || 0)}
-                                    className="w-20 text-[11px] text-right border border-border rounded px-1.5 py-1 bg-card"
-                                  />
-                                  {photo.aiOriginalCost !== undefined && (photo.costEstimate || 0) !== photo.aiOriginalCost && (
-                                    <span className="text-[9px] text-amber-600">AI: ${photo.aiOriginalCost}</span>
-                                  )}
                                 </div>
                               )}
                             </div>
-                            {/* Remove button */}
-                            {!isReview && (
-                              <button
-                                onClick={() => removePhoto(selectedRoomIdx, itemIdx, photoIdx)}
-                                className="self-start p-1 text-muted-foreground hover:text-red-500 shrink-0"
-                              >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                              </button>
-                            )}
                           </div>
                         </div>
                       ))}
@@ -2080,7 +2185,7 @@ function MoveOutInspectionContent() {
             onClick={async () => {
               const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
-              const pdfData = buildPdfData(activeInspection, logo);
+              const pdfData = await buildPdfData(activeInspection, logo);
               if (selectedTenantList.length > 0) {
                 pdfData.tenants = selectedTenantList;
               }
@@ -2101,7 +2206,7 @@ function MoveOutInspectionContent() {
             onClick={async () => {
               const { generateDepositDeductionPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
-              const pdfData = buildPdfData(activeInspection, logo);
+              const pdfData = await buildPdfData(activeInspection, logo);
               if (selectedTenantList.length > 0) {
                 pdfData.tenants = selectedTenantList;
               }
