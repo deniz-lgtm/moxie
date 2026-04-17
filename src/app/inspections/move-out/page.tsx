@@ -1621,7 +1621,7 @@ function MoveOutInspectionContent() {
 
     return (
       <div
-        className="space-y-6 pb-[env(safe-area-inset-bottom)]"
+        className="space-y-3 sm:space-y-6 pb-[env(safe-area-inset-bottom)]"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         {showCamera && step === "walking" && (
@@ -1634,61 +1634,65 @@ function MoveOutInspectionContent() {
             enableAiAnalysis={true}
           />
         )}
-        <div className="space-y-3">
-          <div>
+
+        {/* Compact mobile header */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
             <button
               onClick={() => { setShowList(true); setActiveInspection(null); }}
-              className="inline-flex items-center min-h-[44px] text-sm text-accent hover:underline"
+              className="inline-flex items-center min-h-[44px] text-sm text-accent hover:underline shrink-0"
             >
-              &larr; Back to list
+              &larr;
             </button>
-            <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold">
-                {activeInspection.unitNumber}
-              </h1>
-              <StatusBadge
-                value={activeInspection.status}
-                options={["draft", "walking", "ai_review", "team_review", "completed"]}
-                onChange={(newStatus) => {
-                  const updated = { ...activeInspection, status: newStatus as Inspection["status"], updatedAt: new Date().toISOString() };
-                  if (newStatus === "completed" && !activeInspection.completedDate) updated.completedDate = new Date().toISOString().split("T")[0];
-                  saveInspection(updated);
-                  // Sync the wizard step with the new status
-                  const statusToStep: Record<string, WizardStep> = { draft: "floor_plan", walking: "walking", ai_review: "ai_review", team_review: "team_review", completed: "completed" };
-                  const newStep = statusToStep[newStatus];
-                  if (newStep) setStep(newStep);
-                }}
-              />
-              <SaveIndicator status={saveStatus} onRetry={retrySave} />
+            <div className="flex-1 min-w-0">
+              <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
             </div>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {isReview ? "Review AI analysis and edit costs" : "Photos and conditions for each room"}
-            </p>
-            {analyzing && analysisProgress && (
-              <p className="text-xs text-accent mt-1">
-                Analyzing: {analysisProgress.label}
-              </p>
-            )}
           </div>
-          <div className="flex flex-wrap gap-2">
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-2xl font-bold leading-tight">
+              {activeInspection.unitNumber}
+            </h1>
+            <StatusBadge
+              value={activeInspection.status}
+              options={["draft", "walking", "ai_review", "team_review", "completed"]}
+              onChange={(newStatus) => {
+                const updated = { ...activeInspection, status: newStatus as Inspection["status"], updatedAt: new Date().toISOString() };
+                if (newStatus === "completed" && !activeInspection.completedDate) updated.completedDate = new Date().toISOString().split("T")[0];
+                saveInspection(updated);
+                const statusToStep: Record<string, WizardStep> = { draft: "floor_plan", walking: "walking", ai_review: "ai_review", team_review: "team_review", completed: "completed" };
+                const newStep = statusToStep[newStatus];
+                if (newStep) setStep(newStep);
+              }}
+            />
+            <SaveIndicator status={saveStatus} onRetry={retrySave} />
+          </div>
+
+          {analyzing && analysisProgress && (
+            <p className="text-xs text-accent">
+              Analyzing: {analysisProgress.label}
+            </p>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
             {step === "walking" && (
               <>
                 <button
                   onClick={() => setShowCamera(true)}
-                  className="flex-1 sm:flex-none min-h-[44px] px-4 py-2.5 bg-[#9d1535] text-white text-sm font-medium rounded-xl hover:bg-[#b91c42] flex items-center justify-center gap-1.5"
+                  className="flex-1 min-h-[44px] px-4 py-2 bg-[#9d1535] text-white text-sm font-medium rounded-xl hover:bg-[#b91c42] flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all"
                 >
                   Camera Walk
                 </button>
                 <button
                   onClick={endWalkAndAnalyze}
                   disabled={analyzing}
-                  className="flex-1 sm:flex-none min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50"
+                  className="flex-1 min-h-[44px] px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50 active:scale-[0.98] transition-all"
                 >
                   {analyzing && analysisProgress
-                    ? `Analyzing ${analysisProgress.current}/${analysisProgress.total}...`
+                    ? `${analysisProgress.current}/${analysisProgress.total}...`
                     : analyzing
-                    ? "Starting analysis..."
+                    ? "Analyzing..."
                     : "End Walk & Analyze"}
                 </button>
               </>
@@ -1696,17 +1700,17 @@ function MoveOutInspectionContent() {
             {step === "ai_review" && (
               <button
                 onClick={moveToTeamReview}
-                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
               >
                 Send to Team Review &rarr;
               </button>
             )}
             {step === "team_review" && (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 w-full">
                 <button
                   onClick={() => { setPdfError(null); completeAndGeneratePDF(); }}
                   disabled={generatingPDF}
-                  className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
+                  className="w-full sm:w-auto min-h-[44px] px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-xl hover:bg-green-700 disabled:opacity-50"
                 >
                   {generatingPDF ? "Generating PDF..." : "Complete & Generate Invoice"}
                 </button>
@@ -1779,33 +1783,41 @@ function MoveOutInspectionContent() {
           </div>
         )}
 
-        {/* Room tabs */}
-        <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1 snap-x">
-          {activeInspection.rooms.map((room, idx) => (
-            <button
-              key={room.id}
-              onClick={() => setSelectedRoomIdx(idx)}
-              className={`shrink-0 min-h-[44px] px-4 py-2 text-sm font-medium rounded-xl border transition-colors snap-start ${
-                selectedRoomIdx === idx
-                  ? "bg-accent text-white border-accent shadow-sm"
-                  : "border-border hover:bg-muted"
-              }`}
-            >
-              {room.name}
-              {room.items.some((i) => i.isDeduction) && (
-                <span className="ml-1 text-[10px] text-red-300">!</span>
-              )}
-            </button>
-          ))}
+        {/* Room tabs — show photo count per room for quick scanning */}
+        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x scrollbar-none">
+          {activeInspection.rooms.map((room, idx) => {
+            const roomPhotoCount = room.items.reduce((sum, i) => sum + i.photos.length, 0);
+            return (
+              <button
+                key={room.id}
+                onClick={() => setSelectedRoomIdx(idx)}
+                className={`shrink-0 min-h-[40px] px-3 py-1.5 text-xs sm:text-sm font-medium rounded-xl border transition-colors snap-start ${
+                  selectedRoomIdx === idx
+                    ? "bg-accent text-white border-accent shadow-sm"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                {room.name}
+                {roomPhotoCount > 0 && (
+                  <span className={`ml-1 text-[10px] ${selectedRoomIdx === idx ? "text-white/70" : "text-muted-foreground"}`}>
+                    {roomPhotoCount}
+                  </span>
+                )}
+                {room.items.some((i) => i.isDeduction) && (
+                  <span className="ml-0.5 text-[10px] text-red-300">!</span>
+                )}
+              </button>
+            );
+          })}
           {!isReview && (
             <button
               onClick={() => {
                 const name = prompt("Room name:");
                 if (name) addRoom(name);
               }}
-              className="shrink-0 min-h-[44px] px-4 py-2 text-sm rounded-xl border border-dashed border-border hover:bg-muted text-muted-foreground"
+              className="shrink-0 min-h-[40px] px-3 py-1.5 text-xs sm:text-sm rounded-xl border border-dashed border-border hover:bg-muted text-muted-foreground"
             >
-              + Room
+              +
             </button>
           )}
         </div>
@@ -1813,36 +1825,36 @@ function MoveOutInspectionContent() {
         {/* Room content */}
         {currentRoom && (
           <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="px-3 py-2.5 sm:p-4 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
                 {isReview ? (
-                  <h2 className="font-semibold">{currentRoom.name}</h2>
+                  <h2 className="text-sm font-semibold truncate">{currentRoom.name}</h2>
                 ) : (
                   <input
                     value={currentRoom.name}
                     onChange={(e) => renameRoom(selectedRoomIdx, e.target.value)}
-                    className="font-semibold bg-transparent border-b border-dashed border-border px-1"
+                    className="text-sm font-semibold bg-transparent border-b border-dashed border-border px-1 min-w-0"
                   />
                 )}
-                <span className="text-xs text-muted-foreground">
+                <span className="text-[11px] text-muted-foreground shrink-0">
                   {currentRoom.items.length} items
                 </span>
               </div>
               {!isReview && (
-                <div className="flex gap-2">
+                <div className="flex items-center shrink-0">
                   <button
                     onClick={() => {
                       const name = prompt("Item name:");
                       if (name) addItemToRoom(selectedRoomIdx, name);
                     }}
-                    className="min-h-[44px] px-3 text-xs font-medium text-accent hover:underline"
+                    className="min-h-[40px] px-2 text-xs font-medium text-accent"
                   >
-                    + Add Item
+                    + Item
                   </button>
                   {activeInspection.rooms.length > 1 && (
                     <button
                       onClick={() => removeRoom(selectedRoomIdx)}
-                      className="min-h-[44px] px-3 text-xs font-medium text-red-500 hover:underline"
+                      className="min-h-[40px] px-2 text-xs font-medium text-red-500/60"
                     >
                       Remove
                     </button>
@@ -1853,22 +1865,29 @@ function MoveOutInspectionContent() {
 
             <div className="divide-y divide-border">
               {currentRoom.items.map((item, itemIdx) => (
-                <div key={item.id} className="p-3 sm:p-4 space-y-2">
-                  {/* Item header */}
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium flex-1 min-w-0 truncate">{item.item}</p>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                <div key={item.id} className="px-3 py-2.5 sm:p-4 space-y-2">
+                  {/* Item header — compact row */}
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.item}</p>
+                      {item.photos.length > 0 && (
+                        <span className="shrink-0 text-[10px] font-semibold bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">
+                          {item.photos.length}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
                       <select
                         value={item.condition}
                         onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "condition", e.target.value)}
-                        className="text-xs border border-border rounded-lg px-2 py-2 bg-card min-w-[90px] min-h-[44px]"
+                        className="text-xs border border-border rounded-lg px-1.5 py-1.5 bg-card min-w-[80px] min-h-[36px]"
                       >
                         <option value="">Condition</option>
                         {CONDITIONS.map((c) => (
                           <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                         ))}
                       </select>
-                      <label className="inline-flex items-center px-3 py-2 min-h-[44px] text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 active:bg-accent/15 transition-colors whitespace-nowrap">
+                      <label className="inline-flex items-center px-2.5 py-1.5 min-h-[36px] text-xs font-medium text-accent bg-accent/5 rounded-lg cursor-pointer hover:bg-accent/10 active:bg-accent/15 transition-colors whitespace-nowrap">
                         + Photo
                         <input
                           type="file"
@@ -1881,14 +1900,16 @@ function MoveOutInspectionContent() {
                     </div>
                   </div>
 
-                  {/* Item-level notes */}
-                  <input
-                    type="text"
-                    placeholder="Item notes..."
-                    value={item.notes}
-                    onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "notes", e.target.value)}
-                    className="w-full text-sm border border-border rounded-lg px-3 py-2.5 min-h-[44px] bg-card"
-                  />
+                  {/* Item-level notes — hidden during walking unless item has notes; always show in review */}
+                  {(isReview || item.notes) ? (
+                    <input
+                      type="text"
+                      placeholder="Item notes..."
+                      value={item.notes}
+                      onChange={(e) => updateItem(selectedRoomIdx, itemIdx, "notes", e.target.value)}
+                      className="w-full text-sm border border-border rounded-lg px-3 py-2 min-h-[40px] bg-card"
+                    />
+                  ) : null}
 
                   {/* Per-photo cards — mobile-first, big photo, clearly separated AI vs inspector text */}
                   {item.photos.length > 0 && (
@@ -2071,16 +2092,16 @@ function MoveOutInspectionContent() {
         )}
 
         {/* Overall notes */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <label className="text-xs text-muted-foreground block mb-1">Overall Notes</label>
+        <div className="bg-card rounded-xl border border-border p-3 sm:p-4">
+          <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1">Overall Notes</label>
           <textarea
             value={activeInspection.overallNotes}
             onChange={(e) =>
               saveInspection({ ...activeInspection, overallNotes: e.target.value, updatedAt: new Date().toISOString() })
             }
-            rows={3}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card resize-none"
-            placeholder="General observations about the unit..."
+            rows={2}
+            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card resize-y"
+            placeholder="General observations..."
           />
         </div>
       </div>
