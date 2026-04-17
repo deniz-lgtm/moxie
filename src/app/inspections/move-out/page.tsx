@@ -1320,9 +1320,14 @@ function MoveOutInspectionContent() {
             </div>
 
             {/* Mobile cards */}
-            <div className="md:hidden space-y-2">
+            <div className="md:hidden space-y-3">
               {sortedInspections.map((insp) => {
                 const ded = calcDeductions(insp);
+                const tenantDisplay = insp.tenantName
+                  ? insp.tenantName.split(",").length > 2
+                    ? `${insp.tenantName.split(",")[0].trim()} +${insp.tenantName.split(",").length - 1} more`
+                    : insp.tenantName
+                  : "No tenant";
                 return (
                   <div
                     key={insp.id}
@@ -1337,15 +1342,28 @@ function MoveOutInspectionContent() {
                         setStep(insp.status === "completed" ? "completed" : insp.status === "team_review" ? "team_review" : insp.status === "ai_review" ? "ai_review" : insp.status === "walking" ? "walking" : "floor_plan");
                       }
                     }}
-                    className="bg-card rounded-xl border border-border p-3.5 active:bg-muted/50 transition-colors cursor-pointer"
+                    className="bg-card rounded-xl border border-border p-4 active:bg-muted/50 transition-colors cursor-pointer"
                     style={{ boxShadow: "var(--shadow-sm)" }}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    {/* Row 1: Unit name + deposit */}
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{insp.unitNumber}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">{insp.propertyName}</p>
+                        <p className="text-base font-semibold leading-tight">{insp.unitNumber}</p>
+                        {insp.propertyName !== insp.unitNumber && (
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">{insp.propertyName}</p>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      {insp.depositAmount ? (
+                        <p className="text-sm font-semibold tabular-nums shrink-0">${insp.depositAmount.toLocaleString()}</p>
+                      ) : null}
+                    </div>
+
+                    {/* Row 2: Tenant (truncated) */}
+                    <p className="text-xs text-muted-foreground mt-1.5 truncate">{tenantDisplay}</p>
+
+                    {/* Row 3: Status + deductions + actions */}
+                    <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-border/50">
+                      <div className="flex items-center gap-2">
                         <StatusBadge
                           value={insp.status}
                           options={["not_started", "draft", "walking", "ai_review", "team_review", "completed"]}
@@ -1355,18 +1373,14 @@ function MoveOutInspectionContent() {
                             saveInspection(updated);
                           }}
                         />
-                        <button
-                          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete ${insp.unitNumber}?`)) deleteInspection(insp.id); }}
-                          className="p-1 rounded-lg text-muted-foreground hover:text-red-600"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-                        </button>
+                        {ded > 0 && <span className="text-xs font-semibold text-red-600">-${ded.toLocaleString()}</span>}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
-                      <span className="truncate flex-1">{insp.tenantName || "No tenant"}</span>
-                      {insp.depositAmount ? <span className="shrink-0">${insp.depositAmount.toLocaleString()}</span> : null}
-                      {ded > 0 && <span className="shrink-0 text-red-600 font-medium">-${ded.toLocaleString()}</span>}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); if (confirm(`Delete ${insp.unitNumber}?`)) deleteInspection(insp.id); }}
+                        className="p-2 -mr-1 rounded-lg text-muted-foreground/50 hover:text-red-600 hover:bg-red-50 active:bg-red-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                      </button>
                     </div>
                   </div>
                 );
