@@ -109,10 +109,10 @@ export default function InspectionsHub() {
     .slice(0, 8);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Inspections</h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Inspections</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
           Five inspection types for every stage of the tenant lifecycle
         </p>
       </div>
@@ -141,12 +141,12 @@ export default function InspectionsHub() {
       </div>
 
       {/* Inspection type cards */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {INSPECTION_TYPES.map((t) => {
           const Icon = t.icon;
           return (
             <Link key={t.type} href={t.href}>
-              <div className={`group ${t.color} rounded-2xl border border-border border-l-4 ${t.borderColor} p-5 card-hover cursor-pointer h-full`}>
+              <div className={`group ${t.color} rounded-2xl border border-border border-l-4 ${t.borderColor} p-4 sm:p-5 card-hover cursor-pointer h-full active:scale-[0.99] transition-transform`}>
                 <div className="flex items-start justify-between">
                   <div className={`w-10 h-10 rounded-xl ${t.iconBg} flex items-center justify-center`}>
                     <Icon size={20} className={t.textColor} />
@@ -177,10 +177,10 @@ export default function InspectionsHub() {
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">Recent Inspections</h2>
           <div className="space-y-1">
             {recent.map((insp) => (
-              <div key={insp.id} className="flex items-center justify-between py-3 px-3 rounded-lg hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0">
-                <div>
-                  <p className="text-sm font-medium">{insp.unitNumber}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+              <div key={insp.id} className="flex items-center justify-between min-h-[52px] py-3 px-3 rounded-lg hover:bg-muted/50 active:bg-muted transition-colors border-b border-border/50 last:border-0 gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium truncate">{insp.unitNumber}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
                     {INSPECTION_TYPES.find((t) => t.type === insp.type)?.label} &middot;{" "}
                     {insp.inspector || "Unassigned"} &middot; {insp.scheduledDate}
                   </p>

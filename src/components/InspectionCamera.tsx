@@ -343,9 +343,9 @@ export function InspectionCamera({
   }
 
   function goToNextRoom() {
-    stopCamera();
     setShowPanoramaViewer(false);
     if (isLastRoom) {
+      stopCamera();
       batchAnalyzeAndComplete();
     } else {
       setCurrentRoomIdx((i) => i + 1);
@@ -353,7 +353,6 @@ export function InspectionCamera({
   }
 
   function goToPrevRoom() {
-    stopCamera();
     setShowPanoramaViewer(false);
     if (!isFirstRoom) setCurrentRoomIdx((i) => i - 1);
   }
@@ -528,10 +527,10 @@ export function InspectionCamera({
                       <img src={photo.url} alt="" className="w-full h-full object-cover" />
                       <button
                         onClick={() => removePhoto(photo.id)}
-                        className="absolute top-1.5 right-1.5 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center shadow-md active:scale-95 transition-all"
+                        className="absolute top-1 right-1 w-10 h-10 bg-red-500/90 rounded-full flex items-center justify-center shadow-md active:scale-90 transition-all"
                         aria-label="Remove photo"
                       >
-                        <X size={16} className="text-white" />
+                        <X size={18} className="text-white" />
                       </button>
                       {photo.aiAnalysis && (
                         <div className="absolute bottom-0 left-0 right-0 bg-black/80 text-white text-[10px] px-1.5 py-1">

@@ -100,8 +100,8 @@ export function StatusBadge({ value, options, onChange }: {
         value={value}
         onChange={(e) => { e.stopPropagation(); onChange(e.target.value); }}
         onClick={(e) => e.stopPropagation()}
-        className={`appearance-none cursor-pointer px-2 py-0.5 rounded-md text-[11px] font-semibold ring-1 ring-inset pr-5 ${colors}`}
-        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 4px center" }}
+        className={`appearance-none cursor-pointer px-2.5 py-1.5 min-h-[36px] sm:min-h-0 rounded-lg text-xs font-semibold ring-1 ring-inset pr-6 ${colors}`}
+        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 6px center" }}
       >
         {options.map((opt) => (
           <option key={opt} value={opt}>{formatLabel(opt)}</option>
@@ -112,7 +112,7 @@ export function StatusBadge({ value, options, onChange }: {
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ring-1 ring-inset ${colors}`}
+      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold ring-1 ring-inset ${colors}`}
     >
       {formatLabel(value)}
     </span>
