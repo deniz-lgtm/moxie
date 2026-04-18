@@ -1,12 +1,25 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { AuthProvider } from "@/components/AuthProvider";
 import { AuthGate } from "@/components/AuthGate";
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+};
+
 export const metadata: Metadata = {
   title: "Moxie Management",
   description: "Property management tools for USC off-campus student housing",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Moxie",
+  },
 };
 
 export default function RootLayout({
@@ -34,7 +47,7 @@ export default function RootLayout({
                   </div>
                 </header>
 
-                <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8">
+                <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-10 py-3 sm:py-6 lg:py-8">
                   {children}
                 </main>
 
