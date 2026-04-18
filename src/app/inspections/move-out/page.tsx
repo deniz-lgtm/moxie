@@ -1911,17 +1911,17 @@ function MoveOutInspectionContent() {
                     />
                   ) : null}
 
-                  {/* Per-photo cards — mobile-first, big photo, clearly separated AI vs inspector text */}
+                  {/* Per-photo cards — compact thumbnails during walk, expanded during review */}
                   {item.photos.length > 0 && (
-                    <div className="space-y-3">
-                      {item.photos.map((photo, photoIdx) => (
+                    <div className={isReview ? "space-y-3" : "flex flex-wrap gap-2"}>
+                      {item.photos.map((photo, photoIdx) => isReview ? (
                         <div
                           key={photo.id}
                           className={`rounded-xl border overflow-hidden ${
                             photo.isDeduction ? "border-red-200 bg-red-50/30" : "border-border bg-card"
                           }`}
                         >
-                          {/* Large mobile-friendly thumbnail (tap to open full size) */}
+                          {/* Review mode: large photo + full controls */}
                           <div className="flex flex-col sm:flex-row">
                             <a
                               href={photo.url}
@@ -1932,103 +1932,83 @@ function MoveOutInspectionContent() {
                               <img
                                 src={photo.url}
                                 alt=""
-                                className="w-full h-48 sm:h-full object-cover"
+                                className="w-full h-40 sm:h-full object-cover"
                               />
                               {photo.isDeduction && (photo.costEstimate || 0) > 0 && (
                                 <span className="absolute top-2 right-2 bg-red-600 text-white text-[11px] font-semibold px-2 py-1 rounded-full shadow">
                                   ${photo.costEstimate}
                                 </span>
                               )}
-                              {!isReview && (
-                                <button
-                                  onClick={(e) => { e.preventDefault(); removePhoto(selectedRoomIdx, itemIdx, photoIdx); }}
-                                  className="absolute top-2 left-2 w-8 h-8 bg-black/60 rounded-full flex items-center justify-center active:scale-95 transition-all"
-                                  aria-label="Remove photo"
-                                >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                                </button>
-                              )}
                             </a>
-
-                            {/* Photo metadata */}
-                            <div className="flex-1 min-w-0 p-3 sm:p-4 space-y-3">
-                              {/* AI forensic assessment — read-only, clearly labeled as internal reference */}
+                            <div className="flex-1 min-w-0 p-3 space-y-2.5">
                               {photo.aiAnalysis && (
-                                <div className="rounded-lg bg-muted/40 border border-border/60 p-2.5">
-                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                                    AI Forensic Assessment <span className="font-normal normal-case text-muted-foreground/70">· internal reference</span>
+                                <div className="rounded-lg bg-muted/40 border border-border/60 p-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
+                                    AI Assessment <span className="font-normal normal-case text-muted-foreground/70">· internal</span>
                                   </p>
                                   <p className="text-[11px] leading-snug text-muted-foreground italic">{photo.aiAnalysis}</p>
                                 </div>
                               )}
-
-                              {/* Inspector review textarea — this is what goes to the tenant */}
-                              {isReview ? (
-                                <div>
-                                  <label className="text-[10px] font-semibold uppercase tracking-wider text-accent block mb-1">
-                                    Inspector Review <span className="font-normal normal-case text-muted-foreground">· goes to tenant</span>
-                                  </label>
-                                  <textarea
-                                    placeholder="Describe any potential damage in a professional voice the tenant will see on the disposition statement…"
-                                    value={photo.notes || ""}
-                                    onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", e.target.value)}
-                                    rows={3}
-                                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors resize-y min-h-[72px]"
-                                  />
-                                </div>
-                              ) : (
-                                <input
-                                  type="text"
-                                  placeholder="Photo notes..."
+                              <div>
+                                <label className="text-[10px] font-semibold uppercase tracking-wider text-accent block mb-1">
+                                  Inspector Review <span className="font-normal normal-case text-muted-foreground">· goes to tenant</span>
+                                </label>
+                                <textarea
+                                  placeholder="Describe damage for the tenant disposition statement…"
                                   value={photo.notes || ""}
                                   onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", e.target.value)}
-                                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                                  rows={2}
+                                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors resize-y"
                                 />
-                              )}
-
-                              {/* Condition + deduction controls */}
-                              {isReview && (
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Condition</label>
-                                    <select
-                                      value={photo.condition || ""}
-                                      onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "condition", e.target.value)}
-                                      className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-card min-h-[44px]"
-                                    >
-                                      <option value="">Condition</option>
-                                      {CONDITIONS.map((c) => (
-                                        <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Deduction ($)</label>
-                                    <input
-                                      type="number"
-                                      inputMode="decimal"
-                                      placeholder="0"
-                                      value={photo.costEstimate || ""}
-                                      onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "costEstimate", parseFloat(e.target.value) || 0)}
-                                      className="w-full text-sm text-right border border-border rounded-lg px-2.5 py-2 bg-card min-h-[44px]"
-                                    />
-                                  </div>
-                                  <label className="col-span-2 flex items-center gap-2 px-3 py-2.5 border border-border rounded-lg cursor-pointer min-h-[44px]">
-                                    <input
-                                      type="checkbox"
-                                      checked={photo.isDeduction || false}
-                                      onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "isDeduction", e.target.checked)}
-                                      className="w-4 h-4 rounded accent-accent"
-                                    />
-                                    <span className="text-sm">Include as deduction on statement</span>
-                                    {photo.aiOriginalCost !== undefined && (photo.costEstimate || 0) !== photo.aiOriginalCost && (
-                                      <span className="ml-auto text-[10px] text-amber-600">AI suggested ${photo.aiOriginalCost}</span>
-                                    )}
-                                  </label>
-                                </div>
-                              )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <select
+                                  value={photo.condition || ""}
+                                  onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "condition", e.target.value)}
+                                  className="w-full text-xs border border-border rounded-lg px-2 py-2 bg-card min-h-[40px]"
+                                >
+                                  <option value="">Condition</option>
+                                  {CONDITIONS.map((c) => (
+                                    <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  placeholder="$0"
+                                  value={photo.costEstimate || ""}
+                                  onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "costEstimate", parseFloat(e.target.value) || 0)}
+                                  className="w-full text-xs text-right border border-border rounded-lg px-2 py-2 bg-card min-h-[40px]"
+                                />
+                              </div>
+                              <label className="flex items-center gap-2 px-2.5 py-2 border border-border rounded-lg cursor-pointer min-h-[40px]">
+                                <input
+                                  type="checkbox"
+                                  checked={photo.isDeduction || false}
+                                  onChange={(e) => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "isDeduction", e.target.checked)}
+                                  className="w-4 h-4 rounded accent-accent"
+                                />
+                                <span className="text-xs">Include as deduction</span>
+                                {photo.aiOriginalCost !== undefined && (photo.costEstimate || 0) !== photo.aiOriginalCost && (
+                                  <span className="ml-auto text-[10px] text-amber-600">AI: ${photo.aiOriginalCost}</span>
+                                )}
+                              </label>
                             </div>
                           </div>
+                        </div>
+                      ) : (
+                        /* Walking mode: compact thumbnail grid */
+                        <div key={photo.id} className="relative w-20 h-20 rounded-lg overflow-hidden bg-black/5 shrink-0">
+                          <a href={photo.url} target="_blank" rel="noopener noreferrer">
+                            <img src={photo.url} alt="" className="w-full h-full object-cover" />
+                          </a>
+                          <button
+                            onClick={(e) => { e.preventDefault(); removePhoto(selectedRoomIdx, itemIdx, photoIdx); }}
+                            className="absolute top-0.5 right-0.5 w-6 h-6 bg-black/60 rounded-full flex items-center justify-center"
+                            aria-label="Remove photo"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                          </button>
                         </div>
                       ))}
                     </div>
