@@ -10,7 +10,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing billId parameter" }, { status: 400 });
     }
 
-    const bill = getBillById(billId);
+    const bill = await getBillById(billId);
     if (!bill) {
       return NextResponse.json({ error: "Bill not found" }, { status: 404 });
     }

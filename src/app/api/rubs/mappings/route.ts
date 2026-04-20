@@ -4,7 +4,7 @@ import type { MeterMapping } from "@/lib/rubs-types";
 
 export async function GET() {
   try {
-    const mappings = getMeterMappings();
+    const mappings = await getMeterMappings();
     return NextResponse.json({ mappings });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to fetch mappings" }, { status: 500 });
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     if (!mapping || !mapping.id || !mapping.propertyName) {
       return NextResponse.json({ error: "Missing required mapping fields" }, { status: 400 });
     }
-    saveMeterMapping(mapping);
+    await saveMeterMapping(mapping);
     return NextResponse.json({ ok: true, mapping });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to save mapping" }, { status: 500 });
@@ -32,7 +32,7 @@ export async function DELETE(request: Request) {
     if (!id) {
       return NextResponse.json({ error: "Missing id parameter" }, { status: 400 });
     }
-    deleteMeterMapping(id);
+    await deleteMeterMapping(id);
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to delete mapping" }, { status: 500 });

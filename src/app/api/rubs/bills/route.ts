@@ -7,7 +7,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const month = url.searchParams.get("month") || undefined;
     const propertyName = url.searchParams.get("property") || undefined;
-    const bills = getBillsFiltered({ month, propertyName });
+    const bills = await getBillsFiltered({ month, propertyName });
     return NextResponse.json({ bills });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to fetch bills" }, { status: 500 });
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     if (!bill || !bill.id || !bill.propertyName) {
       return NextResponse.json({ error: "Missing required bill fields" }, { status: 400 });
     }
-    saveBill(bill);
+    await saveBill(bill);
     return NextResponse.json({ ok: true, bill });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to save bill" }, { status: 500 });
@@ -35,7 +35,7 @@ export async function DELETE(request: Request) {
     if (!id) {
       return NextResponse.json({ error: "Missing id parameter" }, { status: 400 });
     }
-    deleteBill(id);
+    await deleteBill(id);
     return NextResponse.json({ ok: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed to delete bill" }, { status: 500 });

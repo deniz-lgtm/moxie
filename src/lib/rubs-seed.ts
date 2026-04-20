@@ -185,8 +185,8 @@ function generateBillAmount(baseCost: number, unitCount: number): number {
 
 // ─── Seed Function ─────────────────────────────────────────────
 
-export function seedRubsData(): { mappings: number; bills: number } {
-  clearAllRubsData();
+export async function seedRubsData(): Promise<{ mappings: number; bills: number }> {
+  await clearAllRubsData();
 
   let mappingCount = 0;
   let billCount = 0;
@@ -205,7 +205,7 @@ export function seedRubsData(): { mappings: number; bills: number } {
         unitIds,
         splitMethod: meter.splitMethod,
       };
-      saveMeterMapping(mapping);
+      await saveMeterMapping(mapping);
       mappingCount++;
 
       // Create sample bills for master-metered utilities
@@ -241,7 +241,7 @@ export function seedRubsData(): { mappings: number; bills: number } {
             createdAt: new Date(`${month}-15T12:00:00Z`).toISOString(),
             updatedAt: new Date(`${month}-15T12:00:00Z`).toISOString(),
           };
-          saveBill(bill);
+          await saveBill(bill);
           billCount++;
         }
       }

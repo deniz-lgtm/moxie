@@ -25,8 +25,9 @@ import {
   getOccupancyData,
   saveOccupancyData,
   getPropertyAliases,
+  migrateLocalToSupabaseIfNeeded,
 } from "@/lib/rubs-db";
-import { seedRubsData, isSeeded as checkIsSeeded } from "@/lib/rubs-seed";
+import { seedRubsData } from "@/lib/rubs-seed";
 import { calculateAllocations } from "@/lib/rubs-calc";
 import {
   parseAppFolioTemplate,
@@ -54,14 +55,22 @@ export default function RubsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      // Units come from AppFolio API (server-side), RUBS data from localStorage (client-side)
+      // Units from AppFolio API; RUBS data from Supabase (or localStorage fallback)
       const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
 
-      const localBills = getBills();
-      const localMappings = getMeterMappings();
-      const localOccupancy = getOccupancyData();
-      const localAliases = getPropertyAliases();
+      // One-time migration of any existing localStorage data to Supabase
+      const migration = await migrateLocalToSupabaseIfNeeded();
+      if (migration.migrated && migration.counts) {
+        console.log("[RUBS] Migrated localStorage to Supabase:", migration.counts);
+      }
+
+      const [localBills, localMappings, localOccupancy, localAliases] = await Promise.all([
+        getBills(),
+        getMeterMappings(),
+        getOccupancyData(),
+        getPropertyAliases(),
+      ]);
       setBills(localBills);
       setMappings(localMappings);
       setOccupancy(localOccupancy);
@@ -78,30 +87,29 @@ export default function RubsPage() {
     loadData();
   }, [loadData]);
 
-  function handleSeed() {
+  async function handleSeed() {
     setLoading(true);
-    seedRubsData();
-    // Reload from localStorage
-    setBills(getBills());
-    setMappings(getMeterMappings());
+    await seedRubsData();
+    setBills(await getBills());
+    setMappings(await getMeterMappings());
     setSeeded(true);
     setLoading(false);
   }
 
-  function handleDeleteBill(id: string) {
-    deleteBillFromStorage(id);
+  async function handleDeleteBill(id: string) {
+    await deleteBillFromStorage(id);
     setBills((prev) => prev.filter((b) => b.id !== id));
     if (selected?.id === id) setSelected(null);
   }
 
-  function handlePostBill(bill: RubsBill) {
+  async function handlePostBill(bill: RubsBill) {
     const updated: RubsBill = { ...bill, status: "posted", updatedAt: new Date().toISOString() };
-    saveBillToStorage(updated);
+    await saveBillToStorage(updated);
     setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
     setSelected(updated);
   }
 
-  function handleCalculateAll(method: SplitMethod = "occupancy") {
+  async function handleCalculateAll(method: SplitMethod = "occupancy") {
     const draftBills = bills.filter((b) => b.status === "draft");
     if (draftBills.length === 0) {
       alert("No draft bills to calculate.");
@@ -111,12 +119,17 @@ export default function RubsPage() {
 
     let calculated = 0;
     let skipped = 0;
-    const updates: RubsBill[] = bills.map((b) => {
-      if (b.status !== "draft") return b;
-      const mapping = getMeterMappingById(b.mappingId);
+    const updates: RubsBill[] = [];
+    for (const b of bills) {
+      if (b.status !== "draft") {
+        updates.push(b);
+        continue;
+      }
+      const mapping = await getMeterMappingById(b.mappingId);
       if (!mapping) {
         skipped++;
-        return b;
+        updates.push(b);
+        continue;
       }
       const allocs = calculateAllocations({
         totalAmount: b.totalAmount,
@@ -130,10 +143,10 @@ export default function RubsPage() {
         status: "calculated",
         updatedAt: new Date().toISOString(),
       };
-      saveBillToStorage(updated);
+      await saveBillToStorage(updated);
       calculated++;
-      return updated;
-    });
+      updates.push(updated);
+    }
     setBills(updates);
     alert(`Calculated ${calculated} bill${calculated !== 1 ? "s" : ""}${skipped > 0 ? ` (${skipped} skipped — no meter mapping found)` : ""}.`);
   }
@@ -144,7 +157,7 @@ export default function RubsPage() {
     if (!file) return;
     try {
       const data = await parseAppFolioTemplate(file);
-      saveOccupancyData(data);
+      await saveOccupancyData(data);
       setOccupancy(data);
     } catch (err: any) {
       alert(`Failed to parse AppFolio template: ${err.message}`);
@@ -218,8 +231,8 @@ export default function RubsPage() {
         onBack={() => setSelected(null)}
         onPost={() => handlePostBill(selected)}
         onExport={() => handleExport(selected.id)}
-        onRecalculate={(method: SplitMethod) => {
-          const mapping = getMeterMappingById(selected.mappingId);
+        onRecalculate={async (method: SplitMethod) => {
+          const mapping = await getMeterMappingById(selected.mappingId);
           if (!mapping) return;
           const allocs = calculateAllocations({
             totalAmount: selected.totalAmount,
@@ -233,7 +246,7 @@ export default function RubsPage() {
             status: "calculated",
             updatedAt: new Date().toISOString(),
           };
-          saveBillToStorage(updated);
+          await saveBillToStorage(updated);
           setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
           setSelected(updated);
         }}
@@ -520,7 +533,7 @@ function CreateBillForm({
     .filter((m) => m.propertyName === propertyName)
     .map((m) => m.meterType);
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!propertyName || totalAmount <= 0 || !mapping) return;
 
     const bill: RubsBill = {
@@ -536,7 +549,7 @@ function CreateBillForm({
       updatedAt: new Date().toISOString(),
     };
 
-    saveBillToStorage(bill);
+    await saveBillToStorage(bill);
     onCreated(bill);
   }
 
@@ -628,7 +641,7 @@ function BillDetailView({
   onBack: () => void;
   onPost: () => void;
   onExport: () => void;
-  onRecalculate: (method: SplitMethod) => void;
+  onRecalculate: (method: SplitMethod) => void | Promise<void>;
 }) {
   const [recalcMethod, setRecalcMethod] = useState<SplitMethod | "">("");
   const [recalculating, setRecalculating] = useState(false);
@@ -703,10 +716,10 @@ function BillDetailView({
             ))}
           </select>
           <button
-            onClick={() => {
+            onClick={async () => {
               if (!recalcMethod) return;
               setRecalculating(true);
-              onRecalculate(recalcMethod);
+              await onRecalculate(recalcMethod);
               setRecalculating(false);
               setRecalcMethod("");
             }}
@@ -890,9 +903,10 @@ function ImportBillsFlow({
     setStep("preview");
   }
 
-  function handleSaveImported() {
+  async function handleSaveImported() {
     const validBills = parsedBills.filter((p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod);
-    const newBills: RubsBill[] = validBills.map((p) => {
+    const newBills: RubsBill[] = [];
+    for (const p of validBills) {
       const mapping = mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
       const bill: RubsBill = {
         id: `bill-import-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -907,9 +921,9 @@ function ImportBillsFlow({
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      saveBillToStorage(bill);
-      return bill;
-    });
+      await saveBillToStorage(bill);
+      newBills.push(bill);
+    }
     onImported(newBills);
   }
 

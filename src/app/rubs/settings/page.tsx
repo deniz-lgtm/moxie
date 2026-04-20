@@ -46,8 +46,12 @@ export default function RubsSettingsPage() {
     try {
       const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
-      setMappings(getMeterMappings());
-      setAliases(getPropertyAliases());
+      const [loadedMappings, loadedAliases] = await Promise.all([
+        getMeterMappings(),
+        getPropertyAliases(),
+      ]);
+      setMappings(loadedMappings);
+      setAliases(loadedAliases);
     } catch {
       // ignore
     } finally {
@@ -114,37 +118,41 @@ export default function RubsSettingsPage() {
     return a.meterType.localeCompare(b.meterType);
   });
 
-  function handleSave(mapping: MeterMapping) {
-    saveMeterMapping(mapping);
-    setMappings(getMeterMappings());
+  async function handleSave(mapping: MeterMapping) {
+    await saveMeterMapping(mapping);
+    setMappings(await getMeterMappings());
     setShowForm(false);
     setEditMapping(null);
   }
 
-  function handleInlineUpdate(id: string, patch: Partial<MeterMapping>) {
+  async function handleInlineUpdate(id: string, patch: Partial<MeterMapping>) {
     const existing = mappings.find((m) => m.id === id);
     if (!existing) return;
     const updated = { ...existing, ...patch };
-    saveMeterMapping(updated);
+    await saveMeterMapping(updated);
     setMappings((prev) => prev.map((m) => (m.id === id ? updated : m)));
   }
 
-  function handleBulkUpdate(patch: Partial<MeterMapping>) {
+  async function handleBulkUpdate(patch: Partial<MeterMapping>) {
     if (selectedIds.size === 0) return;
-    const updates = mappings.map((m) => {
-      if (!selectedIds.has(m.id)) return m;
+    const updates: MeterMapping[] = [];
+    for (const m of mappings) {
+      if (!selectedIds.has(m.id)) {
+        updates.push(m);
+        continue;
+      }
       const updated = { ...m, ...patch };
-      saveMeterMapping(updated);
-      return updated;
-    });
+      await saveMeterMapping(updated);
+      updates.push(updated);
+    }
     setMappings(updates);
   }
 
-  function handleBulkDelete() {
+  async function handleBulkDelete() {
     if (selectedIds.size === 0) return;
     if (!confirm(`Delete ${selectedIds.size} mapping${selectedIds.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
     for (const id of selectedIds) {
-      deleteMeterMapping(id);
+      await deleteMeterMapping(id);
     }
     setMappings((prev) => prev.filter((m) => !selectedIds.has(m.id)));
     setSelectedIds(new Set());
@@ -159,13 +167,13 @@ export default function RubsSettingsPage() {
     });
   }
 
-  function handleAliasSave(alias: PropertyAlias) {
-    savePropertyAlias(alias);
-    setAliases(getPropertyAliases());
+  async function handleAliasSave(alias: PropertyAlias) {
+    await savePropertyAlias(alias);
+    setAliases(await getPropertyAliases());
   }
 
-  function handleAliasDelete(id: string) {
-    deletePropertyAlias(id);
+  async function handleAliasDelete(id: string) {
+    await deletePropertyAlias(id);
     setAliases((prev) => prev.filter((a) => a.id !== id));
   }
 
@@ -178,8 +186,8 @@ export default function RubsSettingsPage() {
     }
   }
 
-  function handleDelete(id: string) {
-    deleteMeterMapping(id);
+  async function handleDelete(id: string) {
+    await deleteMeterMapping(id);
     setMappings((prev) => prev.filter((m) => m.id !== id));
   }
 
@@ -191,7 +199,7 @@ export default function RubsSettingsPage() {
     setImportError("");
     try {
       const parsed = await parseImportFile(file);
-      const result = transformRowsToMappings(parsed, getPropertyAliases());
+      const result = transformRowsToMappings(parsed, await getPropertyAliases());
       setImportFilename(file.name);
       setImportPreview(result);
     } catch (err: any) {
@@ -199,18 +207,18 @@ export default function RubsSettingsPage() {
     }
   }
 
-  function handleConfirmImport() {
+  async function handleConfirmImport() {
     if (!importPreview) return;
     if (importMode === "replace") {
       // Delete all existing mappings first
       for (const m of mappings) {
-        deleteMeterMapping(m.id);
+        await deleteMeterMapping(m.id);
       }
     }
     for (const m of importPreview.mappings) {
-      saveMeterMapping(m);
+      await saveMeterMapping(m);
     }
-    setMappings(getMeterMappings());
+    setMappings(await getMeterMappings());
     setImportPreview(null);
     setImportFilename("");
     setImportMode("merge");

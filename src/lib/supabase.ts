@@ -92,3 +92,64 @@ export type DbPhoto = {
   ai_original_condition?: string;
   ai_original_cost?: number;
 };
+
+// ─── RUBS Database Types ────────────────────────────────────────
+// Mirror the RubsBill / MeterMapping / OccupancyData / PropertyAlias
+// types from rubs-types.ts but in snake_case for Postgres. See
+// supabase/migrations/20260408_rubs_tables.sql for the schema.
+
+export type DbMeterMapping = {
+  id: string;
+  property_name: string;
+  meter_type: "water" | "gas" | "electric" | "trash";
+  metering_method: "master" | "sub_metered";
+  meter_id: string;
+  unit_ids: string[];
+  split_method: "sqft" | "occupancy" | "equal" | "custom";
+  custom_shares: Record<string, number> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbRubsBill = {
+  id: string;
+  property_name: string;
+  month: string;
+  meter_type: "water" | "gas" | "electric" | "trash";
+  total_amount: number;
+  mapping_id: string;
+  status: "draft" | "calculated" | "posted";
+  allocations: Array<{
+    unitId: string;
+    unitName: string;
+    tenant: string;
+    sqft: number;
+    occupants: number;
+    share: number;
+    amount: number;
+  }>;
+  source_file: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbOccupancy = {
+  id: "singleton";
+  records: Array<{
+    propertyName: string;
+    unitName: string;
+    occupancyUid: string;
+    tenantName: string;
+    occupancyId: string;
+  }>;
+  imported_at: string;
+  filename: string;
+};
+
+export type DbPropertyAlias = {
+  id: string;
+  canonical_name: string;
+  aliases: string[];
+  notes: string | null;
+  created_at: string;
+};

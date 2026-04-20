@@ -17,12 +17,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing billId" }, { status: 400 });
     }
 
-    const bill = getBillById(billId);
+    const bill = await getBillById(billId);
     if (!bill) {
       return NextResponse.json({ error: "Bill not found" }, { status: 404 });
     }
 
-    const mapping = getMeterMappingById(bill.mappingId);
+    const mapping = await getMeterMappingById(bill.mappingId);
     if (!mapping) {
       return NextResponse.json({ error: "Meter mapping not found for this bill" }, { status: 404 });
     }
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       status: "calculated" as const,
       updatedAt: new Date().toISOString(),
     };
-    saveBill(updatedBill);
+    await saveBill(updatedBill);
 
     return NextResponse.json({ ok: true, bill: updatedBill });
   } catch (error: any) {
