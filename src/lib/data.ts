@@ -83,12 +83,12 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (!rows || rows.length === 0) return [];
   const moxieIds = await getMoxiePropertyIds();
   const filtered = rows.filter((row) => {
-    // Direct portfolio_id match
-    const pid = String(row.portfolio_id ?? "").trim();
+    // Direct portfolio_id match (snake_case on most reports, PascalCase on work_order_detail)
+    const pid = String(row.portfolio_id ?? row.PortfolioId ?? "").trim();
     if (pid === MOXIE_PORTFOLIO_ID) return true;
 
     // Fallback: property_id membership (for rows with null portfolio_id)
-    const propId = String(row.property_id || "");
+    const propId = String(row.property_id ?? row.PropertyId ?? "");
     if (propId && moxieIds.has(propId)) return true;
 
     return false;
@@ -97,7 +97,8 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
     console.warn(
       `[Moxie] filterToMoxie: 0/${rows.length} rows matched. ` +
       `Moxie property IDs: ${moxieIds.size}. ` +
-      `Sample: portfolio_id=${rows[0]?.portfolio_id}, property_id=${rows[0]?.property_id}`
+      `Sample: portfolio_id=${rows[0]?.portfolio_id ?? rows[0]?.PortfolioId}, ` +
+      `property_id=${rows[0]?.property_id ?? rows[0]?.PropertyId}`
     );
   }
   return filtered;
