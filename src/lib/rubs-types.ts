@@ -27,6 +27,8 @@ export interface RubsBill {
   mappingId: string; // links to MeterMapping
   status: BillStatus;
   allocations: RubsAllocation[];
+  /** Relative path to the source PDF in the bills folder, e.g. "2026-04/LADWP/acct1.pdf" */
+  sourceFile?: string;
   createdAt: string;
   updatedAt: string;
 }

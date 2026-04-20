@@ -96,6 +96,43 @@ export default function RubsPage() {
     setSelected(updated);
   }
 
+  function handleCalculateAll(method: SplitMethod = "occupancy") {
+    const draftBills = bills.filter((b) => b.status === "draft");
+    if (draftBills.length === 0) {
+      alert("No draft bills to calculate.");
+      return;
+    }
+    if (!confirm(`Calculate allocations for ${draftBills.length} draft bill${draftBills.length !== 1 ? "s" : ""} using "${SPLIT_METHOD_LABELS[method]}"?`)) return;
+
+    let calculated = 0;
+    let skipped = 0;
+    const updates: RubsBill[] = bills.map((b) => {
+      if (b.status !== "draft") return b;
+      const mapping = getMeterMappingById(b.mappingId);
+      if (!mapping) {
+        skipped++;
+        return b;
+      }
+      const allocs = calculateAllocations({
+        totalAmount: b.totalAmount,
+        mapping,
+        units,
+        splitMethod: method,
+      });
+      const updated: RubsBill = {
+        ...b,
+        allocations: allocs,
+        status: "calculated",
+        updatedAt: new Date().toISOString(),
+      };
+      saveBillToStorage(updated);
+      calculated++;
+      return updated;
+    });
+    setBills(updates);
+    alert(`Calculated ${calculated} bill${calculated !== 1 ? "s" : ""}${skipped > 0 ? ` (${skipped} skipped — no meter mapping found)` : ""}.`);
+  }
+
   async function handleTemplateUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (templateInputRef.current) templateInputRef.current.value = "";
@@ -222,6 +259,15 @@ export default function RubsPage() {
           >
             {showImport ? "Cancel Import" : "Import Bills"}
           </button>
+          {bills.filter((b) => b.status === "draft").length > 0 && (
+            <button
+              onClick={() => handleCalculateAll("occupancy")}
+              className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+              title="Calculate allocations for all draft bills using By Occupancy"
+            >
+              Calculate All ({bills.filter((b) => b.status === "draft").length})
+            </button>
+          )}
           <button
             onClick={() => { setShowCreateForm(!showCreateForm); setShowImport(false); }}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
@@ -380,7 +426,19 @@ export default function RubsPage() {
                     <td className="px-4 py-3 text-center">
                       <StatusBadge status={bill.status} />
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {bill.sourceFile && (
+                        <a
+                          href={`/api/rubs/pdf?file=${encodeURIComponent(bill.sourceFile)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs text-accent hover:underline mr-3"
+                          title="View original bill PDF"
+                        >
+                          PDF
+                        </a>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteBill(bill.id); }}
                         className="text-xs text-red-500 hover:underline"
@@ -581,6 +639,19 @@ function BillDetailView({
           <h1 className="text-2xl font-bold">{bill.propertyName}</h1>
           <p className="text-muted-foreground mt-1 capitalize">
             {bill.meterType} &middot; {bill.month} &middot; <StatusBadge status={bill.status} />
+            {bill.sourceFile && (
+              <>
+                {" "}&middot;{" "}
+                <a
+                  href={`/api/rubs/pdf?file=${encodeURIComponent(bill.sourceFile)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  View Original PDF
+                </a>
+              </>
+            )}
           </p>
         </div>
         <div className="text-right">
@@ -820,6 +891,7 @@ function ImportBillsFlow({
         mappingId: mapping?.id || "",
         status: "draft",
         allocations: [],
+        sourceFile: p.sourceFile,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
