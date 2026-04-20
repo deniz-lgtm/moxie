@@ -90,13 +90,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing filename" }, { status: 400 });
     }
 
-    const safeName = path.basename(filename);
+    // The file-server returns names like "subfolder/bill.pdf". Preserve the
+    // relative path but sanitize each segment to block traversal attempts.
+    const relPath = filename
+      .split(/[/\\]/)
+      .filter((seg) => seg && seg !== "." && seg !== "..")
+      .join("/");
+    if (!relPath) {
+      return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
+    }
+    // URL-encode each segment individually so slashes stay as path separators
+    const encodedPath = relPath.split("/").map(encodeURIComponent).join("/");
+    const displayName = relPath.split("/").pop() || relPath;
     let pdfBase64: string;
 
     // Fetch the PDF bytes: either from the remote downloader or from local disk
     if (DOWNLOADER_URL && DOWNLOADER_TOKEN) {
       const res = await fetch(
-        `${DOWNLOADER_URL.replace(/\/$/, "")}/files/${encodeURIComponent(safeName)}`,
+        `${DOWNLOADER_URL.replace(/\/$/, "")}/files/${encodedPath}`,
         {
           headers: {
             Authorization: `Bearer ${DOWNLOADER_TOKEN}`,
@@ -114,7 +125,7 @@ export async function POST(request: Request) {
       const arrayBuf = await res.arrayBuffer();
       pdfBase64 = Buffer.from(arrayBuf).toString("base64");
     } else if (LOCAL_BILLS_FOLDER) {
-      const filePath = path.join(LOCAL_BILLS_FOLDER, safeName);
+      const filePath = path.join(LOCAL_BILLS_FOLDER, ...relPath.split("/"));
       if (!fs.existsSync(filePath)) {
         return NextResponse.json({ error: "File not found" }, { status: 404 });
       }
@@ -126,7 +137,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const results = await parseBillPdf(pdfBase64, knownProperties || [], safeName);
+    const results = await parseBillPdf(pdfBase64, knownProperties || [], displayName);
     return NextResponse.json({ results });
   } catch (error: any) {
     return NextResponse.json(

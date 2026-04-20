@@ -736,6 +736,7 @@ function ImportBillsFlow({
 }) {
   const [step, setStep] = useState<ImportStep>("scan");
   const [files, setFiles] = useState<ImportFileInfo[]>([]);
+  const [scannedFolder, setScannedFolder] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [parsedBills, setParsedBills] = useState<ParsedBill[]>([]);
   const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
@@ -750,13 +751,16 @@ function ImportBillsFlow({
     try {
       const res = await fetch("/api/rubs/import");
       const data = await res.json();
-      if (data.error) {
-        setError(data.error);
+      if (!res.ok || data.error) {
+        setError(data.error || `Scan failed (HTTP ${res.status})`);
+        setScannedFolder(null);
       } else {
         setFiles(data.files || []);
+        setScannedFolder(data.folder || "(unknown)");
       }
     } catch (err: any) {
       setError(err.message || "Failed to scan folder");
+      setScannedFolder(null);
     } finally {
       setScanLoading(false);
     }
@@ -946,7 +950,19 @@ function ImportBillsFlow({
           </>
         )}
 
-        {files.length === 0 && !scanLoading && !error && !showCoworkInstructions && (
+        {files.length === 0 && !scanLoading && !error && !showCoworkInstructions && scannedFolder && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm space-y-2">
+            <p className="font-semibold text-amber-900">No PDFs found in the folder</p>
+            <p className="text-amber-800 text-xs break-all">Scanned: <code>{scannedFolder}</code></p>
+            <p className="text-amber-800">
+              Either the folder is empty, Dropbox hasn&apos;t finished syncing yet, or the files
+              don&apos;t have a <code>.pdf</code> extension. Make sure Cowork saved the bills to
+              the exact path above.
+            </p>
+          </div>
+        )}
+
+        {files.length === 0 && !scanLoading && !error && !showCoworkInstructions && !scannedFolder && (
           <p className="text-sm text-muted-foreground">
             Click &quot;Scan Folder for New Bills&quot; if Cowork has already downloaded bills, or
             click &quot;Need to download new bills?&quot; for instructions.

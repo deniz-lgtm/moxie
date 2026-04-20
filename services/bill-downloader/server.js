@@ -82,28 +82,55 @@ app.get("/files", requireAuth, (_req, res) => {
     if (!fs.existsSync(BILLS_FOLDER)) {
       return res.status(404).json({ error: `Bills folder not found: ${BILLS_FOLDER}` });
     }
-    const entries = fs.readdirSync(BILLS_FOLDER);
-    const files = entries
-      .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .map((name) => {
-        const stat = fs.statSync(path.join(BILLS_FOLDER, name));
-        return {
-          name,
-          size: stat.size,
-          modified: stat.mtime.toISOString(),
-        };
-      })
-      .sort((a, b) => b.modified.localeCompare(a.modified));
+    // Recursively walk the folder to include PDFs in any subfolder
+    const files = [];
+    walkPdfs(BILLS_FOLDER, BILLS_FOLDER, files);
+    files.sort((a, b) => b.modified.localeCompare(a.modified));
     res.json({ folder: BILLS_FOLDER, files });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/files/:name", requireAuth, (req, res) => {
+// Recursively walk a directory, adding all PDFs to the output array.
+// Each entry has a "name" that's the path relative to the base folder
+// (with forward slashes) so it can be safely URL-encoded.
+function walkPdfs(baseFolder, dir, out, depth = 0) {
+  // Guard against absurd nesting (infinite symlinks etc.)
+  if (depth > 6) return;
+  let entries;
   try {
-    const safeName = path.basename(req.params.name);
-    const filePath = path.join(BILLS_FOLDER, safeName);
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkPdfs(baseFolder, fullPath, out, depth + 1);
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".pdf")) {
+      try {
+        const stat = fs.statSync(fullPath);
+        const rel = path.relative(baseFolder, fullPath).split(path.sep).join("/");
+        out.push({
+          name: rel,
+          size: stat.size,
+          modified: stat.mtime.toISOString(),
+        });
+      } catch {
+        // skip files we can't stat
+      }
+    }
+  }
+}
+
+app.get("/files/*", requireAuth, (req, res) => {
+  try {
+    // Express wildcard captures the full path including subfolders
+    const rawName = req.params[0] || "";
+    // Normalize to system separator, reject any traversal attempts
+    const normalized = rawName.split("/").map((s) => path.basename(s)).join(path.sep);
+    const filePath = path.join(BILLS_FOLDER, normalized);
     const resolved = path.resolve(filePath);
     const folderResolved = path.resolve(BILLS_FOLDER);
 
@@ -117,6 +144,7 @@ app.get("/files/:name", requireAuth, (req, res) => {
       return res.status(400).json({ error: "Only PDF files are allowed" });
     }
 
+    const safeName = path.basename(resolved);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
     fs.createReadStream(resolved).pipe(res);
