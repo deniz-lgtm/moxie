@@ -13,8 +13,10 @@ import type {
   AppFolioExportRow,
   RubsBill,
   MeterType,
+  PropertyAlias,
 } from "./rubs-types";
 import { parseCsvText, parseExcelBuffer } from "./rubs-csv-import";
+import { buildAliasMap, resolvePropertyName, normalizePropertyName } from "./rubs-property-resolver";
 
 // ─── Template Parser ───────────────────────────────────────────
 
@@ -106,8 +108,10 @@ export interface ReconciliationResult {
  */
 export function reconcile(
   bills: RubsBill[],
-  occupancy: OccupancyData | null
+  occupancy: OccupancyData | null,
+  aliases: PropertyAlias[] = []
 ): ReconciliationResult {
+  const aliasMap = buildAliasMap(aliases);
   const issues: ReconciliationIssue[] = [];
   const unmatchedAllocations: { property: string; unit: string; tenant: string }[] = [];
   let matchedCount = 0;
@@ -134,10 +138,13 @@ export function reconcile(
     });
   }
 
-  // Build lookup: normalized (property + unit) → OccupancyRecord
+  // Build lookup: canonical-property-normalized | unit-normalized → OccupancyRecord
+  // Using the alias-resolved canonical name means "Dorr Holdings -1 LLC" and
+  // "1006 W. 23rd St" match to the same slot.
   const lookup = new Map<string, OccupancyRecord>();
   for (const rec of occupancy.records) {
-    const key = `${normName(rec.propertyName)}|${normName(rec.unitName)}`;
+    const canonical = resolvePropertyName(rec.propertyName, aliasMap);
+    const key = `${normalizePropertyName(canonical)}|${normName(rec.unitName)}`;
     lookup.set(key, rec);
   }
 
@@ -147,14 +154,15 @@ export function reconcile(
     for (const alloc of bill.allocations) {
       if (alloc.amount <= 0) continue; // skip $0 allocations (vacant units)
 
-      const key = `${normName(bill.propertyName)}|${normName(alloc.unitName)}`;
+      const canonicalBillProp = resolvePropertyName(bill.propertyName, aliasMap);
+      const key = `${normalizePropertyName(canonicalBillProp)}|${normName(alloc.unitName)}`;
       const match = lookup.get(key);
 
       if (match) {
         matchedCount++;
       } else {
         // Try fuzzy match — maybe the property name or unit name differs slightly
-        const fuzzyKey = findFuzzyMatch(bill.propertyName, alloc.unitName, occupancy.records);
+        const fuzzyKey = findFuzzyMatch(bill.propertyName, alloc.unitName, occupancy.records, aliasMap);
         if (fuzzyKey) {
           matchedCount++;
           issues.push({
@@ -188,16 +196,20 @@ export function reconcile(
 function findFuzzyMatch(
   property: string,
   unit: string,
-  records: OccupancyRecord[]
+  records: OccupancyRecord[],
+  aliasMap: Map<string, string> = new Map()
 ): OccupancyRecord | null {
-  const normProp = normName(property);
+  // Use alias-resolved canonical names on both sides for comparison
+  const canonicalIn = resolvePropertyName(property, aliasMap);
+  const normProp = normalizePropertyName(canonicalIn);
   const normUnit = normName(unit);
 
   // Extract just the street number from both sides for comparison
   const unitNum = normUnit.match(/^(\d+)/)?.[1];
 
   for (const rec of records) {
-    const recProp = normName(rec.propertyName);
+    const canonicalRec = resolvePropertyName(rec.propertyName, aliasMap);
+    const recProp = normalizePropertyName(canonicalRec);
     const recUnit = normName(rec.unitName);
 
     // Exact property match but unit is close
@@ -224,8 +236,10 @@ export function generateAppFolioExport(
   utilityType: MeterType,
   occupancy: OccupancyData,
   billingMonth: string, // e.g. "2026-04"
+  aliases: PropertyAlias[] = []
 ): { csv: string; rows: AppFolioExportRow[]; errors: string[] } {
   const errors: string[] = [];
+  const aliasMap = buildAliasMap(aliases);
   const utilityBills = bills.filter(
     (b) => b.meterType === utilityType && (b.status === "calculated" || b.status === "posted")
   );
@@ -234,10 +248,11 @@ export function generateAppFolioExport(
     return { csv: "", rows: [], errors: [`No calculated ${utilityType} bills found`] };
   }
 
-  // Build lookup
+  // Build lookup keyed by canonical property name (alias-resolved) + unit
   const lookup = new Map<string, OccupancyRecord>();
   for (const rec of occupancy.records) {
-    const key = `${normName(rec.propertyName)}|${normName(rec.unitName)}`;
+    const canonical = resolvePropertyName(rec.propertyName, aliasMap);
+    const key = `${normalizePropertyName(canonical)}|${normName(rec.unitName)}`;
     lookup.set(key, rec);
   }
 
@@ -255,12 +270,13 @@ export function generateAppFolioExport(
     for (const alloc of bill.allocations) {
       if (alloc.amount <= 0) continue; // skip $0
 
-      const key = `${normName(bill.propertyName)}|${normName(alloc.unitName)}`;
+      const canonicalBillProp = resolvePropertyName(bill.propertyName, aliasMap);
+      const key = `${normalizePropertyName(canonicalBillProp)}|${normName(alloc.unitName)}`;
       let match = lookup.get(key);
 
       // Try fuzzy
       if (!match) {
-        match = findFuzzyMatch(bill.propertyName, alloc.unitName, occupancy.records) || undefined;
+        match = findFuzzyMatch(bill.propertyName, alloc.unitName, occupancy.records, aliasMap) || undefined;
       }
 
       if (!match) {

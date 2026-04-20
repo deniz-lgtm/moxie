@@ -81,9 +81,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { filename, knownProperties } = body as {
+    const { filename, knownProperties, aliases } = body as {
       filename: string;
       knownProperties: string[];
+      aliases?: import("@/lib/rubs-types").PropertyAlias[];
     };
 
     if (!filename) {
@@ -137,7 +138,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const results = await parseBillPdf(pdfBase64, knownProperties || [], displayName);
+    const results = await parseBillPdf(pdfBase64, knownProperties || [], displayName, aliases || []);
     return NextResponse.json({ results });
   } catch (error: any) {
     return NextResponse.json(

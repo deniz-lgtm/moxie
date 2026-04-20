@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { Unit } from "@/lib/types";
-import type { MeterMapping, MeterType, MeteringMethod, SplitMethod } from "@/lib/rubs-types";
+import type { MeterMapping, MeterType, MeteringMethod, SplitMethod, PropertyAlias } from "@/lib/rubs-types";
+import { findDuplicateNameGroups } from "@/lib/rubs-property-resolver";
 import {
   METER_TYPE_LABELS,
   SPLIT_METHOD_LABELS,
@@ -13,6 +14,9 @@ import {
   getMeterMappings,
   saveMeterMapping,
   deleteMeterMapping,
+  getPropertyAliases,
+  savePropertyAlias,
+  deletePropertyAlias,
 } from "@/lib/rubs-db";
 import { parseImportFile, transformRowsToMappings, type ImportResult } from "@/lib/rubs-csv-import";
 
@@ -35,12 +39,15 @@ export default function RubsSettingsPage() {
   const [sortKey, setSortKey] = useState<"property" | "meterType" | "meteringMethod" | "splitMethod" | "units">("property");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [aliases, setAliases] = useState<PropertyAlias[]>([]);
+  const [showAliases, setShowAliases] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
       const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
       setMappings(getMeterMappings());
+      setAliases(getPropertyAliases());
     } catch {
       // ignore
     } finally {
@@ -152,6 +159,16 @@ export default function RubsSettingsPage() {
     });
   }
 
+  function handleAliasSave(alias: PropertyAlias) {
+    savePropertyAlias(alias);
+    setAliases(getPropertyAliases());
+  }
+
+  function handleAliasDelete(id: string) {
+    deletePropertyAlias(id);
+    setAliases((prev) => prev.filter((a) => a.id !== id));
+  }
+
   function toggleSort(key: typeof sortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -174,7 +191,7 @@ export default function RubsSettingsPage() {
     setImportError("");
     try {
       const parsed = await parseImportFile(file);
-      const result = transformRowsToMappings(parsed);
+      const result = transformRowsToMappings(parsed, getPropertyAliases());
       setImportFilename(file.name);
       setImportPreview(result);
     } catch (err: any) {
@@ -499,6 +516,17 @@ export default function RubsSettingsPage() {
           or &quot;+ Add Mapping&quot; to add one manually.
         </div>
       )}
+
+      {/* Property Aliases */}
+      <PropertyAliasesSection
+        aliases={aliases}
+        mappingPropertyNames={mappingPropertyNames}
+        appfolioPropertyNames={propertyNames}
+        expanded={showAliases}
+        onToggle={() => setShowAliases(!showAliases)}
+        onSave={handleAliasSave}
+        onDelete={handleAliasDelete}
+      />
 
       {/* Properties without any mappings */}
       {propertyNames.filter((p) => !mappingsByProperty[p]).length > 0 && (
@@ -878,5 +906,292 @@ function SortHeader<K extends string>({
     >
       {label} <span className="text-xs text-muted-foreground">{arrow}</span>
     </th>
+  );
+}
+
+// ─── Property Aliases Section ───────────────────────────────
+
+function PropertyAliasesSection({
+  aliases,
+  mappingPropertyNames,
+  appfolioPropertyNames,
+  expanded,
+  onToggle,
+  onSave,
+  onDelete,
+}: {
+  aliases: PropertyAlias[];
+  mappingPropertyNames: string[];
+  appfolioPropertyNames: string[];
+  expanded: boolean;
+  onToggle: () => void;
+  onSave: (a: PropertyAlias) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<PropertyAlias | null>(null);
+
+  // Auto-detect: find pairs of property names that normalize to the same form
+  // but are not already grouped in an alias.
+  const allNames = Array.from(new Set([...mappingPropertyNames, ...appfolioPropertyNames]));
+  const coveredNames = new Set<string>();
+  for (const a of aliases) {
+    coveredNames.add(a.canonicalName);
+    for (const alt of a.aliases) coveredNames.add(alt);
+  }
+  const uncoveredNames = allNames.filter((n) => !coveredNames.has(n));
+  const suggested = findDuplicateNameGroups(uncoveredNames);
+
+  function createFromSuggestion(group: string[]) {
+    // Pick the shortest name as canonical (usually the cleaner address)
+    const sorted = [...group].sort((a, b) => a.length - b.length);
+    const canonical = sorted[0];
+    const rest = sorted.slice(1);
+    onSave({
+      id: `alias-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      canonicalName: canonical,
+      aliases: rest,
+    });
+  }
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full p-5 border-b border-border flex items-center justify-between hover:bg-muted/30 transition-colors"
+      >
+        <div className="text-left">
+          <h2 className="font-semibold">Property Aliases</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Group different names for the same building (LLC name = street address = utility bill format).
+            {aliases.length > 0 && ` ${aliases.length} alias group${aliases.length !== 1 ? "s" : ""} configured.`}
+            {suggested.length > 0 && (
+              <span className="text-amber-700 ml-1">
+                &middot; {suggested.length} suggestion{suggested.length !== 1 ? "s" : ""} detected
+              </span>
+            )}
+          </p>
+        </div>
+        <span className="text-xs text-muted-foreground">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div className="p-5 space-y-4">
+          {/* Suggested groups */}
+          {suggested.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-900">
+                Suggested alias groups — names that look like duplicates
+              </p>
+              <div className="space-y-2">
+                {suggested.map((group, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 bg-white rounded px-3 py-2">
+                    <div className="text-xs space-y-0.5">
+                      {group.map((name) => (
+                        <div key={name} className="truncate" title={name}>{name}</div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => createFromSuggestion(group)}
+                      className="text-xs text-accent hover:underline whitespace-nowrap"
+                    >
+                      Group as alias
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Existing aliases */}
+          {aliases.length > 0 ? (
+            <div className="space-y-2">
+              {aliases.map((a) => (
+                <div key={a.id} className="border border-border rounded-lg p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm">{a.canonicalName}</p>
+                      {a.aliases.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {a.aliases.map((alt, i) => (
+                            <span key={i} className="text-xs px-2 py-0.5 bg-muted rounded" title={alt}>
+                              {alt}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {a.notes && <p className="text-xs text-muted-foreground mt-1">{a.notes}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      <button
+                        onClick={() => { setEditing(a); setShowForm(false); }}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(a.id)}
+                        className="text-xs text-red-500 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No aliases yet. Add one manually below, or use a suggestion above.
+            </p>
+          )}
+
+          {/* Add / edit form */}
+          {(showForm || editing) ? (
+            <AliasForm
+              existing={editing}
+              allNames={allNames}
+              onSave={(a) => { onSave(a); setShowForm(false); setEditing(null); }}
+              onCancel={() => { setShowForm(false); setEditing(null); }}
+            />
+          ) : (
+            <button
+              onClick={() => { setShowForm(true); setEditing(null); }}
+              className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+            >
+              + Add Alias
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AliasForm({
+  existing,
+  allNames,
+  onSave,
+  onCancel,
+}: {
+  existing: PropertyAlias | null;
+  allNames: string[];
+  onSave: (a: PropertyAlias) => void;
+  onCancel: () => void;
+}) {
+  const [canonical, setCanonical] = useState(existing?.canonicalName || "");
+  const [selectedAliases, setSelectedAliases] = useState<string[]>(existing?.aliases || []);
+  const [customAlias, setCustomAlias] = useState("");
+  const [notes, setNotes] = useState(existing?.notes || "");
+
+  function toggleAlias(name: string) {
+    setSelectedAliases((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  }
+
+  function addCustom() {
+    const trimmed = customAlias.trim();
+    if (trimmed && !selectedAliases.includes(trimmed) && trimmed !== canonical) {
+      setSelectedAliases((prev) => [...prev, trimmed]);
+      setCustomAlias("");
+    }
+  }
+
+  function submit() {
+    if (!canonical) return;
+    onSave({
+      id: existing?.id || `alias-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      canonicalName: canonical,
+      aliases: selectedAliases.filter((a) => a !== canonical),
+      notes: notes.trim() || undefined,
+    });
+  }
+
+  const availableNames = allNames.filter((n) => n !== canonical);
+
+  return (
+    <div className="border border-border rounded-lg p-4 space-y-3 bg-muted/30">
+      <h3 className="font-semibold text-sm">{existing ? "Edit Alias" : "Add Alias"}</h3>
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">Canonical name (the one we&apos;ll use everywhere)</label>
+        <input
+          type="text"
+          list="canonical-options"
+          value={canonical}
+          onChange={(e) => setCanonical(e.target.value)}
+          placeholder="e.g. 1006 W. 23rd St"
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+        />
+        <datalist id="canonical-options">
+          {allNames.map((n) => <option key={n} value={n} />)}
+        </datalist>
+      </div>
+
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">
+          Alternate names that all refer to this property ({selectedAliases.length} selected)
+        </label>
+        <div className="border border-border rounded-lg max-h-40 overflow-y-auto">
+          {availableNames.map((n) => (
+            <label key={n} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedAliases.includes(n)}
+                onChange={() => toggleAlias(n)}
+              />
+              <span className="truncate" title={n}>{n}</span>
+            </label>
+          ))}
+          {availableNames.length === 0 && (
+            <p className="text-xs text-muted-foreground p-3">No other known property names to add as aliases.</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-2">
+          <input
+            type="text"
+            value={customAlias}
+            onChange={(e) => setCustomAlias(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCustom()}
+            placeholder="Add a custom alias (e.g. utility-bill formatting)"
+            className="flex-1 text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          />
+          <button
+            onClick={addCustom}
+            disabled={!customAlias.trim()}
+            className="px-3 py-2 text-xs border border-border rounded-lg hover:bg-muted disabled:opacity-50"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs text-muted-foreground block mb-1">Notes (optional)</label>
+        <input
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="e.g. Barrett's building, LLC name"
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={submit}
+          disabled={!canonical}
+          className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 disabled:opacity-50"
+        >
+          {existing ? "Update" : "Save"} Alias
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }

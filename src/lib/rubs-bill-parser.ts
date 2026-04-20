@@ -4,7 +4,8 @@
 // Sends PDF documents to Claude AI to extract billing data.
 // Follows the same API pattern as ai-analysis.ts.
 
-import type { ParsedBill, MeterType } from "./rubs-types";
+import type { ParsedBill, MeterType, PropertyAlias } from "./rubs-types";
+import { buildAliasMap, matchProperty } from "./rubs-property-resolver";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
@@ -35,7 +36,8 @@ Respond with ONLY the JSON array, no other text.`;
 export async function parseBillPdf(
   pdfBase64: string,
   knownProperties: string[],
-  sourceFile: string
+  sourceFile: string,
+  aliases: PropertyAlias[] = []
 ): Promise<ParsedBill[]> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY not configured");
@@ -115,11 +117,12 @@ export async function parseBillPdf(
   }>;
 
   // Map to ParsedBill with property matching
+  const aliasMap = buildAliasMap(aliases);
   return rawEntries
     .filter((e) => e.totalAmount && e.totalAmount > 0)
     .map((entry) => {
       const serviceAddr = entry.serviceAddress || "";
-      const matched = fuzzyMatchProperty(serviceAddr, knownProperties);
+      const matched = matchProperty(serviceAddr, knownProperties, aliasMap);
 
       // Convert billing period end date to YYYY-MM
       let billingPeriod = "";
@@ -142,50 +145,6 @@ export async function parseBillPdf(
         sourceFile,
       };
     });
-}
-
-// ─── Property Matching ─────────────────────────────────────────
-
-function fuzzyMatchProperty(
-  serviceAddress: string,
-  knownProperties: string[]
-): { property: string | null; confidence: number } {
-  if (!serviceAddress || knownProperties.length === 0) {
-    return { property: null, confidence: 0 };
-  }
-
-  const normalized = serviceAddress.toLowerCase().replace(/[,.\-#]/g, " ").replace(/\s+/g, " ").trim();
-
-  let bestMatch: string | null = null;
-  let bestScore = 0;
-
-  for (const prop of knownProperties) {
-    const propNorm = prop.toLowerCase().replace(/[,.\-#]/g, " ").replace(/\s+/g, " ").trim();
-
-    // Extract street number and name from both
-    const addrNum = normalized.match(/^(\d+)/)?.[1] || "";
-    const propNum = propNorm.match(/^(\d+)/)?.[1] || "";
-
-    if (!addrNum || !propNum) continue;
-
-    // Street number must match exactly
-    if (addrNum !== propNum) continue;
-
-    // Check how much of the property name appears in the address
-    const propWords = propNorm.split(" ");
-    const matchedWords = propWords.filter((w) => normalized.includes(w));
-    const score = matchedWords.length / propWords.length;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = prop;
-    }
-  }
-
-  return {
-    property: bestScore >= 0.5 ? bestMatch : null,
-    confidence: bestScore,
-  };
 }
 
 function normalizeMeterType(raw?: string): MeterType {

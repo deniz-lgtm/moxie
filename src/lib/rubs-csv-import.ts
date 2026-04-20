@@ -19,7 +19,8 @@
 // utility type is the sum of its allocations from each meter.
 
 import * as XLSX from "xlsx";
-import type { MeterMapping, MeterType } from "./rubs-types";
+import type { MeterMapping, MeterType, PropertyAlias } from "./rubs-types";
+import { buildAliasMap, resolvePropertyName } from "./rubs-property-resolver";
 
 export interface CsvParseResult {
   headers: string[];
@@ -168,9 +169,13 @@ function findHeader(headers: string[], patterns: string[]): string | null {
 
 // ─── Transform Rows to MeterMappings ───────────────────────────
 
-export function transformRowsToMappings(parseResult: CsvParseResult): ImportResult {
+export function transformRowsToMappings(
+  parseResult: CsvParseResult,
+  aliases: PropertyAlias[] = []
+): ImportResult {
   const { headers, rows } = parseResult;
   const warnings: string[] = [];
+  const aliasMap = buildAliasMap(aliases);
 
   // Identify column names
   const colUnitId = findHeader(headers, ["Unit ID - RR", "UnitIDRR", "Unit ID RR"]);
@@ -202,7 +207,9 @@ export function transformRowsToMappings(parseResult: CsvParseResult): ImportResu
 
   for (const row of rows) {
     const unitId = colUnitId ? row[colUnitId]?.trim() : "";
-    const propertyName = colProperty ? row[colProperty]?.trim() : "";
+    const rawPropertyName = colProperty ? row[colProperty]?.trim() : "";
+    // Resolve to canonical name if this property has an alias registered
+    const propertyName = rawPropertyName ? resolvePropertyName(rawPropertyName, aliasMap) : "";
     const unitName = colUnitName ? row[colUnitName]?.trim() : "";
 
     // Skip rows with no property name or no unit ID

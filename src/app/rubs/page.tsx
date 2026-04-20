@@ -13,6 +13,7 @@ import type {
   ImportFileInfo,
   OccupancyData,
   ReconciliationIssue,
+  PropertyAlias,
 } from "@/lib/rubs-types";
 import { METER_TYPE_LABELS, SPLIT_METHOD_LABELS } from "@/lib/rubs-types";
 import {
@@ -23,6 +24,7 @@ import {
   deleteBill as deleteBillFromStorage,
   getOccupancyData,
   saveOccupancyData,
+  getPropertyAliases,
 } from "@/lib/rubs-db";
 import { seedRubsData, isSeeded as checkIsSeeded } from "@/lib/rubs-seed";
 import { calculateAllocations } from "@/lib/rubs-calc";
@@ -47,6 +49,7 @@ export default function RubsPage() {
   const [filterMonth, setFilterMonth] = useState("");
   const [filterProperty, setFilterProperty] = useState("");
   const [occupancy, setOccupancy] = useState<OccupancyData | null>(null);
+  const [aliases, setAliases] = useState<PropertyAlias[]>([]);
   const templateInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
@@ -58,9 +61,11 @@ export default function RubsPage() {
       const localBills = getBills();
       const localMappings = getMeterMappings();
       const localOccupancy = getOccupancyData();
+      const localAliases = getPropertyAliases();
       setBills(localBills);
       setMappings(localMappings);
       setOccupancy(localOccupancy);
+      setAliases(localAliases);
       setSeeded(localBills.length > 0 || localMappings.length > 0);
     } catch {
       // ignore
@@ -209,6 +214,7 @@ export default function RubsPage() {
         bill={selected}
         bills={bills}
         occupancy={occupancy}
+        aliases={aliases}
         onBack={() => setSelected(null)}
         onPost={() => handlePostBill(selected)}
         onExport={() => handleExport(selected.id)}
@@ -353,6 +359,7 @@ export default function RubsPage() {
         <ImportBillsFlow
           propertyNames={propertyNames}
           mappings={mappings}
+          aliases={aliases}
           onImported={(newBills) => {
             setBills((prev) => [...prev, ...newBills]);
             setShowImport(false);
@@ -608,6 +615,7 @@ function BillDetailView({
   bill,
   bills,
   occupancy,
+  aliases,
   onBack,
   onPost,
   onExport,
@@ -616,6 +624,7 @@ function BillDetailView({
   bill: RubsBill;
   bills: RubsBill[];
   occupancy: OccupancyData | null;
+  aliases: PropertyAlias[];
   onBack: () => void;
   onPost: () => void;
   onExport: () => void;
@@ -786,6 +795,7 @@ function BillDetailView({
           bill={bill}
           bills={bills}
           occupancy={occupancy}
+          aliases={aliases}
         />
       )}
     </div>
@@ -799,10 +809,12 @@ type ImportStep = "scan" | "parsing" | "preview";
 function ImportBillsFlow({
   propertyNames,
   mappings,
+  aliases,
   onImported,
 }: {
   propertyNames: string[];
   mappings: MeterMapping[];
+  aliases: PropertyAlias[];
   onImported: (bills: RubsBill[]) => void;
 }) {
   const [step, setStep] = useState<ImportStep>("scan");
@@ -851,7 +863,7 @@ function ImportBillsFlow({
         const res = await fetch("/api/rubs/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: filesToParse[i], knownProperties: propertyNames }),
+          body: JSON.stringify({ filename: filesToParse[i], knownProperties: propertyNames, aliases }),
         });
         const data = await res.json();
         if (data.results) {
@@ -1175,12 +1187,14 @@ function AppFolioExportPanel({
   bill,
   bills,
   occupancy,
+  aliases,
 }: {
   bill: RubsBill;
   bills: RubsBill[];
   occupancy: OccupancyData | null;
+  aliases: PropertyAlias[];
 }) {
-  const recon = reconcile([bill], occupancy);
+  const recon = reconcile([bill], occupancy, aliases);
   const errors = recon.issues.filter((i) => i.severity === "error");
   const warnings = recon.issues.filter((i) => i.severity === "warning");
 
@@ -1190,7 +1204,8 @@ function AppFolioExportPanel({
       [bill],
       bill.meterType,
       occupancy,
-      bill.month
+      bill.month,
+      aliases
     );
     if (exportErrors.length > 0) {
       const proceed = confirm(
@@ -1217,7 +1232,7 @@ function AppFolioExportPanel({
     const types: MeterType[] = ["water", "gas", "electric", "trash"];
     let downloadCount = 0;
     for (const type of types) {
-      const { csv, rows } = generateAppFolioExport(bills, type, occupancy, bill.month);
+      const { csv, rows } = generateAppFolioExport(bills, type, occupancy, bill.month, aliases);
       if (rows.length === 0) continue;
       const blob = new Blob([csv], { type: "text/tab-separated-values" });
       const url = URL.createObjectURL(blob);

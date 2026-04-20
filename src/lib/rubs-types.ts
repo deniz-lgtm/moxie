@@ -101,6 +101,21 @@ export interface OccupancyData {
   filename: string;
 }
 
+// ─── Property Aliases ──────────────────────────────────────────
+// A canonical property name + list of alternate names that refer to the
+// same physical property. Used to match bills, meter mappings, occupancy
+// records, and AppFolio exports across spelling differences.
+
+export interface PropertyAlias {
+  id: string;
+  /** The one name we prefer to display + match against */
+  canonicalName: string;
+  /** Alternate names: LLC names, address variants, utility bill formatting, etc. */
+  aliases: string[];
+  /** Optional notes */
+  notes?: string;
+}
+
 // ─── AppFolio Export / Reconciliation ──────────────────────────
 
 export interface ReconciliationIssue {
