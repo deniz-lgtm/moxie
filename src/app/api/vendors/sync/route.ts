@@ -93,7 +93,7 @@ export async function POST() {
 
       if (!existing) {
         pullRows.push({
-          id: `v-${fields.notion_page_id.replace(/-/g, "").slice(0, 12)}`,
+          id: `v-${fields.notion_page_id.replace(/-/g, "")}`,
           name: fields.name,
           category: fields.category,
           phone: fields.phone,

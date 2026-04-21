@@ -90,9 +90,20 @@ export async function upsertVendorRows(
   const sb = getSupabase();
   if (!sb) throw new Error("Supabase not configured");
   if (rows.length === 0) return 0;
+  // Dedupe by id — Postgres rejects a single upsert that targets the same
+  // conflict key twice. Also dedupe by notion_page_id since it has a unique
+  // constraint. Last occurrence wins for both.
+  const byId = new Map<string, typeof rows[number]>();
+  for (const row of rows) byId.set(row.id, row);
+  const byNotion = new Map<string, typeof rows[number]>();
+  for (const row of byId.values()) {
+    const key = row.notion_page_id ?? `__no_notion__:${row.id}`;
+    byNotion.set(key, row);
+  }
+  const deduped = Array.from(byNotion.values());
   let total = 0;
-  for (let i = 0; i < rows.length; i += 200) {
-    const batch = rows.slice(i, i + 200);
+  for (let i = 0; i < deduped.length; i += 200) {
+    const batch = deduped.slice(i, i + 200);
     const { error } = await sb.from("vendors").upsert(batch, { onConflict: "id" });
     if (error) throw new Error(`[vendors-db] upsert rows: ${error.message}`);
     total += batch.length;
