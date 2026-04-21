@@ -742,7 +742,7 @@ function BillDetailView({
               <thead>
                 <tr className="border-b border-border bg-muted">
                   <th className="text-left px-4 py-3 font-medium">Unit</th>
-                  <th className="text-left px-4 py-3 font-medium">Tenant</th>
+                  <th className="text-right px-4 py-3 font-medium">Tenants</th>
                   <th className="text-right px-4 py-3 font-medium">Sq Ft</th>
                   <th className="text-right px-4 py-3 font-medium">Share</th>
                   <th className="text-right px-4 py-3 font-medium">Amount</th>
@@ -752,7 +752,7 @@ function BillDetailView({
                 {bill.allocations.map((a) => (
                   <tr key={a.unitId} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-medium">{a.unitName}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{a.tenant}</td>
+                    <td className="px-4 py-3 text-right text-muted-foreground">{a.occupants}</td>
                     <td className="px-4 py-3 text-right text-muted-foreground">{a.sqft.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right text-muted-foreground">{(a.share * 100).toFixed(1)}%</td>
                     <td className="px-4 py-3 text-right font-medium">${a.amount.toFixed(2)}</td>
