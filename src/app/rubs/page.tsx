@@ -45,7 +45,6 @@ export default function RubsPage() {
   const [bills, setBills] = useState<RubsBill[]>([]);
   const [mappings, setMappings] = useState<MeterMapping[]>([]);
   const [selected, setSelected] = useState<RubsBill | null>(null);
-  const [showCreateForm, setShowCreateForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -133,7 +132,6 @@ export default function RubsPage() {
       setSelected(null);
       setShowImport(false);
       setShowExport(false);
-      setShowCreateForm(false);
       alert(
         `Cleared. ${billCount} bill${billCount !== 1 ? "s" : ""} and ${removed} PDF${removed !== 1 ? "s" : ""} removed. Upload a fresh template and bills to start the next cycle.`,
       );
@@ -317,13 +315,7 @@ export default function RubsPage() {
             </button>
           )}
           <button
-            onClick={() => { setShowImport(!showImport); setShowCreateForm(false); setShowExport(false); }}
-            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
-          >
-            {showImport ? "Cancel Import" : "Import Bills"}
-          </button>
-          <button
-            onClick={() => { setShowExport(!showExport); setShowImport(false); setShowCreateForm(false); }}
+            onClick={() => { setShowExport(!showExport); setShowImport(false); }}
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
             {showExport ? "Cancel Export" : "Export to AppFolio"}
@@ -332,16 +324,16 @@ export default function RubsPage() {
             <button
               onClick={() => handleCalculateAll("occupancy")}
               className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
-              title="Calculate allocations for all draft bills using By Occupancy"
+              title="Calculate allocations for any draft bills (no meter mapping was found at import time)"
             >
               Calculate All ({bills.filter((b) => b.status === "draft").length})
             </button>
           )}
           <button
-            onClick={() => { setShowCreateForm(!showCreateForm); setShowImport(false); setShowExport(false); }}
+            onClick={() => { setShowImport(!showImport); setShowExport(false); }}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
           >
-            {showCreateForm ? "Cancel" : "+ New Bill"}
+            {showImport ? "Cancel Import" : "Import Bills"}
           </button>
         </div>
       </div>
@@ -404,25 +396,13 @@ export default function RubsPage() {
         </div>
       </div>
 
-      {/* Create Form */}
-      {showCreateForm && (
-        <CreateBillForm
-          propertyNames={propertyNames}
-          mappings={mappings}
-          onCreated={(bill) => {
-            setBills((prev) => [...prev, bill]);
-            setShowCreateForm(false);
-            setSelected(bill);
-          }}
-        />
-      )}
-
       {/* Import Flow */}
       {showImport && (
         <ImportBillsFlow
           propertyNames={propertyNames}
           mappings={mappings}
           aliases={aliases}
+          units={units}
           onImported={(newBills) => {
             setBills((prev) => [...prev, ...newBills]);
             setShowImport(false);
@@ -567,120 +547,6 @@ function StatusBadge({ status }: { status: BillStatus }) {
   );
 }
 
-// ─── Create Bill Form ────────────────────────────────────────
-
-function CreateBillForm({
-  propertyNames,
-  mappings,
-  onCreated,
-}: {
-  propertyNames: string[];
-  mappings: MeterMapping[];
-  onCreated: (bill: RubsBill) => void;
-}) {
-  const [propertyName, setPropertyName] = useState("");
-  const [meterType, setMeterType] = useState<MeterType>("water");
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [totalAmount, setTotalAmount] = useState<number>(0);
-  // Find matching mapping
-  const mapping = mappings.find(
-    (m) => m.propertyName === propertyName && m.meterType === meterType
-  );
-
-  // Available meter types for selected property
-  const availableMeters = mappings
-    .filter((m) => m.propertyName === propertyName)
-    .map((m) => m.meterType);
-
-  async function handleCreate() {
-    if (!propertyName || totalAmount <= 0 || !mapping) return;
-
-    const bill: RubsBill = {
-      id: `bill-${Date.now()}`,
-      propertyName,
-      month,
-      meterType,
-      totalAmount,
-      mappingId: mapping.id,
-      status: "draft",
-      allocations: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await saveBillToStorage(bill);
-    onCreated(bill);
-  }
-
-  return (
-    <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-      <h2 className="font-semibold">Create Utility Bill</h2>
-      <div className="grid md:grid-cols-2 gap-4">
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Property</label>
-          <select
-            value={propertyName}
-            onChange={(e) => { setPropertyName(e.target.value); setMeterType("water"); }}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-          >
-            <option value="">Select property...</option>
-            {propertyNames.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Utility Type</label>
-          <select
-            value={meterType}
-            onChange={(e) => setMeterType(e.target.value as MeterType)}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-          >
-            {(availableMeters.length > 0
-              ? availableMeters
-              : (["water", "gas", "electric", "sewer"] as MeterType[])
-            ).map((t) => (
-              <option key={t} value={t}>{METER_TYPE_LABELS[t]}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Billing Month</label>
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Total Bill ($)</label>
-          <input
-            type="number"
-            value={totalAmount || ""}
-            placeholder="0.00"
-            onChange={(e) => setTotalAmount(parseFloat(e.target.value) || 0)}
-            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-          />
-        </div>
-      </div>
-      {propertyName && !mapping && (
-        <p className="text-xs text-amber-600">
-          No meter mapping found for {propertyName} / {METER_TYPE_LABELS[meterType]}.{" "}
-          <Link href="/rubs/settings" className="underline">Configure in Settings</Link>
-        </p>
-      )}
-      <button
-        onClick={handleCreate}
-        disabled={!propertyName || totalAmount <= 0 || !mapping}
-        className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
-      >
-        Create Bill
-      </button>
-    </div>
-  );
-}
-
 // ─── Bill Detail View ────────────────────────────────────────
 
 function BillDetailView({
@@ -708,6 +574,9 @@ function BillDetailView({
 
   const totalAllocated = bill.allocations.reduce((s, a) => s + a.amount, 0);
   const totalTenants = bill.allocations.reduce((s, a) => s + (a.occupants || 0), 0);
+  // Only show the Sq Ft column when at least one allocation actually has a
+  // sqft value — for occupancy/equal/custom splits it's irrelevant clutter.
+  const showSqft = bill.allocations.some((a) => (a.sqft || 0) > 0);
 
   return (
     <div className="space-y-6">
@@ -803,7 +672,7 @@ function BillDetailView({
                 <tr className="border-b border-border bg-muted">
                   <th className="text-left px-4 py-3 font-medium">Unit</th>
                   <th className="text-right px-4 py-3 font-medium">Tenants</th>
-                  <th className="text-right px-4 py-3 font-medium">Sq Ft</th>
+                  {showSqft && <th className="text-right px-4 py-3 font-medium">Sq Ft</th>}
                   <th className="text-right px-4 py-3 font-medium">Share</th>
                   <th className="text-right px-4 py-3 font-medium">Amount</th>
                 </tr>
@@ -813,7 +682,9 @@ function BillDetailView({
                   <tr key={a.unitId} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-medium">{a.unitName}</td>
                     <td className="px-4 py-3 text-right text-muted-foreground">{a.occupants}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">{a.sqft.toLocaleString()}</td>
+                    {showSqft && (
+                      <td className="px-4 py-3 text-right text-muted-foreground">{a.sqft.toLocaleString()}</td>
+                    )}
                     <td className="px-4 py-3 text-right text-muted-foreground">{(a.share * 100).toFixed(1)}%</td>
                     <td className="px-4 py-3 text-right font-medium">${a.amount.toFixed(2)}</td>
                   </tr>
@@ -821,7 +692,7 @@ function BillDetailView({
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted">
-                  <td className="px-4 py-3 font-semibold" colSpan={4}>Total</td>
+                  <td className="px-4 py-3 font-semibold" colSpan={showSqft ? 4 : 3}>Total</td>
                   <td className="px-4 py-3 text-right font-semibold">${totalAllocated.toFixed(2)}</td>
                 </tr>
               </tfoot>
@@ -883,11 +754,13 @@ function ImportBillsFlow({
   propertyNames,
   mappings,
   aliases,
+  units,
   onImported,
 }: {
   propertyNames: string[];
   mappings: MeterMapping[];
   aliases: PropertyAlias[];
+  units: Unit[];
   onImported: (bills: RubsBill[]) => void;
 }) {
   const [step, setStep] = useState<ImportStep>("scan");
@@ -914,17 +787,21 @@ function ImportBillsFlow({
     setError("");
     setUploading({ current: 0, total: pdfs.length });
     const folder = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const uploadedPaths: string[] = [];
     for (let i = 0; i < pdfs.length; i++) {
       setUploading({ current: i + 1, total: pdfs.length });
       try {
-        await uploadBillPdf(pdfs[i], folder);
+        const storedPath = await uploadBillPdf(pdfs[i], folder);
+        uploadedPaths.push(storedPath);
       } catch (err: any) {
         setError(err.message || `Upload failed for ${pdfs[i].name}`);
       }
     }
     setUploading({ current: 0, total: 0 });
-    // Refresh the list so the new files appear
-    await scanFolder();
+    // Auto-parse just the newly uploaded files and land on the review screen.
+    if (uploadedPaths.length > 0) {
+      await parseSelected(uploadedPaths);
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -968,8 +845,8 @@ function ImportBillsFlow({
     }
   }
 
-  async function parseSelected() {
-    const filesToParse = Array.from(selectedFiles);
+  async function parseSelected(filenames?: string[]) {
+    const filesToParse = filenames ?? Array.from(selectedFiles);
     if (filesToParse.length === 0) return;
 
     setStep("parsing");
@@ -1016,6 +893,16 @@ function ImportBillsFlow({
     const newBills: RubsBill[] = [];
     for (const p of validBills) {
       const mapping = mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
+      // Auto-calculate when a meter mapping exists. Skip when there is no
+      // mapping — those bills land as drafts so the user knows to set one up.
+      const allocations = mapping
+        ? calculateAllocations({
+            totalAmount: p.totalAmount,
+            mapping,
+            units,
+            splitMethod: mapping.splitMethod,
+          })
+        : [];
       const bill: RubsBill = {
         id: `bill-import-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         propertyName: p.matchedProperty!,
@@ -1023,8 +910,8 @@ function ImportBillsFlow({
         meterType: p.meterType,
         totalAmount: p.totalAmount,
         mappingId: mapping?.id || "",
-        status: "draft",
-        allocations: [],
+        status: mapping ? "calculated" : "draft",
+        allocations,
         sourceFile: p.sourceFile,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -1169,7 +1056,7 @@ function ImportBillsFlow({
                 Select All ({files.length})
               </button>
               <button
-                onClick={parseSelected}
+                onClick={() => parseSelected()}
                 disabled={selectedFiles.size === 0}
                 className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
               >
