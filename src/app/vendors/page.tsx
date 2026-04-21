@@ -130,6 +130,16 @@ export default function VendorsPage() {
     }
   }
 
+  // All distinct scope tokens across existing vendors — used for the
+  // ScopeTagInput dropdown suggestions.
+  const scopeSuggestions = useMemo(() => {
+    const set = new Set<string>();
+    for (const v of vendors) {
+      for (const s of parseScope(v.scope)) set.add(s);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [vendors]);
+
   const vendorMetrics = useMemo(() => {
     const metrics: Record<string, { jobsCompleted: number; avgResponseDays: number | null }> = {};
     for (const wo of workOrders) {
@@ -312,7 +322,11 @@ export default function VendorsPage() {
                 ))}
               </select>
             </div>
-            <EditableField label="Scope" value={selected.scope || ""} onBlurSave={(v) => updateVendor(selected.id, "scope", v || undefined)} />
+            <ScopeTagInput
+              value={parseScope(selected.scope)}
+              suggestions={scopeSuggestions}
+              onChange={(tags) => updateVendor(selected.id, "scope", tags.length > 0 ? tags.join(", ") : undefined)}
+            />
             <EditableField label="Phone" value={selected.phone || ""} onBlurSave={(v) => updateVendor(selected.id, "phone", v || undefined)} />
             <EditableField label="Email" type="email" value={selected.email || ""} onBlurSave={(v) => updateVendor(selected.id, "email", v || undefined)} />
             <EditableField label="Website" value={selected.website || ""} onBlurSave={(v) => updateVendor(selected.id, "website", v || undefined)} />
@@ -487,13 +501,14 @@ export default function VendorsPage() {
               />
               Internal vendor
             </label>
-            <input
-              type="text"
-              placeholder="Scope (e.g. drain cleaning, water heaters)"
-              value={newVendor.scope}
-              onChange={(e) => setNewVendor({ ...newVendor, scope: e.target.value })}
-              className="text-sm border border-border rounded-lg px-3 py-2 bg-card md:col-span-2"
-            />
+            <div className="md:col-span-2">
+              <ScopeTagInput
+                value={parseScope(newVendor.scope)}
+                suggestions={scopeSuggestions}
+                onChange={(tags) => setNewVendor({ ...newVendor, scope: tags.join(", ") })}
+                label="Scope"
+              />
+            </div>
           </div>
           <textarea
             placeholder="Notes"
@@ -617,6 +632,102 @@ function EditableField({
         }}
         className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
       />
+    </div>
+  );
+}
+
+/** Split a comma-separated scope string into an array of trimmed, non-empty tags. */
+function parseScope(scope: string | undefined | null): string[] {
+  if (!scope) return [];
+  return scope
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Multi-tag picker with suggestions from existing vendors. Stores back to
+ *  the vendor as a comma-separated string so the DB schema stays `text`. */
+function ScopeTagInput({
+  value,
+  suggestions,
+  onChange,
+  label = "Scope",
+}: {
+  value: string[];
+  suggestions: string[];
+  onChange: (tags: string[]) => void;
+  label?: string;
+}) {
+  const [input, setInput] = useState("");
+  const datalistId = `scope-suggestions-${label.replace(/\s+/g, "-").toLowerCase()}`;
+
+  function addTag(raw: string) {
+    const t = raw.trim().replace(/,$/, "").trim();
+    if (!t) return;
+    if (value.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      setInput("");
+      return;
+    }
+    onChange([...value, t]);
+    setInput("");
+  }
+
+  function removeTag(tag: string) {
+    onChange(value.filter((x) => x !== tag));
+  }
+
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+      <div className="flex flex-wrap gap-1.5 items-center border border-border rounded-lg bg-card px-2 py-1.5 min-h-[2.25rem]">
+        {value.map((tag) => (
+          <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-slate-100 text-slate-700 rounded">
+            {tag}
+            <button
+              type="button"
+              onClick={() => removeTag(tag)}
+              aria-label={`Remove ${tag}`}
+              className="text-slate-500 hover:text-slate-700 leading-none"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          list={datalistId}
+          type="text"
+          value={input}
+          onChange={(e) => {
+            const v = e.target.value;
+            // Typing a comma commits the tag.
+            if (v.includes(",")) {
+              v.split(",").forEach((part) => addTag(part));
+            } else {
+              setInput(v);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addTag(input);
+            } else if (e.key === "Backspace" && !input && value.length > 0) {
+              removeTag(value[value.length - 1]);
+            }
+          }}
+          onBlur={() => {
+            if (input.trim()) addTag(input);
+          }}
+          placeholder={value.length === 0 ? "Type a scope, pick from the dropdown, or add your own…" : "Add another…"}
+          className="flex-1 min-w-[140px] bg-transparent text-sm outline-none py-0.5"
+        />
+      </div>
+      <datalist id={datalistId}>
+        {suggestions
+          .filter((s) => !value.some((v) => v.toLowerCase() === s.toLowerCase()))
+          .map((s) => (
+            <option key={s} value={s} />
+          ))}
+      </datalist>
     </div>
   );
 }
