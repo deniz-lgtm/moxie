@@ -33,6 +33,20 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+/** Normalise a phone number for display. Accepts US 10-digit, US 11-digit
+ *  (leading 1), or anything else (returned as-is — international, ext, etc.). */
+function formatPhone(phone: string | undefined | null): string {
+  if (!phone) return "—";
+  const digits = String(phone).replace(/\D/g, "");
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+  return String(phone).trim();
+}
+
 export default function VendorsPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
@@ -49,6 +63,7 @@ export default function VendorsPage() {
   const [newVendor, setNewVendor] = useState({
     name: "",
     category: VENDOR_CATEGORIES[0],
+    scope: "",
     phone: "",
     email: "",
     insuranceExpiry: "",
@@ -141,7 +156,25 @@ export default function VendorsPage() {
 
   const filtered = vendors.filter((v) => {
     if (filterCategory !== "all" && v.category !== filterCategory) return false;
-    if (searchQuery && !v.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const haystack = [
+        v.name,
+        v.scope,
+        v.category,
+        v.phone,
+        v.email,
+        v.website,
+        v.address,
+        v.contactName,
+        v.licenseNumber,
+        v.notes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     return true;
   });
 
@@ -158,6 +191,7 @@ export default function VendorsPage() {
       id: `v-${Date.now()}`,
       name: newVendor.name.trim(),
       category: newVendor.category,
+      scope: newVendor.scope || undefined,
       phone: newVendor.phone || undefined,
       email: newVendor.email || undefined,
       insuranceExpiry: newVendor.insuranceExpiry || undefined,
@@ -181,6 +215,7 @@ export default function VendorsPage() {
     setNewVendor({
       name: "",
       category: VENDOR_CATEGORIES[0],
+      scope: "",
       phone: "",
       email: "",
       insuranceExpiry: "",
@@ -264,6 +299,20 @@ export default function VendorsPage() {
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-card rounded-xl border border-border p-5 space-y-3">
             <h2 className="font-semibold">Contact Info</h2>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Category</label>
+              <select
+                value={selected.category || ""}
+                onChange={(e) => updateVendor(selected.id, "category", e.target.value || undefined)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                <option value="">—</option>
+                {VENDOR_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <EditableField label="Scope" value={selected.scope || ""} onBlurSave={(v) => updateVendor(selected.id, "scope", v || undefined)} />
             <EditableField label="Phone" value={selected.phone || ""} onBlurSave={(v) => updateVendor(selected.id, "phone", v || undefined)} />
             <EditableField label="Email" type="email" value={selected.email || ""} onBlurSave={(v) => updateVendor(selected.id, "email", v || undefined)} />
             <EditableField label="Website" value={selected.website || ""} onBlurSave={(v) => updateVendor(selected.id, "website", v || undefined)} />
@@ -438,6 +487,13 @@ export default function VendorsPage() {
               />
               Internal vendor
             </label>
+            <input
+              type="text"
+              placeholder="Scope (e.g. drain cleaning, water heaters)"
+              value={newVendor.scope}
+              onChange={(e) => setNewVendor({ ...newVendor, scope: e.target.value })}
+              className="text-sm border border-border rounded-lg px-3 py-2 bg-card md:col-span-2"
+            />
           </div>
           <textarea
             placeholder="Notes"
@@ -458,7 +514,7 @@ export default function VendorsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <input
           type="text"
-          placeholder="Search vendors…"
+          placeholder="Search name, scope, category, phone…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
@@ -501,11 +557,16 @@ export default function VendorsPage() {
                       className="border-b border-border last:border-0 hover:bg-muted/50 cursor-pointer"
                     >
                       <td className="px-4 py-3 font-medium">
-                        {v.name}
-                        {v.isInternal && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 align-middle">Internal</span>}
+                        <div className="flex items-center gap-2">
+                          <span>{v.name}</span>
+                          {v.isInternal && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">Internal</span>}
+                        </div>
+                        {v.scope && (
+                          <p className="text-xs text-muted-foreground font-normal mt-0.5 line-clamp-1">{v.scope}</p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{v.category || "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{v.phone || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{formatPhone(v.phone)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{m.jobsCompleted}</td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {m.avgResponseDays != null ? `${Math.round(m.avgResponseDays)}d` : "—"}

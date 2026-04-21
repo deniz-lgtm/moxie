@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       id: vendor.id,
       name: vendor.name,
       category: vendor.category,
+      scope: vendor.scope,
       phone: vendor.phone,
       email: vendor.email,
       website: vendor.website,
