@@ -192,3 +192,27 @@ export type DbWorkOrder = {
   created_at: string;
   updated_at: string;
 };
+
+// ─── Work Order Annotations (Moxie-side overlay) ────────────────
+// Mirrors supabase/migrations/20260421_work_order_annotations.sql.
+// Shares `id` with `work_orders`; overrides layer on top of AppFolio
+// fields so edits survive AppFolio syncs.
+
+export type DbWorkOrderNote = {
+  text: string;
+  created_at: string;
+  author?: string;
+};
+
+export type DbWorkOrderAnnotation = {
+  id: string;
+  notes: DbWorkOrderNote[];
+  internal_status: string | null;
+  assigned_to_override: string | null;
+  vendor_override: string | null;
+  scheduled_date_override: string | null;
+  tags: string[];
+  follow_up_on: string | null;
+  created_at: string;
+  updated_at: string;
+};
