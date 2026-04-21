@@ -65,9 +65,19 @@ export async function POST() {
     // NOTION_VENDORS_DB_ID may be either a database id or the id of the page
     // that contains the database. Resolve once per request.
     const dbId = await resolveDatabaseId(rawId);
+    // Fetch the most recent sync timestamp first so we can ask Notion only
+    // for pages edited since then. First sync (no timestamp) pulls everything.
+    const lastSync = await getLastVendorSyncTime();
+    const incrementalFilter = lastSync
+      ? {
+          timestamp: "last_edited_time" as const,
+          last_edited_time: { after: lastSync },
+        }
+      : undefined;
+
     const [schema, notionPages, localVendors] = await Promise.all([
       getDatabase(dbId),
-      queryDatabase(dbId),
+      queryDatabase(dbId, incrementalFilter),
       listVendors(),
     ]);
 
@@ -110,7 +120,7 @@ export async function POST() {
           notes: fields.notes,
           is_internal: fields.is_internal,
           notion_page_id: fields.notion_page_id,
-          notion_last_synced_at: nowIso,
+          notion_last_synced_at: fields.notion_last_edited || nowIso,
           raw: fields.raw,
         });
         pulled++;
@@ -143,7 +153,7 @@ export async function POST() {
           notes: fields.notes,
           is_internal: fields.is_internal,
           notion_page_id: fields.notion_page_id,
-          notion_last_synced_at: nowIso,
+          notion_last_synced_at: fields.notion_last_edited || nowIso,
           raw: fields.raw,
         });
         pulled++;
@@ -186,7 +196,8 @@ export async function POST() {
 
       try {
         if (!v.notionPageId) {
-          // Create in Notion
+          // Create in Notion. Use the returned last_edited_time so the
+          // next incremental sync's filter doesn't re-fetch our own write.
           const page = await createDatabasePage(
             dbId,
             vendorToNotionProps(vendorToNotionPayload(v), schema)
@@ -194,16 +205,17 @@ export async function POST() {
           await upsertVendor({
             ...v,
             notionPageId: page.id,
-            notionLastSyncedAt: nowIso,
+            notionLastSyncedAt: page.last_edited_time || nowIso,
           });
           created++;
         } else if (localChanged) {
-          // Push local update to Notion
-          await updatePage(
+          // Push local update to Notion. Same trick — capture the page's
+          // post-update last_edited_time as our sync watermark.
+          const updated = await updatePage(
             v.notionPageId,
             vendorToNotionProps(vendorToNotionPayload(v), schema)
           );
-          await upsertVendor({ ...v, notionLastSyncedAt: nowIso });
+          await upsertVendor({ ...v, notionLastSyncedAt: updated.last_edited_time || nowIso });
           pushed++;
         }
       } catch (e: any) {
