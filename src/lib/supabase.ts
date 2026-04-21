@@ -295,10 +295,53 @@ export type DbAgendaCarryOver = {
   fromMeetingDate?: string | null;
 };
 
+export type DbAgendaApplication = {
+  id: string;
+  propertyName: string;
+  unitNumber?: string | null;
+  primaryApplicant?: string | null;
+  applicantCount: number;
+  status: string;
+  daysInReview?: number | null;
+};
+
+export type DbAgendaMove = {
+  unitId: string;
+  unitName: string;
+  propertyName?: string | null;
+  direction: "move_in" | "move_out";
+  date: string;
+  tenant?: string | null;
+  daysUntil?: number | null;
+};
+
+export type DbAgendaInspection = {
+  id: string;
+  type: string;
+  propertyName?: string | null;
+  unitNumber?: string | null;
+  inspector?: string | null;
+  scheduledDate?: string | null;
+  status: string;
+};
+
 export type DbAgendaSnapshot = {
+  // Legacy flat keys (kept so older meetings keep rendering)
   workOrders?: DbAgendaWorkOrder[];
   vacancies?: DbAgendaVacancy[];
   carryOverActions?: DbAgendaCarryOver[];
+  // New three-category structure
+  leasing?: {
+    vacancies?: DbAgendaVacancy[];
+    applications?: DbAgendaApplication[];
+    upcomingMoves?: DbAgendaMove[];
+  };
+  maintenance?: {
+    openWorkOrders?: DbAgendaWorkOrder[];
+  };
+  propertyManagement?: {
+    upcomingInspections?: DbAgendaInspection[];
+  };
 };
 
 export type DbPropertyMeeting = {
