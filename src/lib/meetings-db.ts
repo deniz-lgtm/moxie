@@ -147,6 +147,23 @@ export type UpdateActionItemInput = Partial<
   Omit<DbMeetingActionItem, "id" | "meeting_id" | "property_id" | "created_at" | "updated_at">
 >;
 
+export async function getActionItem(id: string): Promise<DbMeetingActionItem | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("meeting_action_items")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (!isMissingTableError(error)) {
+      console.warn("[meetings-db] getActionItem:", error.message);
+    }
+    return null;
+  }
+  return (data as DbMeetingActionItem) ?? null;
+}
+
 export async function listActionItems(opts: {
   meetingId?: string;
   propertyId?: string;
