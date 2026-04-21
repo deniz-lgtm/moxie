@@ -580,20 +580,15 @@ const STATUS_MAP: Record<string, MaintenanceStatus> = {
   resolved: "closed",
 };
 
-export async function fetchMaintenanceRequests(params?: {
-  property_id?: string;
-  status?: string;
-}): Promise<{ data: MaintenanceRequest[]; source: "appfolio" }> {
-  const allRows = await afGetWorkOrders(params);
-  console.log(`[Moxie] Work orders raw: ${(allRows || []).length} rows`);
-  if (allRows?.length > 0) {
-    console.log(`[Moxie] Work order sample fields:`, Object.keys(allRows[0]).join(", "));
-  }
-  const rows = await filterToMoxie(allRows || []);
-  console.log(`[Moxie] Work orders after filter: ${rows.length} rows`);
-  // Field names map to AppFolio v2 `work_order` report schema (all snake_case).
-  const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
-    id: String(wo.work_order_id || wo.work_order_number || `wo-${i}`),
+/**
+ * Map a single AppFolio `work_order` row (snake_case JSON from the
+ * Reports API) to the internal `MaintenanceRequest` shape. Exported so
+ * the same mapping is used whether the row came from a live AppFolio
+ * fetch or from the Supabase `work_orders.raw` snapshot.
+ */
+export function mapWorkOrderRow(wo: Record<string, any>, index = 0): MaintenanceRequest {
+  return {
+    id: String(wo.work_order_id || wo.work_order_number || `wo-${index}`),
     unitId: String(wo.unit_id || ""),
     propertyId: String(wo.property_id || ""),
     unitNumber: String(wo.unit_name || wo.unit_address || ""),
@@ -617,8 +612,30 @@ export async function fetchMaintenanceRequests(params?: {
     createdAt: wo.created_at || new Date().toISOString(),
     updatedAt: wo.created_at || new Date().toISOString(),
     appfolioWorkOrderId: wo.work_order_id ? String(wo.work_order_id) : undefined,
-  }));
-  return { data: requests, source: "appfolio" };
+  };
+}
+
+/** Fetch raw work-order rows from AppFolio, filtered to the Moxie portfolio. */
+export async function fetchMoxieWorkOrderRows(params?: {
+  property_id?: string;
+  status?: string;
+}): Promise<any[]> {
+  const allRows = await afGetWorkOrders(params);
+  console.log(`[Moxie] Work orders raw: ${(allRows || []).length} rows`);
+  if (allRows?.length > 0) {
+    console.log(`[Moxie] Work order sample fields:`, Object.keys(allRows[0]).join(", "));
+  }
+  const rows = await filterToMoxie(allRows || []);
+  console.log(`[Moxie] Work orders after filter: ${rows.length} rows`);
+  return rows;
+}
+
+export async function fetchMaintenanceRequests(params?: {
+  property_id?: string;
+  status?: string;
+}): Promise<{ data: MaintenanceRequest[]; source: "appfolio" }> {
+  const rows = await fetchMoxieWorkOrderRows(params);
+  return { data: rows.map((wo, i) => mapWorkOrderRow(wo, i)), source: "appfolio" };
 }
 
 // --- Applications (from AppFolio tenant directory) ---

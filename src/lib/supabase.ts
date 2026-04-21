@@ -153,3 +153,42 @@ export type DbPropertyAlias = {
   notes: string | null;
   created_at: string;
 };
+
+// ─── Work Orders (AppFolio snapshot) ────────────────────────────
+// Mirrors supabase/migrations/20260421_work_orders.sql. Populated by
+// POST /api/maintenance/sync from the AppFolio `work_order` report
+// (snake_case fields preserved as-is).
+
+export type DbWorkOrder = {
+  id: string;
+  work_order_number: string | null;
+  service_request_number: string | null;
+  property_id: string | null;
+  property_name: string | null;
+  unit_id: string | null;
+  unit_name: string | null;
+  primary_tenant: string | null;
+  primary_tenant_email: string | null;
+  primary_tenant_phone_number: string | null;
+  work_order_type: string | null;
+  priority: string | null;
+  status: string | null;
+  job_description: string | null;
+  service_request_description: string | null;
+  instructions: string | null;
+  vendor: string | null;
+  vendor_id: string | null;
+  assigned_user: string | null;
+  estimate_amount: number | null;
+  amount: number | null;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  completed_on: string | null;
+  work_completed_on: string | null;
+  appfolio_created_at: string | null;
+  status_notes: string | null;
+  raw: Record<string, unknown>;
+  synced_at: string;
+  created_at: string;
+  updated_at: string;
+};

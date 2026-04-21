@@ -19,6 +19,19 @@ const OPEN_STATUSES = new Set<MaintenanceStatus>([
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function formatRelative(iso: string): string {
+  const diffMs = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(diffMs) || diffMs < 0) return "just now";
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 type Metrics = {
   openCount: number;
   openEmergencies: number;
@@ -162,11 +175,13 @@ export default function MaintenancePage() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [newNote, setNewNote] = useState("");
-  const [dataSource, setDataSource] = useState<"appfolio" | "error">("appfolio");
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [unitSearch, setUnitSearch] = useState("");
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [newRequest, setNewRequest] = useState({
     unitId: "",
     title: "",
@@ -175,22 +190,52 @@ export default function MaintenancePage() {
     priority: "medium" as MaintenancePriority,
   });
 
+  async function loadRequests() {
+    const res = await fetch("/api/maintenance/requests");
+    if (!res.ok) return { workOrders: [] as MaintenanceRequest[], syncedAt: null };
+    const json = await res.json();
+    return {
+      workOrders: (json.workOrders || []) as MaintenanceRequest[],
+      syncedAt: (json.syncedAt || null) as string | null,
+    };
+  }
+
+  async function syncFromAppFolio() {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const res = await fetch("/api/maintenance/sync", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Sync failed");
+      const { workOrders, syncedAt: ts } = await loadRequests();
+      setAllRequests(workOrders);
+      setSyncedAt(ts ?? json.syncedAt ?? null);
+    } catch (e: any) {
+      setSyncError(e.message || "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   useEffect(() => {
     async function loadData() {
       try {
-        const [woRes, unitRes] = await Promise.all([
-          fetch("/api/appfolio/work-orders"),
+        const [wo, unitRes] = await Promise.all([
+          loadRequests(),
           fetch("/api/appfolio/units"),
         ]);
-        const [woJson, unitJson] = await Promise.all([
-          woRes.ok ? woRes.json() : { workOrders: [] },
-          unitRes.ok ? unitRes.json() : { units: [] },
-        ]);
-        setAllRequests(woJson.workOrders || []);
+        const unitJson = unitRes.ok ? await unitRes.json() : { units: [] };
+        setAllRequests(wo.workOrders);
+        setSyncedAt(wo.syncedAt);
         setUnits(unitJson.units || []);
-        setDataSource("appfolio");
+        // First-time UX: no snapshot yet → pull once automatically
+        if (wo.workOrders.length === 0 && !wo.syncedAt) {
+          setLoading(false);
+          await syncFromAppFolio();
+          return;
+        }
       } catch {
-        setDataSource("error");
+        setSyncError("Couldn't load work orders");
       } finally {
         setLoading(false);
       }
@@ -428,10 +473,19 @@ export default function MaintenancePage() {
             Track and manage work orders across all properties
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium whitespace-nowrap">
-            Live from AppFolio
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {syncedAt
+              ? `Last synced ${formatRelative(syncedAt)}`
+              : "Never synced"}
           </span>
+          <button
+            onClick={syncFromAppFolio}
+            disabled={syncing}
+            className="px-3 py-2 bg-card border border-border text-sm rounded-lg hover:bg-muted transition-colors whitespace-nowrap disabled:opacity-50"
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors whitespace-nowrap"
@@ -440,6 +494,12 @@ export default function MaintenancePage() {
           </button>
         </div>
       </div>
+
+      {syncError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+          {syncError}
+        </div>
+      )}
 
       {showCreateForm && (
         <div className="bg-card rounded-xl border border-border p-5 space-y-4">
