@@ -41,6 +41,22 @@ export default function PropertyMeetings({ propertyId, propertyName, units }: Pr
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [openActionCount, setOpenActionCount] = useState<number>(0);
+  const [propertyWorkOrders, setPropertyWorkOrders] = useState<MaintenanceRequest[]>([]);
+
+  const loadWorkOrders = useCallback(async (): Promise<MaintenanceRequest[]> => {
+    try {
+      const r = await fetch(
+        `/api/maintenance/requests?property_id=${encodeURIComponent(propertyId)}`
+      );
+      const j = await r.json();
+      const next: MaintenanceRequest[] = Array.isArray(j.workOrders) ? j.workOrders : [];
+      setPropertyWorkOrders(next);
+      return next;
+    } catch {
+      setPropertyWorkOrders([]);
+      return [];
+    }
+  }, [propertyId]);
 
   const loadMeetings = useCallback(async () => {
     setLoading(true);
@@ -73,19 +89,14 @@ export default function PropertyMeetings({ propertyId, propertyName, units }: Pr
   useEffect(() => {
     loadMeetings();
     loadOpenActionCount();
-  }, [loadMeetings, loadOpenActionCount]);
+    loadWorkOrders();
+  }, [loadMeetings, loadOpenActionCount, loadWorkOrders]);
 
   const generateMeeting = useCallback(async () => {
     setCreating(true);
     try {
-      // Pull open work orders for this property + build vacancy agenda from units
-      const woResp = await fetch(
-        `/api/maintenance/requests?property_id=${encodeURIComponent(propertyId)}`
-      );
-      const woJson = await woResp.json();
-      const allWorkOrders: MaintenanceRequest[] = Array.isArray(woJson.workOrders)
-        ? woJson.workOrders
-        : [];
+      // Refresh right before creating so the agenda reflects the latest work orders.
+      const allWorkOrders = await loadWorkOrders();
       const openWO = allWorkOrders.filter(
         (w) => w.status !== "completed" && w.status !== "closed"
       );
@@ -139,7 +150,7 @@ export default function PropertyMeetings({ propertyId, propertyName, units }: Pr
     } finally {
       setCreating(false);
     }
-  }, [propertyId, propertyName, units]);
+  }, [loadWorkOrders, propertyId, propertyName, units]);
 
   const selected = useMemo(
     () => meetings.find((m) => m.id === selectedId) ?? null,
@@ -150,6 +161,8 @@ export default function PropertyMeetings({ propertyId, propertyName, units }: Pr
     return (
       <MeetingDetailView
         meeting={selected}
+        units={units}
+        workOrders={propertyWorkOrders}
         onBack={() => {
           setSelectedId(null);
           loadMeetings();

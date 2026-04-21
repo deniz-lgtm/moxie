@@ -6,14 +6,16 @@ import {
   CheckCircle2,
   ChevronLeft,
   ClipboardList,
+  MessageSquare,
   Mic,
+  Paperclip,
   Plus,
   Sparkles,
   Square,
-  Trash2,
   Wrench,
   Home as HomeIcon,
 } from "lucide-react";
+import ActionItemDetailModal from "@/components/ActionItemDetailModal";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useMeetingRecorder } from "@/hooks/useMeetingRecorder";
 import type {
@@ -24,9 +26,12 @@ import type {
   DbMeetingActionItem,
   DbPropertyMeeting,
 } from "@/lib/supabase";
+import type { MaintenanceRequest, Unit } from "@/lib/types";
 
 type Props = {
   meeting: DbPropertyMeeting;
+  units: Unit[];
+  workOrders: MaintenanceRequest[];
   onBack: () => void;
   onMeetingChange?: (m: DbPropertyMeeting) => void;
 };
@@ -49,7 +54,13 @@ function makeId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export default function MeetingDetailView({ meeting: initial, onBack, onMeetingChange }: Props) {
+export default function MeetingDetailView({
+  meeting: initial,
+  units,
+  workOrders,
+  onBack,
+  onMeetingChange,
+}: Props) {
   const [meeting, setMeetingState] = useState<DbPropertyMeeting>(initial);
   const [items, setItems] = useState<DbMeetingActionItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
@@ -59,6 +70,7 @@ export default function MeetingDetailView({ meeting: initial, onBack, onMeetingC
   const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null);
   const [transcriptDraft, setTranscriptDraft] = useState<string>(meeting.transcript || "");
   const [notesDraft, setNotesDraft] = useState<string>(meeting.notes || "");
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
 
   const recorder = useMeetingRecorder();
 
@@ -268,7 +280,7 @@ export default function MeetingDetailView({ meeting: initial, onBack, onMeetingC
   const doneItems = useMemo(() => items.filter((i) => i.status === "completed"), [items]);
 
   const agenda = meeting.agenda_snapshot || {};
-  const workOrders: DbAgendaWorkOrder[] = Array.isArray(agenda.workOrders) ? agenda.workOrders : [];
+  const agendaWorkOrders: DbAgendaWorkOrder[] = Array.isArray(agenda.workOrders) ? agenda.workOrders : [];
   const vacancies: DbAgendaVacancy[] = Array.isArray(agenda.vacancies) ? agenda.vacancies : [];
   const carryOver: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions) ? agenda.carryOverActions : [];
 
@@ -439,10 +451,10 @@ export default function MeetingDetailView({ meeting: initial, onBack, onMeetingC
         <AgendaCard
           title="Open Work Orders"
           icon={<Wrench className="w-4 h-4" />}
-          count={workOrders.length}
+          count={agendaWorkOrders.length}
           empty="No open work orders at meeting time."
         >
-          {workOrders.map((wo) => (
+          {agendaWorkOrders.map((wo) => (
             <div key={wo.id} className="text-sm border-b border-border last:border-0 pb-2 last:pb-0">
               <div className="flex items-center gap-2">
                 {wo.workOrderNumber && (
@@ -530,8 +542,12 @@ export default function MeetingDetailView({ meeting: initial, onBack, onMeetingC
                     <ActionItemRow
                       key={it.id}
                       item={it}
-                      onPatch={(patch) => patchItem(it.id, patch)}
-                      onDelete={() => removeItem(it.id)}
+                      onOpen={() => setOpenItemId(it.id)}
+                      onToggleDone={() =>
+                        patchItem(it.id, {
+                          status: it.status === "completed" ? "open" : "completed",
+                        })
+                      }
                     />
                   ))}
                 </div>
@@ -545,8 +561,12 @@ export default function MeetingDetailView({ meeting: initial, onBack, onMeetingC
                     <ActionItemRow
                       key={it.id}
                       item={it}
-                      onPatch={(patch) => patchItem(it.id, patch)}
-                      onDelete={() => removeItem(it.id)}
+                      onOpen={() => setOpenItemId(it.id)}
+                      onToggleDone={() =>
+                        patchItem(it.id, {
+                          status: it.status === "completed" ? "open" : "completed",
+                        })
+                      }
                     />
                   ))}
                 </div>
@@ -572,6 +592,26 @@ export default function MeetingDetailView({ meeting: initial, onBack, onMeetingC
           className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
         />
       </div>
+
+      {openItemId && (() => {
+        const openItem = items.find((i) => i.id === openItemId);
+        if (!openItem) return null;
+        return (
+          <ActionItemDetailModal
+            item={openItem}
+            units={units}
+            workOrders={workOrders}
+            onClose={() => setOpenItemId(null)}
+            onChange={(updated) =>
+              setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
+            }
+            onDelete={async () => {
+              await removeItem(openItem.id);
+              setOpenItemId(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -608,71 +648,88 @@ function AgendaCard({
 
 function ActionItemRow({
   item,
-  onPatch,
-  onDelete,
+  onOpen,
+  onToggleDone,
 }: {
   item: DbMeetingActionItem;
-  onPatch: (patch: Partial<DbMeetingActionItem>) => void;
-  onDelete: () => void;
+  onOpen: () => void;
+  onToggleDone: () => void;
 }) {
-  const toggleDone = () => {
-    onPatch({ status: item.status === "completed" ? "open" : "completed" });
-  };
+  const commentCount = item.comments?.length ?? 0;
+  const attachmentCount = item.attachments?.length ?? 0;
+  const overdue =
+    item.due_date &&
+    item.status !== "completed" &&
+    item.status !== "cancelled" &&
+    new Date(item.due_date + "T00:00:00") < new Date(new Date().toDateString());
+
   return (
-    <div className="border border-border rounded-lg p-3 bg-background/50">
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full text-left border border-border rounded-lg p-3 bg-background/50 hover:bg-muted/50 transition-colors"
+    >
       <div className="flex items-start gap-3">
-        <button onClick={toggleDone} className="mt-0.5" aria-label="Toggle complete">
+        <span
+          role="checkbox"
+          aria-checked={item.status === "completed"}
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleDone();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === " " || e.key === "Enter") {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleDone();
+            }
+          }}
+          className="mt-0.5 shrink-0 cursor-pointer"
+        >
           {item.status === "completed" ? (
             <CheckCircle2 className="w-5 h-5 text-green-600" />
           ) : (
             <Circle className="w-5 h-5 text-muted-foreground" />
           )}
-        </button>
+        </span>
         <div className="flex-1 min-w-0">
-          <input
-            value={item.title}
-            onChange={(e) => onPatch({ title: e.target.value })}
-            className={`w-full text-sm font-medium bg-transparent border-none focus:outline-none focus:ring-0 px-0 ${
+          <p
+            className={`text-sm font-medium ${
               item.status === "completed" ? "line-through text-muted-foreground" : ""
             }`}
-          />
+          >
+            {item.title}
+          </p>
           {item.description && (
-            <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+              {item.description}
+            </p>
           )}
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
-            <select
-              value={item.status}
-              onChange={(e) => onPatch({ status: e.target.value as ActionItemStatus })}
-              className="text-xs border border-border rounded px-2 py-1 bg-card"
-            >
-              <option value="open">Open</option>
-              <option value="in_progress">In progress</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-            <input
-              type="text"
-              value={item.assigned_to || ""}
-              onChange={(e) => onPatch({ assigned_to: e.target.value || null })}
-              placeholder="Assign to…"
-              className="text-xs border border-border rounded px-2 py-1 bg-card w-32"
-            />
-            <input
-              type="date"
-              value={item.due_date || ""}
-              onChange={(e) => onPatch({ due_date: e.target.value || null })}
-              className="text-xs border border-border rounded px-2 py-1 bg-card"
-            />
-            <select
-              value={item.priority || ""}
-              onChange={(e) => onPatch({ priority: e.target.value || null })}
-              className="text-xs border border-border rounded px-2 py-1 bg-card"
-            >
-              <option value="">Priority…</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
+          <div className="flex items-center gap-2 mt-2 flex-wrap text-xs text-muted-foreground">
+            {item.status !== "open" && <StatusBadge value={item.status} />}
+            {item.priority && <StatusBadge value={item.priority} />}
+            {item.assigned_to && <span>{item.assigned_to}</span>}
+            {item.due_date && (
+              <span className={overdue ? "text-red-600 font-medium" : ""}>
+                Due {item.due_date}
+              </span>
+            )}
+            {item.linked_work_order_id && (
+              <span className="inline-flex items-center gap-1">
+                <Wrench className="w-3 h-3" /> linked WO
+              </span>
+            )}
+            {commentCount > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <MessageSquare className="w-3 h-3" /> {commentCount}
+              </span>
+            )}
+            {attachmentCount > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Paperclip className="w-3 h-3" /> {attachmentCount}
+              </span>
+            )}
             {item.source === "transcript" && (
               <span className="text-[10px] uppercase tracking-wide text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">
                 AI
@@ -680,15 +737,8 @@ function ActionItemRow({
             )}
           </div>
         </div>
-        <button
-          onClick={onDelete}
-          className="text-muted-foreground hover:text-red-600"
-          aria-label="Delete"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
       </div>
-    </div>
+    </button>
   );
 }
 

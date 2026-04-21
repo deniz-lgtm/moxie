@@ -317,6 +317,24 @@ export type DbPropertyMeeting = {
   updated_at: string;
 };
 
+export type DbActionItemComment = {
+  id: string;
+  text: string;
+  author?: string | null;
+  created_at: string;
+};
+
+export type DbActionItemAttachment = {
+  id: string;
+  name: string;
+  url: string;
+  content_type?: string | null;
+  size?: number | null;
+  uploaded_at: string;
+  uploaded_by?: string | null;
+  storage_path?: string | null;
+};
+
 export type DbMeetingActionItem = {
   id: string;
   meeting_id: string;
@@ -332,6 +350,8 @@ export type DbMeetingActionItem = {
   completed_by: string | null;
   linked_work_order_id: string | null;
   linked_unit_id: string | null;
+  comments: DbActionItemComment[];
+  attachments: DbActionItemAttachment[];
   created_at: string;
   updated_at: string;
 };

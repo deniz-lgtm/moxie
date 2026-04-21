@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  appendComment,
   bulkCreateActionItems,
   createActionItem,
   deleteActionItem,
+  deleteComment,
   listActionItems,
   updateActionItem,
   type CreateActionItemInput,
@@ -59,7 +61,10 @@ export async function POST(request: Request) {
 
 /**
  * PATCH /api/meetings/action-items?id=<action_item_id>
- * Body: partial fields.
+ *
+ * Body: partial fields, plus (exclusive) helpers:
+ *   { appendComment: { text, author? } }      → append to comments thread
+ *   { deleteCommentId: string }               → remove a comment by id
  */
 export async function PATCH(request: Request) {
   try {
@@ -68,6 +73,19 @@ export async function PATCH(request: Request) {
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
     const body = await request.json();
+
+    if (body?.appendComment?.text) {
+      const item = await appendComment(id, {
+        text: String(body.appendComment.text),
+        author: body.appendComment.author,
+      });
+      return NextResponse.json({ item });
+    }
+    if (body?.deleteCommentId) {
+      const item = await deleteComment(id, String(body.deleteCommentId));
+      return NextResponse.json({ item });
+    }
+
     const update: UpdateActionItemInput = {};
     if ("title" in body) update.title = body.title;
     if ("description" in body) update.description = body.description ?? null;

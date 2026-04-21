@@ -9,12 +9,16 @@
 
 import {
   getSupabase,
+  type DbActionItemAttachment,
+  type DbActionItemComment,
   type DbAgendaSnapshot,
   type DbMeetingActionItem,
   type DbPropertyMeeting,
   type ActionItemStatus,
   type MeetingStatus,
 } from "./supabase";
+
+const ATTACHMENT_BUCKET = "meeting-attachments";
 
 function isMissingTableError(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
@@ -133,10 +137,12 @@ export async function deleteMeeting(id: string): Promise<void> {
 
 export type CreateActionItemInput = Omit<
   DbMeetingActionItem,
-  "created_at" | "updated_at" | "completed_at" | "completed_by"
+  "created_at" | "updated_at" | "completed_at" | "completed_by" | "comments" | "attachments"
 > & {
   completed_at?: string | null;
   completed_by?: string | null;
+  comments?: DbActionItemComment[];
+  attachments?: DbActionItemAttachment[];
 };
 
 export type UpdateActionItemInput = Partial<
@@ -222,6 +228,135 @@ export async function deleteActionItem(id: string): Promise<void> {
   if (!sb) throw new Error("Supabase not configured");
   const { error } = await sb.from("meeting_action_items").delete().eq("id", id);
   if (error) throw new Error(`[meetings-db] deleteActionItem: ${error.message}`);
+}
+
+// ─── Comments & attachments ──────────────────────────────────────
+
+async function getItemOrThrow(id: string): Promise<DbMeetingActionItem> {
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured");
+  const { data, error } = await sb
+    .from("meeting_action_items")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) throw new Error(`[meetings-db] getItem: ${error.message}`);
+  return data as DbMeetingActionItem;
+}
+
+export async function appendComment(
+  id: string,
+  comment: { text: string; author?: string }
+): Promise<DbMeetingActionItem> {
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured");
+  const existing = await getItemOrThrow(id);
+  const newComment: DbActionItemComment = {
+    id: `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    text: comment.text,
+    author: comment.author ?? null,
+    created_at: new Date().toISOString(),
+  };
+  const comments = [...(existing.comments || []), newComment];
+  const { data, error } = await sb
+    .from("meeting_action_items")
+    .update({ comments })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error(`[meetings-db] appendComment: ${error.message}`);
+  return data as DbMeetingActionItem;
+}
+
+export async function deleteComment(id: string, commentId: string): Promise<DbMeetingActionItem> {
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured");
+  const existing = await getItemOrThrow(id);
+  const comments = (existing.comments || []).filter((c) => c.id !== commentId);
+  const { data, error } = await sb
+    .from("meeting_action_items")
+    .update({ comments })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error(`[meetings-db] deleteComment: ${error.message}`);
+  return data as DbMeetingActionItem;
+}
+
+/** Upload an attachment blob to Supabase storage and append to the item. */
+export async function uploadAttachment(
+  itemId: string,
+  file: {
+    name: string;
+    contentType: string;
+    size: number;
+    dataUrl: string;
+  },
+  uploadedBy?: string
+): Promise<DbMeetingActionItem> {
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured");
+
+  const attachmentId = `att_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase().slice(0, 10);
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${itemId}/${attachmentId}-${safeName}`;
+
+  // Decode dataUrl → blob
+  const res = await fetch(file.dataUrl);
+  const blob = await res.blob();
+
+  const { error: uploadError } = await sb.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(path, blob, { contentType: file.contentType, upsert: false });
+  if (uploadError) throw new Error(`[meetings-db] upload: ${uploadError.message}`);
+
+  const { data: publicUrlData } = sb.storage.from(ATTACHMENT_BUCKET).getPublicUrl(path);
+  const attachment: DbActionItemAttachment = {
+    id: attachmentId,
+    name: file.name,
+    url: publicUrlData.publicUrl,
+    content_type: file.contentType,
+    size: file.size,
+    uploaded_at: new Date().toISOString(),
+    uploaded_by: uploadedBy ?? null,
+    storage_path: path,
+  };
+
+  const existing = await getItemOrThrow(itemId);
+  const attachments = [...(existing.attachments || []), attachment];
+  const { data, error } = await sb
+    .from("meeting_action_items")
+    .update({ attachments })
+    .eq("id", itemId)
+    .select("*")
+    .single();
+  if (error) throw new Error(`[meetings-db] updateAttachments: ${error.message}`);
+  // Suppress unused-var warning for ext
+  void ext;
+  return data as DbMeetingActionItem;
+}
+
+export async function deleteAttachment(
+  itemId: string,
+  attachmentId: string
+): Promise<DbMeetingActionItem> {
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured");
+  const existing = await getItemOrThrow(itemId);
+  const target = (existing.attachments || []).find((a) => a.id === attachmentId);
+  if (target?.storage_path) {
+    await sb.storage.from(ATTACHMENT_BUCKET).remove([target.storage_path]);
+  }
+  const attachments = (existing.attachments || []).filter((a) => a.id !== attachmentId);
+  const { data, error } = await sb
+    .from("meeting_action_items")
+    .update({ attachments })
+    .eq("id", itemId)
+    .select("*")
+    .single();
+  if (error) throw new Error(`[meetings-db] deleteAttachment: ${error.message}`);
+  return data as DbMeetingActionItem;
 }
 
 /**
