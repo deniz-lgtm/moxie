@@ -5,6 +5,7 @@ import {
   createActionItem,
   deleteActionItem,
   deleteComment,
+  getActionItem,
   listActionItems,
   updateActionItem,
   type CreateActionItemInput,
@@ -14,13 +15,20 @@ import type { ActionItemSource, ActionItemStatus } from "@/lib/supabase";
 
 /**
  * GET /api/meetings/action-items
- *   ?meeting_id=<id>     items for a specific meeting
- *   ?property_id=<id>    items for a property (all meetings)
- *   ?status=<status>     filter by status
+ *   ?id=<action_item_id>  fetch a single action item
+ *   ?meeting_id=<id>      items for a specific meeting
+ *   ?property_id=<id>     items for a property (all meetings)
+ *   ?status=<status>      filter by status
  */
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
+    const id = url.searchParams.get("id");
+    if (id) {
+      const item = await getActionItem(id);
+      if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ item });
+    }
     const items = await listActionItems({
       meetingId: url.searchParams.get("meeting_id") || undefined,
       propertyId: url.searchParams.get("property_id") || undefined,

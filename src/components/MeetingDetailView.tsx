@@ -16,6 +16,7 @@ import {
   Home as HomeIcon,
 } from "lucide-react";
 import ActionItemDetailModal from "@/components/ActionItemDetailModal";
+import InfoPopup, { type InfoRow } from "@/components/InfoPopup";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useMeetingRecorder } from "@/hooks/useMeetingRecorder";
 import type {
@@ -71,6 +72,9 @@ export default function MeetingDetailView({
   const [transcriptDraft, setTranscriptDraft] = useState<string>(meeting.transcript || "");
   const [notesDraft, setNotesDraft] = useState<string>(meeting.notes || "");
   const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [openWorkOrderId, setOpenWorkOrderId] = useState<string | null>(null);
+  const [openVacancyUnitId, setOpenVacancyUnitId] = useState<string | null>(null);
+  const [openCarryOverItem, setOpenCarryOverItem] = useState<DbMeetingActionItem | null>(null);
   const [attendeesDraft, setAttendeesDraft] = useState<string>(
     (initial.attendees || []).join(", ")
   );
@@ -354,16 +358,188 @@ export default function MeetingDetailView({
         </p>
       </div>
 
+      {/* Agenda panels */}
+      <div className="grid lg:grid-cols-3 gap-4">
+        <AgendaCard
+          title="Open Work Orders"
+          icon={<Wrench className="w-4 h-4" />}
+          count={agendaWorkOrders.length}
+          empty="No open work orders at meeting time."
+        >
+          {agendaWorkOrders.map((wo) => (
+            <button
+              type="button"
+              key={wo.id}
+              onClick={() => setOpenWorkOrderId(wo.id)}
+              className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                {wo.workOrderNumber && (
+                  <span className="text-xs font-mono text-muted-foreground">#{wo.workOrderNumber}</span>
+                )}
+                {wo.priority && <StatusBadge value={wo.priority} />}
+              </div>
+              <p className="mt-1">{wo.title}</p>
+              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
+                {wo.propertyName && <span>{wo.propertyName}</span>}
+                {wo.unitName && <span>Unit {wo.unitName}</span>}
+                {wo.status && <StatusBadge value={wo.status} />}
+                {wo.vendor && <span>· {wo.vendor}</span>}
+              </div>
+            </button>
+          ))}
+        </AgendaCard>
+
+        <AgendaCard
+          title="Vacancies"
+          icon={<HomeIcon className="w-4 h-4" />}
+          count={vacancies.length}
+          empty="No vacant units."
+        >
+          {vacancies.map((v) => (
+            <button
+              type="button"
+              key={v.unitId}
+              onClick={() => setOpenVacancyUnitId(v.unitId)}
+              className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-medium">Unit {v.unitName}</span>
+                <StatusBadge value="vacant" />
+              </div>
+              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+                {v.propertyName && <span>{v.propertyName}</span>}
+                {v.bedrooms != null && <span>{v.bedrooms}bd / {v.bathrooms ?? "—"}ba</span>}
+                {v.rent && <span>${Number(v.rent).toLocaleString()}/mo</span>}
+                {v.daysVacant != null && <span>{v.daysVacant}d vacant</span>}
+              </div>
+            </button>
+          ))}
+        </AgendaCard>
+
+        <AgendaCard
+          title="Carry-over from last meeting"
+          icon={<ClipboardList className="w-4 h-4" />}
+          count={carryOver.length}
+          empty="No prior open action items."
+        >
+          {carryOver.map((c) => (
+            <button
+              type="button"
+              key={c.id}
+              onClick={async () => {
+                try {
+                  const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(c.id)}`);
+                  const j = await r.json();
+                  if (j.item) setOpenCarryOverItem(j.item);
+                } catch {
+                  /* ignore */
+                }
+              }}
+              className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
+            >
+              <p className="font-medium">{c.title}</p>
+              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+                <StatusBadge value={c.status} />
+                {c.assignedTo && <span>Owner: {c.assignedTo}</span>}
+                {c.dueDate && <span>Due: {c.dueDate}</span>}
+              </div>
+            </button>
+          ))}
+        </AgendaCard>
+      </div>
+
+      {/* Action items board */}
+      <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold flex items-center gap-2">
+            <ClipboardList className="w-4 h-4" /> Action Items ({items.length})
+          </h3>
+          <button
+            onClick={addManualItem}
+            className="text-sm font-medium text-accent hover:underline inline-flex items-center gap-1"
+          >
+            <Plus className="w-4 h-4" /> Add item
+          </button>
+        </div>
+
+        {loadingItems ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No action items yet. Record the meeting and click &ldquo;Extract Action Items&rdquo;, or add one manually.
+          </p>
+        ) : (
+          <div className="space-y-6">
+            {openItems.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Open</p>
+                <div className="space-y-2">
+                  {openItems.map((it) => (
+                    <ActionItemRow
+                      key={it.id}
+                      item={it}
+                      onOpen={() => setOpenItemId(it.id)}
+                      onToggleDone={() =>
+                        patchItem(it.id, {
+                          status: it.status === "completed" ? "open" : "completed",
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            {doneItems.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Completed</p>
+                <div className="space-y-2 opacity-70">
+                  {doneItems.map((it) => (
+                    <ActionItemRow
+                      key={it.id}
+                      item={it}
+                      onOpen={() => setOpenItemId(it.id)}
+                      onToggleDone={() =>
+                        patchItem(it.id, {
+                          status: it.status === "completed" ? "open" : "completed",
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Notes */}
+      <div className="bg-card rounded-xl border border-border p-5 space-y-2">
+        <h3 className="font-semibold">Notes</h3>
+        <textarea
+          value={notesDraft}
+          onChange={(e) => setNotesDraft(e.target.value)}
+          onBlur={() => {
+            if (notesDraft !== (meeting.notes || "")) {
+              persistMeeting({ notes: notesDraft });
+            }
+          }}
+          rows={4}
+          placeholder="Any additional context from the meeting — decisions, blockers, follow-ups…"
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+        />
+      </div>
+
       {/* Recorder */}
       <div className="bg-card rounded-xl border border-border p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h3 className="font-semibold flex items-center gap-2">
-              <Mic className="w-4 h-4" /> Recording
+              <Mic className="w-4 h-4" /> Recording &amp; Transcript
             </h3>
             <p className="text-xs text-muted-foreground mt-1">
               {recorder.supportsLiveTranscription
-                ? "Live transcription runs in your browser while you record."
+                ? "Live transcription runs in your browser while you record. You can also paste a Google Meet transcript."
                 : "Live transcription isn't supported in this browser — audio still records, and you can paste a transcript after."}
             </p>
           </div>
@@ -479,155 +655,6 @@ export default function MeetingDetailView({
         )}
       </div>
 
-      {/* Agenda panels */}
-      <div className="grid lg:grid-cols-3 gap-4">
-        <AgendaCard
-          title="Open Work Orders"
-          icon={<Wrench className="w-4 h-4" />}
-          count={agendaWorkOrders.length}
-          empty="No open work orders at meeting time."
-        >
-          {agendaWorkOrders.map((wo) => (
-            <div key={wo.id} className="text-sm border-b border-border last:border-0 pb-2 last:pb-0">
-              <div className="flex items-center gap-2">
-                {wo.workOrderNumber && (
-                  <span className="text-xs font-mono text-muted-foreground">#{wo.workOrderNumber}</span>
-                )}
-                {wo.priority && <StatusBadge value={wo.priority} />}
-              </div>
-              <p className="mt-1">{wo.title}</p>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
-                {wo.propertyName && <span>{wo.propertyName}</span>}
-                {wo.unitName && <span>Unit {wo.unitName}</span>}
-                {wo.status && <StatusBadge value={wo.status} />}
-                {wo.vendor && <span>· {wo.vendor}</span>}
-              </div>
-            </div>
-          ))}
-        </AgendaCard>
-
-        <AgendaCard
-          title="Vacancies"
-          icon={<HomeIcon className="w-4 h-4" />}
-          count={vacancies.length}
-          empty="No vacant units."
-        >
-          {vacancies.map((v) => (
-            <div key={v.unitId} className="text-sm border-b border-border last:border-0 pb-2 last:pb-0">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">Unit {v.unitName}</span>
-                <StatusBadge value="vacant" />
-              </div>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                {v.propertyName && <span>{v.propertyName}</span>}
-                {v.bedrooms != null && <span>{v.bedrooms}bd / {v.bathrooms ?? "—"}ba</span>}
-                {v.rent && <span>${Number(v.rent).toLocaleString()}/mo</span>}
-                {v.daysVacant != null && <span>{v.daysVacant}d vacant</span>}
-              </div>
-            </div>
-          ))}
-        </AgendaCard>
-
-        <AgendaCard
-          title="Carry-over from last meeting"
-          icon={<ClipboardList className="w-4 h-4" />}
-          count={carryOver.length}
-          empty="No prior open action items."
-        >
-          {carryOver.map((c) => (
-            <div key={c.id} className="text-sm border-b border-border last:border-0 pb-2 last:pb-0">
-              <p className="font-medium">{c.title}</p>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                <StatusBadge value={c.status} />
-                {c.assignedTo && <span>Owner: {c.assignedTo}</span>}
-                {c.dueDate && <span>Due: {c.dueDate}</span>}
-              </div>
-            </div>
-          ))}
-        </AgendaCard>
-      </div>
-
-      {/* Action items board */}
-      <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold flex items-center gap-2">
-            <ClipboardList className="w-4 h-4" /> Action Items ({items.length})
-          </h3>
-          <button
-            onClick={addManualItem}
-            className="text-sm font-medium text-accent hover:underline inline-flex items-center gap-1"
-          >
-            <Plus className="w-4 h-4" /> Add item
-          </button>
-        </div>
-
-        {loadingItems ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No action items yet. Record the meeting and click &ldquo;Extract Action Items&rdquo;, or add one manually.
-          </p>
-        ) : (
-          <div className="space-y-6">
-            {openItems.length > 0 && (
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Open</p>
-                <div className="space-y-2">
-                  {openItems.map((it) => (
-                    <ActionItemRow
-                      key={it.id}
-                      item={it}
-                      onOpen={() => setOpenItemId(it.id)}
-                      onToggleDone={() =>
-                        patchItem(it.id, {
-                          status: it.status === "completed" ? "open" : "completed",
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-            {doneItems.length > 0 && (
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Completed</p>
-                <div className="space-y-2 opacity-70">
-                  {doneItems.map((it) => (
-                    <ActionItemRow
-                      key={it.id}
-                      item={it}
-                      onOpen={() => setOpenItemId(it.id)}
-                      onToggleDone={() =>
-                        patchItem(it.id, {
-                          status: it.status === "completed" ? "open" : "completed",
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Notes */}
-      <div className="bg-card rounded-xl border border-border p-5 space-y-2">
-        <h3 className="font-semibold">Notes</h3>
-        <textarea
-          value={notesDraft}
-          onChange={(e) => setNotesDraft(e.target.value)}
-          onBlur={() => {
-            if (notesDraft !== (meeting.notes || "")) {
-              persistMeeting({ notes: notesDraft });
-            }
-          }}
-          rows={4}
-          placeholder="Any additional context from the meeting — decisions, blockers, follow-ups…"
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-        />
-      </div>
-
       {openItemId && (() => {
         const openItem = items.find((i) => i.id === openItemId);
         if (!openItem) return null;
@@ -648,6 +675,105 @@ export default function MeetingDetailView({
           />
         );
       })()}
+
+      {openWorkOrderId && (() => {
+        const snap = agendaWorkOrders.find((w) => w.id === openWorkOrderId);
+        const live = workOrders.find((w) => w.id === openWorkOrderId);
+        if (!snap && !live) return null;
+        const title = live?.title || snap?.title || "Work order";
+        const number = live?.appfolioWorkOrderId || snap?.workOrderNumber;
+        const rows: InfoRow[] = [];
+        if (live?.priority || snap?.priority) {
+          rows.push({ label: "Priority", status: (live?.priority || snap?.priority) as string });
+        }
+        if (live?.status || snap?.status) {
+          rows.push({ label: "Status", status: (live?.status || snap?.status) as string });
+        }
+        if (live?.category) rows.push({ label: "Category", value: live.category });
+        if (live?.propertyName || snap?.propertyName) {
+          rows.push({ label: "Property", value: live?.propertyName || snap?.propertyName });
+        }
+        if (live?.unitNumber || snap?.unitName) {
+          rows.push({ label: "Unit", value: live?.unitNumber || snap?.unitName });
+        }
+        if (live?.tenantName) rows.push({ label: "Tenant", value: live.tenantName });
+        if (live?.vendor || snap?.vendor) {
+          rows.push({ label: "Vendor", value: live?.vendor || snap?.vendor });
+        }
+        if (live?.assignedTo) rows.push({ label: "Assigned to", value: live.assignedTo });
+        if (live?.scheduledDate) rows.push({ label: "Scheduled", value: live.scheduledDate });
+        if (live?.description) rows.push({ label: "Description", value: live.description });
+        return (
+          <InfoPopup
+            title={number ? `#${number} — ${title}` : title}
+            subtitle="Work order"
+            icon={<Wrench className="w-5 h-5 text-muted-foreground" />}
+            rows={rows}
+            action={{ label: "Open in Maintenance →", href: "/maintenance" }}
+            onClose={() => setOpenWorkOrderId(null)}
+          />
+        );
+      })()}
+
+      {openVacancyUnitId && (() => {
+        const snap = vacancies.find((v) => v.unitId === openVacancyUnitId);
+        const live = units.find((u) => u.id === openVacancyUnitId);
+        if (!snap && !live) return null;
+        const rows: InfoRow[] = [];
+        rows.push({ label: "Status", status: live?.status || "vacant" });
+        if (live?.propertyName || snap?.propertyName) {
+          rows.push({ label: "Property", value: live?.propertyName || snap?.propertyName });
+        }
+        if ((live?.bedrooms ?? snap?.bedrooms) != null) {
+          rows.push({
+            label: "Layout",
+            value: `${live?.bedrooms ?? snap?.bedrooms}bd / ${
+              live?.bathrooms ?? snap?.bathrooms ?? "—"
+            }ba${live?.sqft ? ` · ${live.sqft} sqft` : ""}`,
+          });
+        }
+        if (live?.rent || snap?.rent) {
+          rows.push({
+            label: "Rent",
+            value: `$${Number(live?.rent ?? snap?.rent).toLocaleString()}/mo`,
+          });
+        }
+        if (snap?.daysVacant != null) rows.push({ label: "Days vacant", value: `${snap.daysVacant}` });
+        if (live?.tenant) rows.push({ label: "Last tenant", value: live.tenant });
+        if (live?.moveOut || snap?.leaseEnded) {
+          rows.push({ label: "Move-out", value: live?.moveOut || snap?.leaseEnded });
+        }
+        if (live?.leaseTo) rows.push({ label: "Lease end", value: live.leaseTo });
+        if (live?.deposit) rows.push({ label: "Deposit", value: `$${live.deposit.toLocaleString()}` });
+        return (
+          <InfoPopup
+            title={`Unit ${live?.unitName || snap?.unitName}`}
+            subtitle={live?.propertyName || snap?.propertyName || "Vacant unit"}
+            icon={<HomeIcon className="w-5 h-5 text-muted-foreground" />}
+            rows={rows}
+            action={{ label: "Open in Leasing →", href: "/leasing" }}
+            onClose={() => setOpenVacancyUnitId(null)}
+          />
+        );
+      })()}
+
+      {openCarryOverItem && (
+        <ActionItemDetailModal
+          item={openCarryOverItem}
+          units={units}
+          workOrders={workOrders}
+          attendees={meeting.attendees || []}
+          onClose={() => setOpenCarryOverItem(null)}
+          onChange={(updated) => setOpenCarryOverItem(updated)}
+          onDelete={async () => {
+            await fetch(
+              `/api/meetings/action-items?id=${encodeURIComponent(openCarryOverItem.id)}`,
+              { method: "DELETE" }
+            );
+            setOpenCarryOverItem(null);
+          }}
+        />
+      )}
     </div>
   );
 }
