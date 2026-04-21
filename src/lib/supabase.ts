@@ -254,3 +254,104 @@ export type DbContact = {
   created_at: string;
   updated_at: string;
 };
+
+// ─── Property Meetings (Monday morning meetings) ────────────────
+// Mirrors supabase/migrations/20260421_property_meetings.sql.
+
+export type MeetingStatus = "scheduled" | "in_progress" | "completed";
+export type ActionItemStatus = "open" | "in_progress" | "completed" | "cancelled";
+export type ActionItemSource = "manual" | "transcript" | "work_order" | "vacancy";
+
+export type DbAgendaWorkOrder = {
+  id: string;
+  workOrderNumber?: string | null;
+  title: string;
+  priority?: string | null;
+  status?: string | null;
+  unitName?: string | null;
+  vendor?: string | null;
+};
+
+export type DbAgendaVacancy = {
+  unitId: string;
+  unitName: string;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  rent?: number | string | null;
+  daysVacant?: number | null;
+  leaseEnded?: string | null;
+};
+
+export type DbAgendaCarryOver = {
+  id: string;
+  title: string;
+  description?: string | null;
+  assignedTo?: string | null;
+  dueDate?: string | null;
+  status: ActionItemStatus;
+  fromMeetingDate?: string | null;
+};
+
+export type DbAgendaSnapshot = {
+  workOrders?: DbAgendaWorkOrder[];
+  vacancies?: DbAgendaVacancy[];
+  carryOverActions?: DbAgendaCarryOver[];
+};
+
+export type DbPropertyMeeting = {
+  id: string;
+  property_id: string;
+  property_name: string;
+  meeting_date: string;
+  status: MeetingStatus;
+  title: string | null;
+  audio_url: string | null;
+  transcript: string | null;
+  summary: string | null;
+  notes: string | null;
+  agenda_snapshot: DbAgendaSnapshot;
+  attendees: string[];
+  recorded_at: string | null;
+  recording_duration_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbActionItemComment = {
+  id: string;
+  text: string;
+  author?: string | null;
+  created_at: string;
+};
+
+export type DbActionItemAttachment = {
+  id: string;
+  name: string;
+  url: string;
+  content_type?: string | null;
+  size?: number | null;
+  uploaded_at: string;
+  uploaded_by?: string | null;
+  storage_path?: string | null;
+};
+
+export type DbMeetingActionItem = {
+  id: string;
+  meeting_id: string;
+  property_id: string;
+  title: string;
+  description: string | null;
+  assigned_to: string | null;
+  due_date: string | null;
+  status: ActionItemStatus;
+  priority: string | null;
+  source: ActionItemSource;
+  completed_at: string | null;
+  completed_by: string | null;
+  linked_work_order_id: string | null;
+  linked_unit_id: string | null;
+  comments: DbActionItemComment[];
+  attachments: DbActionItemAttachment[];
+  created_at: string;
+  updated_at: string;
+};
