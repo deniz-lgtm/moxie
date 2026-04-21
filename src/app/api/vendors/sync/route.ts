@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   queryDatabase,
   getDatabase,
+  resolveDatabaseId,
   createDatabasePage,
   updatePage,
   notionPageToVendor,
@@ -51,8 +52,8 @@ function vendorToNotionPayload(v: Vendor) {
  *     → update the Notion page (or create one if no notion_page_id).
  */
 export async function POST() {
-  const dbId = process.env.NOTION_VENDORS_DB_ID;
-  if (!dbId) {
+  const rawId = process.env.NOTION_VENDORS_DB_ID;
+  if (!rawId) {
     return NextResponse.json(
       { error: "NOTION_VENDORS_DB_ID not configured" },
       { status: 400 }
@@ -60,6 +61,9 @@ export async function POST() {
   }
 
   try {
+    // NOTION_VENDORS_DB_ID may be either a database id or the id of the page
+    // that contains the database. Resolve once per request.
+    const dbId = await resolveDatabaseId(rawId);
     const [schema, notionPages, localVendors] = await Promise.all([
       getDatabase(dbId),
       queryDatabase(dbId),
