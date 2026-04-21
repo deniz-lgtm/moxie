@@ -234,6 +234,14 @@ export default function MaintenancePage() {
           await syncFromAppFolio();
           return;
         }
+        // Stale UX: older than 6h → background sync (doesn't block render)
+        const STALE_MS = 6 * 60 * 60 * 1000;
+        const age = wo.syncedAt ? Date.now() - Date.parse(wo.syncedAt) : Infinity;
+        if (age > STALE_MS) {
+          setLoading(false);
+          void syncFromAppFolio();
+          return;
+        }
       } catch {
         setSyncError("Couldn't load work orders");
       } finally {
@@ -290,6 +298,23 @@ export default function MaintenancePage() {
   const metrics = useMemo(() => computeMetrics(allRequests), [allRequests]);
   const maxAging = Math.max(1, ...metrics.aging.map((a) => a.count));
 
+  async function saveAnnotation(body: Record<string, unknown>) {
+    if (!selected) return;
+    try {
+      const res = await fetch("/api/maintenance/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selected.id, ...body }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Save failed");
+      }
+    } catch (e: any) {
+      setSyncError(e.message || "Save failed");
+    }
+  }
+
   function updateStatus(status: MaintenanceStatus) {
     if (!selected) return;
     const updated: MaintenanceRequest = {
@@ -303,18 +328,21 @@ export default function MaintenancePage() {
     };
     setSelected(updated);
     setAllRequests((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    void saveAnnotation({ internal_status: status });
   }
 
   function addNote() {
     if (!selected || !newNote.trim()) return;
+    const text = newNote.trim();
     const updated: MaintenanceRequest = {
       ...selected,
-      notes: [...selected.notes, newNote.trim()],
+      notes: [...selected.notes, text],
       updatedAt: new Date().toISOString(),
     };
     setSelected(updated);
     setAllRequests((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
     setNewNote("");
+    void saveAnnotation({ appendNote: { text } });
   }
 
   function updateField(field: keyof MaintenanceRequest, value: string) {
@@ -324,6 +352,16 @@ export default function MaintenancePage() {
     setAllRequests((prev) =>
       prev.map((r) => (r.id === updated.id ? (updated as MaintenanceRequest) : r))
     );
+  }
+
+  // Persist text-field edits on blur so we don't hit the API on every keystroke.
+  function persistField(field: "assignedTo" | "vendor" | "scheduledDate", value: string) {
+    const key = {
+      assignedTo: "assigned_to_override",
+      vendor: "vendor_override",
+      scheduledDate: "scheduled_date_override",
+    }[field];
+    void saveAnnotation({ [key]: value || null });
   }
 
   if (selected) {
@@ -403,6 +441,7 @@ export default function MaintenancePage() {
                 type="text"
                 value={selected.assignedTo || ""}
                 onChange={(e) => updateField("assignedTo", e.target.value)}
+                onBlur={(e) => persistField("assignedTo", e.target.value)}
                 placeholder="Staff member..."
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
@@ -413,6 +452,7 @@ export default function MaintenancePage() {
                 type="text"
                 value={selected.vendor || ""}
                 onChange={(e) => updateField("vendor", e.target.value)}
+                onBlur={(e) => persistField("vendor", e.target.value)}
                 placeholder="Vendor name..."
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
@@ -422,7 +462,10 @@ export default function MaintenancePage() {
               <input
                 type="date"
                 value={selected.scheduledDate || ""}
-                onChange={(e) => updateField("scheduledDate", e.target.value)}
+                onChange={(e) => {
+                  updateField("scheduledDate", e.target.value);
+                  persistField("scheduledDate", e.target.value);
+                }}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
             </div>

@@ -8,7 +8,12 @@
 // return an empty array if Supabase isn't configured or the table is
 // missing (the UI surfaces the empty state + prompts a sync).
 
-import { getSupabase, type DbWorkOrder } from "./supabase";
+import {
+  getSupabase,
+  type DbWorkOrder,
+  type DbWorkOrderAnnotation,
+  type DbWorkOrderNote,
+} from "./supabase";
 
 /** Convert a raw AppFolio `work_order` row to a `work_orders` table row. */
 function rawToDbRow(raw: Record<string, any>): Omit<DbWorkOrder, "created_at" | "updated_at"> | null {
@@ -120,6 +125,96 @@ export async function getLastSyncTime(): Promise<string | null> {
     return null;
   }
   return data?.[0]?.synced_at ?? null;
+}
+
+/** Fetch all Moxie annotations, keyed by work_order id. */
+export async function getAllAnnotations(): Promise<Map<string, DbWorkOrderAnnotation>> {
+  const sb = getSupabase();
+  const map = new Map<string, DbWorkOrderAnnotation>();
+  if (!sb) return map;
+
+  const { data, error } = await sb.from("work_order_annotations").select("*");
+  if (error) {
+    if (!isMissingTableError(error)) {
+      console.warn("[work-orders-db] getAllAnnotations:", error.message);
+    }
+    return map;
+  }
+  for (const row of (data ?? []) as DbWorkOrderAnnotation[]) {
+    map.set(row.id, row);
+  }
+  return map;
+}
+
+/** Read one annotation by id (null if none). */
+export async function getAnnotation(id: string): Promise<DbWorkOrderAnnotation | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("work_order_annotations")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    if (!isMissingTableError(error)) {
+      console.warn("[work-orders-db] getAnnotation:", error.message);
+    }
+    return null;
+  }
+  return (data as DbWorkOrderAnnotation) ?? null;
+}
+
+export type AnnotationUpdate = {
+  internal_status?: string | null;
+  assigned_to_override?: string | null;
+  vendor_override?: string | null;
+  scheduled_date_override?: string | null;
+  tags?: string[];
+  follow_up_on?: string | null;
+};
+
+/**
+ * Upsert an annotation for a work order. Merges `update` fields with any
+ * existing row and appends `appendNote` to the notes array (newest last).
+ * Creates the row on first touch.
+ */
+export async function saveAnnotation(
+  id: string,
+  update: AnnotationUpdate = {},
+  appendNote?: { text: string; author?: string }
+): Promise<DbWorkOrderAnnotation> {
+  const sb = getSupabase();
+  if (!sb) throw new Error("Supabase not configured");
+
+  const existing = await getAnnotation(id);
+  const now = new Date().toISOString();
+  const nextNotes: DbWorkOrderNote[] = existing?.notes ? [...existing.notes] : [];
+  if (appendNote?.text) {
+    nextNotes.push({
+      text: appendNote.text,
+      created_at: now,
+      ...(appendNote.author ? { author: appendNote.author } : {}),
+    });
+  }
+
+  const row: Omit<DbWorkOrderAnnotation, "created_at" | "updated_at"> = {
+    id,
+    notes: nextNotes,
+    internal_status: update.internal_status ?? existing?.internal_status ?? null,
+    assigned_to_override: update.assigned_to_override ?? existing?.assigned_to_override ?? null,
+    vendor_override: update.vendor_override ?? existing?.vendor_override ?? null,
+    scheduled_date_override: update.scheduled_date_override ?? existing?.scheduled_date_override ?? null,
+    tags: update.tags ?? existing?.tags ?? [],
+    follow_up_on: update.follow_up_on ?? existing?.follow_up_on ?? null,
+  };
+
+  const { data, error } = await sb
+    .from("work_order_annotations")
+    .upsert(row, { onConflict: "id" })
+    .select("*")
+    .single();
+  if (error) throw new Error(`[work-orders-db] saveAnnotation: ${error.message}`);
+  return data as DbWorkOrderAnnotation;
 }
 
 function isMissingTableError(error: { code?: string; message?: string } | null | undefined): boolean {
