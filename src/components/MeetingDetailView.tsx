@@ -5,13 +5,16 @@ import {
   Circle,
   CheckCircle2,
   ChevronLeft,
+  ClipboardCheck,
   ClipboardList,
+  FileText,
   MessageSquare,
   Mic,
   Paperclip,
   Plus,
   Sparkles,
   Square,
+  Truck,
   Wrench,
   Home as HomeIcon,
 } from "lucide-react";
@@ -21,7 +24,10 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useMeetingRecorder } from "@/hooks/useMeetingRecorder";
 import type {
   ActionItemStatus,
+  DbAgendaApplication,
   DbAgendaCarryOver,
+  DbAgendaInspection,
+  DbAgendaMove,
   DbAgendaVacancy,
   DbAgendaWorkOrder,
   DbMeetingActionItem,
@@ -74,6 +80,13 @@ export default function MeetingDetailView({
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [openWorkOrderId, setOpenWorkOrderId] = useState<string | null>(null);
   const [openVacancyUnitId, setOpenVacancyUnitId] = useState<string | null>(null);
+  const [openApplicationId, setOpenApplicationId] = useState<string | null>(null);
+  const [openMove, setOpenMove] = useState<{
+    unitId: string;
+    direction: "move_in" | "move_out";
+    date: string;
+  } | null>(null);
+  const [openInspectionId, setOpenInspectionId] = useState<string | null>(null);
   const [openCarryOverItem, setOpenCarryOverItem] = useState<DbMeetingActionItem | null>(null);
   const [attendeesDraft, setAttendeesDraft] = useState<string>(
     (initial.attendees || []).join(", ")
@@ -288,9 +301,21 @@ export default function MeetingDetailView({
   const doneItems = useMemo(() => items.filter((i) => i.status === "completed"), [items]);
 
   const agenda = meeting.agenda_snapshot || {};
-  const agendaWorkOrders: DbAgendaWorkOrder[] = Array.isArray(agenda.workOrders) ? agenda.workOrders : [];
-  const vacancies: DbAgendaVacancy[] = Array.isArray(agenda.vacancies) ? agenda.vacancies : [];
   const carryOver: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions) ? agenda.carryOverActions : [];
+
+  // Three-category view with legacy fallback. Old meetings only have
+  // `workOrders` / `vacancies` at the top level; new meetings have the
+  // structured `leasing` / `maintenance` / `propertyManagement` blocks.
+  const leasingVacancies: DbAgendaVacancy[] =
+    agenda.leasing?.vacancies ?? (Array.isArray(agenda.vacancies) ? agenda.vacancies : []);
+  const leasingApplications: DbAgendaApplication[] = agenda.leasing?.applications ?? [];
+  const leasingMoves: DbAgendaMove[] = agenda.leasing?.upcomingMoves ?? [];
+  const leasingTotal = leasingVacancies.length + leasingApplications.length + leasingMoves.length;
+
+  const maintenanceOpen: DbAgendaWorkOrder[] =
+    agenda.maintenance?.openWorkOrders ?? (Array.isArray(agenda.workOrders) ? agenda.workOrders : []);
+
+  const pmInspections: DbAgendaInspection[] = agenda.propertyManagement?.upcomingInspections ?? [];
 
   return (
     <div className="space-y-6">
@@ -358,94 +383,154 @@ export default function MeetingDetailView({
         </p>
       </div>
 
-      {/* Agenda panels */}
+      {/* Review: carry-over action items from prior meetings */}
+      <AgendaCard
+        title="Review — open action items from prior meetings"
+        icon={<ClipboardList className="w-4 h-4" />}
+        count={carryOver.length}
+        empty="No open action items from prior meetings. Starting fresh."
+      >
+        {carryOver.map((c) => (
+          <button
+            type="button"
+            key={c.id}
+            onClick={async () => {
+              try {
+                const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(c.id)}`);
+                const j = await r.json();
+                if (j.item) setOpenCarryOverItem(j.item);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
+          >
+            <p className="font-medium">{c.title}</p>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+              <StatusBadge value={c.status} />
+              {c.assignedTo && <span>Owner: {c.assignedTo}</span>}
+              {c.dueDate && <span>Due: {c.dueDate}</span>}
+            </div>
+          </button>
+        ))}
+      </AgendaCard>
+
+      {/* Three category cards */}
       <div className="grid lg:grid-cols-3 gap-4">
+        {/* ─── Leasing ─────────────────────────────────────── */}
         <AgendaCard
-          title="Open Work Orders"
+          title="Leasing"
+          icon={<FileText className="w-4 h-4" />}
+          count={leasingTotal}
+          empty="Nothing on the leasing side this week."
+        >
+          {leasingVacancies.length > 0 && (
+            <AgendaSubsection label={`Vacancies (${leasingVacancies.length})`}>
+              {leasingVacancies.map((v) => (
+                <AgendaRow
+                  key={v.unitId}
+                  onClick={() => setOpenVacancyUnitId(v.unitId)}
+                  title={`Unit ${v.unitName}`}
+                  right={<StatusBadge value="vacant" />}
+                  meta={[
+                    v.propertyName,
+                    v.bedrooms != null ? `${v.bedrooms}bd / ${v.bathrooms ?? "—"}ba` : null,
+                    v.rent ? `$${Number(v.rent).toLocaleString()}/mo` : null,
+                    v.daysVacant != null ? `${v.daysVacant}d vacant` : null,
+                  ]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
+          {leasingApplications.length > 0 && (
+            <AgendaSubsection label={`Applications (${leasingApplications.length})`}>
+              {leasingApplications.map((a) => (
+                <AgendaRow
+                  key={a.id}
+                  onClick={() => setOpenApplicationId(a.id)}
+                  title={a.primaryApplicant || "Application"}
+                  right={<StatusBadge value={a.status} />}
+                  meta={[
+                    a.propertyName,
+                    a.unitNumber ? `Unit ${a.unitNumber}` : null,
+                    a.applicantCount > 1 ? `${a.applicantCount} applicants` : null,
+                    a.daysInReview != null ? `${a.daysInReview}d in review` : null,
+                  ]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
+          {leasingMoves.length > 0 && (
+            <AgendaSubsection label={`Upcoming moves (${leasingMoves.length})`}>
+              {leasingMoves.map((m) => (
+                <AgendaRow
+                  key={`${m.unitId}-${m.direction}-${m.date}`}
+                  onClick={() =>
+                    setOpenMove({ unitId: m.unitId, direction: m.direction, date: m.date })
+                  }
+                  title={`${m.direction === "move_in" ? "Move-in" : "Move-out"}: Unit ${m.unitName}`}
+                  right={
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {m.daysUntil != null
+                        ? m.daysUntil === 0
+                          ? "today"
+                          : `${m.daysUntil}d`
+                        : ""}
+                    </span>
+                  }
+                  meta={[m.propertyName, m.tenant, m.date]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
+        </AgendaCard>
+
+        {/* ─── Maintenance ─────────────────────────────────── */}
+        <AgendaCard
+          title="Maintenance"
           icon={<Wrench className="w-4 h-4" />}
-          count={agendaWorkOrders.length}
+          count={maintenanceOpen.length}
           empty="No open work orders at meeting time."
         >
-          {agendaWorkOrders.map((wo) => (
-            <button
-              type="button"
+          {maintenanceOpen.map((wo) => (
+            <AgendaRow
               key={wo.id}
               onClick={() => setOpenWorkOrderId(wo.id)}
-              className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                {wo.workOrderNumber && (
-                  <span className="text-xs font-mono text-muted-foreground">#{wo.workOrderNumber}</span>
-                )}
-                {wo.priority && <StatusBadge value={wo.priority} />}
-              </div>
-              <p className="mt-1">{wo.title}</p>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
-                {wo.propertyName && <span>{wo.propertyName}</span>}
-                {wo.unitName && <span>Unit {wo.unitName}</span>}
-                {wo.status && <StatusBadge value={wo.status} />}
-                {wo.vendor && <span>· {wo.vendor}</span>}
-              </div>
-            </button>
+              title={wo.title}
+              right={wo.priority ? <StatusBadge value={wo.priority} /> : null}
+              meta={[
+                wo.workOrderNumber ? `#${wo.workOrderNumber}` : null,
+                wo.propertyName,
+                wo.unitName ? `Unit ${wo.unitName}` : null,
+                wo.status,
+                wo.vendor,
+              ]}
+            />
           ))}
         </AgendaCard>
 
+        {/* ─── Property Management ─────────────────────────── */}
         <AgendaCard
-          title="Vacancies"
+          title="Property Management"
           icon={<HomeIcon className="w-4 h-4" />}
-          count={vacancies.length}
-          empty="No vacant units."
+          count={pmInspections.length}
+          empty="No inspections on the calendar."
         >
-          {vacancies.map((v) => (
-            <button
-              type="button"
-              key={v.unitId}
-              onClick={() => setOpenVacancyUnitId(v.unitId)}
-              className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">Unit {v.unitName}</span>
-                <StatusBadge value="vacant" />
-              </div>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                {v.propertyName && <span>{v.propertyName}</span>}
-                {v.bedrooms != null && <span>{v.bedrooms}bd / {v.bathrooms ?? "—"}ba</span>}
-                {v.rent && <span>${Number(v.rent).toLocaleString()}/mo</span>}
-                {v.daysVacant != null && <span>{v.daysVacant}d vacant</span>}
-              </div>
-            </button>
-          ))}
-        </AgendaCard>
-
-        <AgendaCard
-          title="Carry-over from last meeting"
-          icon={<ClipboardList className="w-4 h-4" />}
-          count={carryOver.length}
-          empty="No prior open action items."
-        >
-          {carryOver.map((c) => (
-            <button
-              type="button"
-              key={c.id}
-              onClick={async () => {
-                try {
-                  const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(c.id)}`);
-                  const j = await r.json();
-                  if (j.item) setOpenCarryOverItem(j.item);
-                } catch {
-                  /* ignore */
-                }
-              }}
-              className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
-            >
-              <p className="font-medium">{c.title}</p>
-              <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-                <StatusBadge value={c.status} />
-                {c.assignedTo && <span>Owner: {c.assignedTo}</span>}
-                {c.dueDate && <span>Due: {c.dueDate}</span>}
-              </div>
-            </button>
-          ))}
+          {pmInspections.length > 0 && (
+            <AgendaSubsection label={`Inspections (${pmInspections.length})`}>
+              {pmInspections.map((i) => (
+                <AgendaRow
+                  key={i.id}
+                  onClick={() => setOpenInspectionId(i.id)}
+                  title={`${formatInspectionType(i.type)}${
+                    i.unitNumber ? ` — Unit ${i.unitNumber}` : ""
+                  }`}
+                  right={<StatusBadge value={i.status} />}
+                  meta={[i.propertyName, i.scheduledDate, i.inspector]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
         </AgendaCard>
       </div>
 
@@ -677,7 +762,7 @@ export default function MeetingDetailView({
       })()}
 
       {openWorkOrderId && (() => {
-        const snap = agendaWorkOrders.find((w) => w.id === openWorkOrderId);
+        const snap = maintenanceOpen.find((w) => w.id === openWorkOrderId);
         const live = workOrders.find((w) => w.id === openWorkOrderId);
         if (!snap && !live) return null;
         const title = live?.title || snap?.title || "Work order";
@@ -716,7 +801,7 @@ export default function MeetingDetailView({
       })()}
 
       {openVacancyUnitId && (() => {
-        const snap = vacancies.find((v) => v.unitId === openVacancyUnitId);
+        const snap = leasingVacancies.find((v) => v.unitId === openVacancyUnitId);
         const live = units.find((u) => u.id === openVacancyUnitId);
         if (!snap && !live) return null;
         const rows: InfoRow[] = [];
@@ -774,7 +859,162 @@ export default function MeetingDetailView({
           }}
         />
       )}
+
+      {openApplicationId && (() => {
+        const a = leasingApplications.find((x) => x.id === openApplicationId);
+        if (!a) return null;
+        const rows: InfoRow[] = [
+          { label: "Status", status: a.status },
+          { label: "Property", value: a.propertyName },
+        ];
+        if (a.unitNumber) rows.push({ label: "Unit", value: a.unitNumber });
+        if (a.primaryApplicant) rows.push({ label: "Primary applicant", value: a.primaryApplicant });
+        if (a.applicantCount) rows.push({ label: "Applicants", value: `${a.applicantCount}` });
+        if (a.daysInReview != null)
+          rows.push({ label: "Days in review", value: `${a.daysInReview}` });
+        return (
+          <InfoPopup
+            title={a.primaryApplicant || "Application"}
+            subtitle="Application"
+            icon={<FileText className="w-5 h-5 text-muted-foreground" />}
+            rows={rows}
+            action={{ label: "Open in Leasing →", href: "/leasing/applications" }}
+            onClose={() => setOpenApplicationId(null)}
+          />
+        );
+      })()}
+
+      {openMove && (() => {
+        const m = leasingMoves.find(
+          (x) =>
+            x.unitId === openMove.unitId &&
+            x.direction === openMove.direction &&
+            x.date === openMove.date
+        );
+        if (!m) return null;
+        const liveUnit = units.find((u) => u.id === m.unitId);
+        const rows: InfoRow[] = [
+          {
+            label: "Direction",
+            value: m.direction === "move_in" ? "Move-in" : "Move-out",
+          },
+          { label: "Date", value: m.date },
+        ];
+        if (m.daysUntil != null) rows.push({ label: "Days until", value: `${m.daysUntil}` });
+        if (m.propertyName) rows.push({ label: "Property", value: m.propertyName });
+        rows.push({ label: "Unit", value: m.unitName });
+        if (m.tenant) rows.push({ label: "Tenant", value: m.tenant });
+        if (liveUnit?.rent)
+          rows.push({ label: "Rent", value: `$${Number(liveUnit.rent).toLocaleString()}/mo` });
+        if (liveUnit?.leaseFrom || liveUnit?.leaseTo)
+          rows.push({
+            label: "Lease",
+            value: `${liveUnit?.leaseFrom || "—"} → ${liveUnit?.leaseTo || "—"}`,
+          });
+        return (
+          <InfoPopup
+            title={`${m.direction === "move_in" ? "Move-in" : "Move-out"}: Unit ${m.unitName}`}
+            subtitle={m.propertyName || undefined}
+            icon={<Truck className="w-5 h-5 text-muted-foreground" />}
+            rows={rows}
+            onClose={() => setOpenMove(null)}
+          />
+        );
+      })()}
+
+      {openInspectionId && (() => {
+        const i = pmInspections.find((x) => x.id === openInspectionId);
+        if (!i) return null;
+        const rows: InfoRow[] = [
+          { label: "Type", value: formatInspectionType(i.type) },
+          { label: "Status", status: i.status },
+        ];
+        if (i.propertyName) rows.push({ label: "Property", value: i.propertyName });
+        if (i.unitNumber) rows.push({ label: "Unit", value: i.unitNumber });
+        if (i.scheduledDate) rows.push({ label: "Scheduled", value: i.scheduledDate });
+        if (i.inspector) rows.push({ label: "Inspector", value: i.inspector });
+        return (
+          <InfoPopup
+            title={`${formatInspectionType(i.type)} inspection`}
+            subtitle={i.unitNumber ? `Unit ${i.unitNumber}` : undefined}
+            icon={<ClipboardCheck className="w-5 h-5 text-muted-foreground" />}
+            rows={rows}
+            action={{ label: "Open in Inspections →", href: `/inspections/${i.type.replace("_", "-")}` }}
+            onClose={() => setOpenInspectionId(null)}
+          />
+        );
+      })()}
     </div>
+  );
+}
+
+function formatInspectionType(t: string): string {
+  switch (t) {
+    case "move_in":
+      return "Move-in";
+    case "move_out":
+      return "Move-out";
+    case "onboarding":
+      return "Onboarding";
+    case "quarterly":
+      return "Quarterly";
+    case "punch_list":
+      return "Punch list";
+    default:
+      return t;
+  }
+}
+
+function AgendaSubsection({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
+        {label}
+      </p>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function AgendaRow({
+  title,
+  right,
+  meta,
+  onClick,
+}: {
+  title: string;
+  right?: React.ReactNode;
+  meta?: (string | null | undefined)[];
+  onClick?: () => void;
+}) {
+  const metas = (meta || []).filter((x): x is string => Boolean(x));
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left text-sm hover:bg-muted/50 rounded px-1 -mx-1 py-1 transition-colors"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium truncate">{title}</span>
+        {right && <span className="shrink-0">{right}</span>}
+      </div>
+      {metas.length > 0 && (
+        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+          {metas.map((m, i) => (
+            <span key={i}>
+              {i > 0 && <span className="opacity-50 mr-2">·</span>}
+              {m}
+            </span>
+          ))}
+        </div>
+      )}
+    </button>
   );
 }
 
