@@ -60,6 +60,40 @@ export async function getDatabase(databaseId: string) {
   return notionFetch(`/databases/${databaseId}`, { method: "GET" });
 }
 
+/**
+ * Some Notion URLs copy a PAGE id instead of the inline DATABASE id — e.g.
+ * https://notion.so/.../Vendor-List-<page_id>?source=copy_link. In that
+ * case getDatabase throws a 400 "Provided ID is a page, not a database".
+ * This helper auto-discovers the actual database by listing the page's
+ * children and returning the first `child_database` block id.
+ */
+export async function resolveDatabaseId(id: string): Promise<string> {
+  try {
+    await getDatabase(id);
+    return id;
+  } catch (err: any) {
+    const msg = String(err?.message ?? "");
+    if (!/is a page, not a database/i.test(msg) && !/Could not find database/i.test(msg)) {
+      throw err;
+    }
+    // Walk the page's block children and find the inline database.
+    let cursor: string | undefined;
+    do {
+      const qs = cursor ? `?start_cursor=${encodeURIComponent(cursor)}&page_size=100` : "?page_size=100";
+      const res = await notionFetch(`/blocks/${id}/children${qs}`, { method: "GET" });
+      for (const block of res.results || []) {
+        if (block?.type === "child_database") {
+          return block.id;
+        }
+      }
+      cursor = res.has_more ? res.next_cursor : undefined;
+    } while (cursor);
+    throw new Error(
+      `Could not resolve Notion database ID from page ${id}. Make sure the page contains a database and that the integration is shared with it.`
+    );
+  }
+}
+
 // --- Get roadmap items ---
 export async function getRoadmapItems() {
   const dbId = process.env.NOTION_ROADMAP_DB_ID;
