@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
   MaintenanceRequest,
@@ -9,6 +9,132 @@ import type {
   MaintenanceCategory,
   Unit,
 } from "@/lib/types";
+
+const OPEN_STATUSES = new Set<MaintenanceStatus>([
+  "submitted",
+  "assigned",
+  "in_progress",
+  "awaiting_parts",
+]);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type Metrics = {
+  openCount: number;
+  openEmergencies: number;
+  avgResolutionDays: number | null;
+  resolvedSample: number;
+  aging: { bucket: string; count: number; color: string }[];
+  oldest31Plus: number;
+  recurring: { key: string; category: string; propertyName: string; unitNumber: string; count: number }[];
+  problemTenants: {
+    name: string;
+    property: string;
+    unit: string;
+    total90d: number;
+    emergencies30d: number;
+  }[];
+};
+
+function computeMetrics(requests: MaintenanceRequest[]): Metrics {
+  const now = Date.now();
+  const d30 = now - 30 * DAY_MS;
+  const d90 = now - 90 * DAY_MS;
+
+  const open = requests.filter((r) => OPEN_STATUSES.has(r.status));
+  const closed = requests.filter(
+    (r) => (r.status === "completed" || r.status === "closed") && r.completedDate && r.createdAt
+  );
+
+  // Avg resolution time over last 90 days of completions
+  const resolvedRecently = closed.filter((r) => {
+    const done = Date.parse(r.completedDate!);
+    return !Number.isNaN(done) && done >= d90;
+  });
+  const avgResolutionDays = resolvedRecently.length
+    ? resolvedRecently.reduce((sum, r) => {
+        const days = (Date.parse(r.completedDate!) - Date.parse(r.createdAt)) / DAY_MS;
+        return sum + Math.max(0, days);
+      }, 0) / resolvedRecently.length
+    : null;
+
+  // Aging buckets (open only)
+  let b07 = 0, b830 = 0, b31 = 0;
+  for (const r of open) {
+    const created = Date.parse(r.createdAt);
+    if (Number.isNaN(created)) continue;
+    const days = (now - created) / DAY_MS;
+    if (days <= 7) b07++;
+    else if (days <= 30) b830++;
+    else b31++;
+  }
+
+  // Recurring: same unit + category, >=2 in last 30 days
+  const recentByKey = new Map<string, MaintenanceRequest[]>();
+  for (const r of requests) {
+    const created = Date.parse(r.createdAt);
+    if (Number.isNaN(created) || created < d30) continue;
+    const unitKey = r.unitId || r.unitNumber || "";
+    if (!unitKey) continue;
+    const key = `${unitKey}|${r.category}`;
+    const arr = recentByKey.get(key) ?? [];
+    arr.push(r);
+    recentByKey.set(key, arr);
+  }
+  const recurring = Array.from(recentByKey.entries())
+    .filter(([, arr]) => arr.length >= 2)
+    .map(([key, arr]) => ({
+      key,
+      category: arr[0].category,
+      propertyName: arr[0].propertyName,
+      unitNumber: arr[0].unitNumber,
+      count: arr.length,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  // Problem tenants: >=3 work orders in 90d OR >=2 emergencies in 30d
+  const byTenant = new Map<string, MaintenanceRequest[]>();
+  for (const r of requests) {
+    const name = r.tenantName?.trim();
+    if (!name || name === "—" || name.toLowerCase() === "vacant") continue;
+    const created = Date.parse(r.createdAt);
+    if (Number.isNaN(created) || created < d90) continue;
+    const key = `${name}|${r.unitId || r.unitNumber}`;
+    const arr = byTenant.get(key) ?? [];
+    arr.push(r);
+    byTenant.set(key, arr);
+  }
+  const problemTenants = Array.from(byTenant.values())
+    .map((reqs) => {
+      const emergencies30d = reqs.filter(
+        (r) => r.priority === "emergency" && Date.parse(r.createdAt) >= d30
+      ).length;
+      return {
+        name: reqs[0].tenantName,
+        property: reqs[0].propertyName,
+        unit: reqs[0].unitNumber,
+        total90d: reqs.length,
+        emergencies30d,
+      };
+    })
+    .filter((t) => t.total90d >= 3 || t.emergencies30d >= 2)
+    .sort((a, b) => b.total90d - a.total90d || b.emergencies30d - a.emergencies30d);
+
+  return {
+    openCount: open.length,
+    openEmergencies: open.filter((r) => r.priority === "emergency").length,
+    avgResolutionDays,
+    resolvedSample: resolvedRecently.length,
+    aging: [
+      { bucket: "0–7 days", count: b07, color: "bg-green-500" },
+      { bucket: "8–30 days", count: b830, color: "bg-yellow-500" },
+      { bucket: "31+ days", count: b31, color: "bg-red-500" },
+    ],
+    oldest31Plus: b31,
+    recurring,
+    problemTenants,
+  };
+}
 
 const STATUS_OPTIONS: MaintenanceStatus[] = [
   "submitted",
@@ -115,6 +241,9 @@ export default function MaintenancePage() {
       const order: Record<string, number> = { emergency: 0, high: 1, medium: 2, low: 3 };
       return order[a.priority] - order[b.priority];
     });
+
+  const metrics = useMemo(() => computeMetrics(allRequests), [allRequests]);
+  const maxAging = Math.max(1, ...metrics.aging.map((a) => a.count));
 
   function updateStatus(status: MaintenanceStatus) {
     if (!selected) return;
@@ -390,6 +519,122 @@ export default function MaintenancePage() {
             Create Work Order
           </button>
         </div>
+      )}
+
+      {/* Dashboard */}
+      {!loading && allRequests.length > 0 && (
+        <section className="space-y-3">
+          {/* Top-line stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-card rounded-xl border border-border p-4">
+              <p className="text-xs text-muted-foreground">Open work orders</p>
+              <p className="text-2xl font-bold mt-1">{metrics.openCount}</p>
+              {metrics.openEmergencies > 0 && (
+                <p className="text-xs text-red-600 mt-1">
+                  {metrics.openEmergencies} emergency
+                </p>
+              )}
+            </div>
+            <div className="bg-card rounded-xl border border-border p-4">
+              <p className="text-xs text-muted-foreground">Avg resolution</p>
+              <p className="text-2xl font-bold mt-1">
+                {metrics.avgResolutionDays != null
+                  ? `${metrics.avgResolutionDays.toFixed(1)}d`
+                  : "—"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {metrics.resolvedSample} resolved (90d)
+              </p>
+            </div>
+            <div className="bg-card rounded-xl border border-border p-4">
+              <p className="text-xs text-muted-foreground">Aging 31+ days</p>
+              <p className={`text-2xl font-bold mt-1 ${metrics.oldest31Plus > 0 ? "text-red-600" : ""}`}>
+                {metrics.oldest31Plus}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">still open</p>
+            </div>
+            <div className="bg-card rounded-xl border border-border p-4">
+              <p className="text-xs text-muted-foreground">Recurring issues</p>
+              <p className="text-2xl font-bold mt-1">{metrics.recurring.length}</p>
+              <p className="text-xs text-muted-foreground mt-1">unit+category, 30d</p>
+            </div>
+          </div>
+
+          {/* Aging breakdown */}
+          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+            <h3 className="font-semibold text-sm mb-3">Open work order aging</h3>
+            <div className="space-y-2">
+              {metrics.aging.map((bucket) => (
+                <div key={bucket.bucket} className="flex items-center gap-3 text-sm">
+                  <span className="w-20 shrink-0 text-muted-foreground">{bucket.bucket}</span>
+                  <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${bucket.color} transition-all`}
+                      style={{ width: `${(bucket.count / maxAging) * 100}%` }}
+                    />
+                  </div>
+                  <span className="w-8 text-right font-medium">{bucket.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Problem tenants + Recurring issues */}
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="font-semibold text-sm">Problem tenants</h3>
+                <span className="text-xs text-muted-foreground">≥3 in 90d · ≥2 emergency in 30d</span>
+              </div>
+              {metrics.problemTenants.length === 0 ? (
+                <p className="text-sm text-muted-foreground">None flagged.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {metrics.problemTenants.slice(0, 5).map((t) => (
+                    <li key={`${t.name}-${t.unit}`} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{t.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {t.property} #{t.unit}
+                        </p>
+                      </div>
+                      <div className="text-right text-xs shrink-0">
+                        <p className="font-medium">{t.total90d} in 90d</p>
+                        {t.emergencies30d > 0 && (
+                          <p className="text-red-600">{t.emergencies30d} emergency</p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="font-semibold text-sm">Recurring issues</h3>
+                <span className="text-xs text-muted-foreground">same unit + category, 30d</span>
+              </div>
+              {metrics.recurring.length === 0 ? (
+                <p className="text-sm text-muted-foreground">None detected.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {metrics.recurring.slice(0, 5).map((r) => (
+                    <li key={r.key} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium capitalize truncate">{r.category}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {r.propertyName} #{r.unitNumber}
+                        </p>
+                      </div>
+                      <span className="text-xs font-medium shrink-0">{r.count}x</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
       )}
 
       {/* Filters */}
