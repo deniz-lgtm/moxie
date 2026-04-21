@@ -260,7 +260,7 @@ export function generateAppFolioExport(
     water: "Water",
     gas: "Gas",
     electric: "Electric",
-    trash: "Trash/Sewer",
+    sewer: "Sewer",
   };
 
   const description = `${utilityLabels[utilityType]} RUBS - ${billingMonth}`;

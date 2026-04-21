@@ -169,7 +169,7 @@ export const apps: AppConfig[] = [
   {
     id: "rubs",
     name: "RUBs",
-    description: "Ratio Utility Billing — split water, gas, electric, and trash costs across tenants by sqft or occupancy",
+    description: "Ratio Utility Billing — split water, gas, electric, and sewer costs across tenants by sqft or occupancy",
     href: "/rubs",
     icon: "Zap",
     category: "finance",

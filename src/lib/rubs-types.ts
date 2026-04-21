@@ -2,7 +2,7 @@
 // RUBS (Ratio Utility Billing System) — Types
 // ============================================
 
-export type MeterType = "water" | "gas" | "electric" | "trash";
+export type MeterType = "water" | "gas" | "electric" | "sewer";
 export type MeteringMethod = "master" | "sub_metered";
 export type SplitMethod = "sqft" | "occupancy" | "equal" | "custom";
 export type BillStatus = "draft" | "calculated" | "posted";
@@ -48,7 +48,7 @@ export const METER_TYPE_LABELS: Record<MeterType, string> = {
   water: "Water",
   gas: "Gas",
   electric: "Electric",
-  trash: "Trash",
+  sewer: "Sewer",
 };
 
 export const SPLIT_METHOD_LABELS: Record<SplitMethod, string> = {
