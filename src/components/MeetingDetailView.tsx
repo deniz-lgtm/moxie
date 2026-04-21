@@ -71,6 +71,9 @@ export default function MeetingDetailView({
   const [transcriptDraft, setTranscriptDraft] = useState<string>(meeting.transcript || "");
   const [notesDraft, setNotesDraft] = useState<string>(meeting.notes || "");
   const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [attendeesDraft, setAttendeesDraft] = useState<string>(
+    (initial.attendees || []).join(", ")
+  );
 
   const recorder = useMeetingRecorder();
 
@@ -86,6 +89,7 @@ export default function MeetingDetailView({
     setMeetingState(initial);
     setTranscriptDraft(initial.transcript || "");
     setNotesDraft(initial.notes || "");
+    setAttendeesDraft((initial.attendees || []).join(", "));
   }, [initial]);
 
   useEffect(() => {
@@ -319,6 +323,34 @@ export default function MeetingDetailView({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Attendees */}
+      <div className="bg-card rounded-xl border border-border p-4 space-y-2">
+        <label className="text-sm font-semibold block">Attendees</label>
+        <input
+          type="text"
+          value={attendeesDraft}
+          onChange={(e) => setAttendeesDraft(e.target.value)}
+          onBlur={() => {
+            const parsed = attendeesDraft
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const current = meeting.attendees || [];
+            const changed =
+              parsed.length !== current.length ||
+              parsed.some((a, i) => a !== current[i]);
+            if (changed) persistMeeting({ attendees: parsed });
+          }}
+          placeholder="Comma-separated: Deniz, Sarah, Marco…"
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+        />
+        <p className="text-xs text-muted-foreground">
+          Used as the allowlist of owners for extracted action items. The AI is told to leave an
+          action item unassigned rather than guess — so hybrid (conference room + dial-in) meetings
+          won&rsquo;t default everything to one person.
+        </p>
       </div>
 
       {/* Recorder */}
@@ -601,6 +633,7 @@ export default function MeetingDetailView({
             item={openItem}
             units={units}
             workOrders={workOrders}
+            attendees={meeting.attendees || []}
             onClose={() => setOpenItemId(null)}
             onChange={(updated) =>
               setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))

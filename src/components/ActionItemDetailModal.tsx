@@ -24,6 +24,7 @@ type Props = {
   item: DbMeetingActionItem;
   units: Unit[];
   workOrders: MaintenanceRequest[];
+  attendees: string[];
   onClose: () => void;
   onChange: (item: DbMeetingActionItem) => void;
   onDelete: () => void;
@@ -63,10 +64,12 @@ export default function ActionItemDetailModal({
   item: initial,
   units,
   workOrders,
+  attendees,
   onClose,
   onChange,
   onDelete,
 }: Props) {
+  const datalistId = `attendees-${initial.id}`;
   const [item, setItem] = useState<DbMeetingActionItem>(initial);
   const [titleDraft, setTitleDraft] = useState(initial.title);
   const [descDraft, setDescDraft] = useState(initial.description || "");
@@ -288,15 +291,27 @@ export default function ActionItemDetailModal({
             <Field label="Assigned to">
               <input
                 type="text"
+                list={attendees.length > 0 ? datalistId : undefined}
                 value={item.assigned_to || ""}
                 onChange={(e) => setItem({ ...item, assigned_to: e.target.value })}
                 onBlur={(e) =>
                   e.target.value !== (initial.assigned_to || "") &&
                   patch({ assigned_to: e.target.value || null })
                 }
-                placeholder="Person or team"
+                placeholder={
+                  attendees.length > 0
+                    ? "Pick an attendee or type a name"
+                    : "Person or team"
+                }
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
+              {attendees.length > 0 && (
+                <datalist id={datalistId}>
+                  {attendees.map((a) => (
+                    <option key={a} value={a} />
+                  ))}
+                </datalist>
+              )}
             </Field>
             <Field label="Due date">
               <input
