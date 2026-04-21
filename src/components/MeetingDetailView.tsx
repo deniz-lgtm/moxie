@@ -303,12 +303,13 @@ export default function MeetingDetailView({
             {meeting.title || "Monday Morning Meeting"}
           </h2>
           <p className="text-muted-foreground mt-1">
-            {meeting.property_name} · {new Date(meeting.meeting_date + "T00:00:00").toLocaleDateString(undefined, {
+            {new Date(meeting.meeting_date + "T00:00:00").toLocaleDateString(undefined, {
               weekday: "long",
               year: "numeric",
               month: "long",
               day: "numeric",
             })}
+            {meeting.property_name ? ` · ${meeting.property_name}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -496,6 +497,7 @@ export default function MeetingDetailView({
               </div>
               <p className="mt-1">{wo.title}</p>
               <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
+                {wo.propertyName && <span>{wo.propertyName}</span>}
                 {wo.unitName && <span>Unit {wo.unitName}</span>}
                 {wo.status && <StatusBadge value={wo.status} />}
                 {wo.vendor && <span>· {wo.vendor}</span>}
@@ -517,6 +519,7 @@ export default function MeetingDetailView({
                 <StatusBadge value="vacant" />
               </div>
               <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+                {v.propertyName && <span>{v.propertyName}</span>}
                 {v.bedrooms != null && <span>{v.bedrooms}bd / {v.bathrooms ?? "—"}ba</span>}
                 {v.rent && <span>${Number(v.rent).toLocaleString()}/mo</span>}
                 {v.daysVacant != null && <span>{v.daysVacant}d vacant</span>}

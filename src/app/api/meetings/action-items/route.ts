@@ -119,13 +119,13 @@ export async function DELETE(request: Request) {
 }
 
 function normalizeCreate(r: any): CreateActionItemInput {
-  if (!r?.id || !r?.meeting_id || !r?.property_id || !r?.title) {
-    throw new Error("action item requires id, meeting_id, property_id, title");
+  if (!r?.id || !r?.meeting_id || !r?.title) {
+    throw new Error("action item requires id, meeting_id, title");
   }
   return {
     id: String(r.id),
     meeting_id: String(r.meeting_id),
-    property_id: String(r.property_id),
+    property_id: r.property_id ? String(r.property_id) : null,
     title: String(r.title),
     description: r.description ?? null,
     assigned_to: r.assigned_to ?? null,

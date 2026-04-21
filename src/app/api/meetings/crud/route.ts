@@ -4,7 +4,7 @@ import {
   deleteMeeting,
   getMeeting,
   listMeetings,
-  listOpenActionItemsForProperty,
+  listOpenActionItems,
   updateMeeting,
   type CreateMeetingInput,
   type UpdateMeetingInput,
@@ -13,9 +13,8 @@ import type { DbAgendaCarryOver, DbAgendaSnapshot } from "@/lib/supabase";
 
 /**
  * GET /api/meetings/crud
- *   ?property_id=<id>        list meetings for a property
- *   ?id=<meeting_id>         fetch a single meeting
- *   (no params)              list all meetings
+ *   ?id=<meeting_id>   fetch a single meeting
+ *   (no params)        list all meetings (newest first)
  */
 export async function GET(request: Request) {
   try {
@@ -26,8 +25,7 @@ export async function GET(request: Request) {
       if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
       return NextResponse.json({ meeting });
     }
-    const propertyId = url.searchParams.get("property_id") || undefined;
-    const meetings = await listMeetings(propertyId);
+    const meetings = await listMeetings();
     return NextResponse.json({ meetings });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -40,29 +38,27 @@ export async function GET(request: Request) {
  * Body:
  * {
  *   id: string,
- *   property_id: string,
- *   property_name: string,
- *   meeting_date: string,         // YYYY-MM-DD
+ *   meeting_date: string,               // YYYY-MM-DD
  *   title?: string,
- *   agenda?: { workOrders, vacancies }  // optional pre-built agenda (minus carry-over)
+ *   agenda?: { workOrders, vacancies }, // optional pre-built agenda (minus carry-over)
  *   attendees?: string[]
  * }
  *
- * Always fetches open carry-over action items for the property and merges
+ * Always fetches open carry-over action items (portfolio-wide) and merges
  * them into agenda_snapshot so the new meeting opens with prior-meeting
  * follow-ups already on the agenda.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    if (!body?.id || !body?.property_id || !body?.property_name || !body?.meeting_date) {
+    if (!body?.id || !body?.meeting_date) {
       return NextResponse.json(
-        { error: "Missing id / property_id / property_name / meeting_date" },
+        { error: "Missing id or meeting_date" },
         { status: 400 }
       );
     }
 
-    const openItems = await listOpenActionItemsForProperty(body.property_id);
+    const openItems = await listOpenActionItems();
     const carryOver: DbAgendaCarryOver[] = openItems.map((i) => ({
       id: i.id,
       title: i.title,
@@ -80,8 +76,6 @@ export async function POST(request: Request) {
 
     const input: CreateMeetingInput = {
       id: String(body.id),
-      property_id: String(body.property_id),
-      property_name: String(body.property_name),
       meeting_date: String(body.meeting_date),
       title: body.title ?? null,
       agenda_snapshot: agenda,
