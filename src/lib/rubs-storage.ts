@@ -84,3 +84,18 @@ export async function deleteBillPdf(path: string): Promise<void> {
   if (!sb) return;
   await sb.storage.from(RUBS_BILLS_BUCKET).remove([path]);
 }
+
+/** Wipe every PDF in the bucket. Used by "Clear All Bills". */
+export async function deleteAllBillPdfs(): Promise<number> {
+  const sb = getSupabase();
+  if (!sb) return 0;
+  const files = await listBillPdfs();
+  if (files.length === 0) return 0;
+  const paths = files.map((f) => f.name);
+  // Supabase remove() handles up to 1000 paths in one call.
+  for (let i = 0; i < paths.length; i += 1000) {
+    const batch = paths.slice(i, i + 1000);
+    await sb.storage.from(RUBS_BILLS_BUCKET).remove(batch);
+  }
+  return paths.length;
+}
