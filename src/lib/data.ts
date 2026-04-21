@@ -541,7 +541,10 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 }
 
 // --- Work Orders / Maintenance ---
-// Maps AppFolio categories to internal types
+// Normalize AppFolio `work_order_type` values to our internal categories.
+// AppFolio's field is free-form-ish, so we check an exact map first and
+// fall back to keyword patterns — "A/C Repair", "Water Heater", "Garbage
+// Disposal" etc. should land in the right bucket instead of "general".
 const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   plumbing: "plumbing",
   electrical: "electrical",
@@ -555,6 +558,26 @@ const CATEGORY_MAP: Record<string, MaintenanceCategory> = {
   lock: "locksmith",
   general: "general",
 };
+
+const CATEGORY_PATTERNS: ReadonlyArray<readonly [RegExp, MaintenanceCategory]> = [
+  [/plumb|leak|drain|toilet|faucet|sink|shower|tub|water.?heater|hot.?water|sewer/i, "plumbing"],
+  [/electric|wiring|outlet|breaker|fuse|light(?!.?ing)|lightbulb|lighting/i, "electrical"],
+  [/hvac|a\/?c\b|air.?cond|heating|heat(?!er)|thermostat|furnace|ventilat/i, "hvac"],
+  [/appliance|refrigerator|fridge|washer|dryer|oven|dishwasher|stove|range|microwave|disposal/i, "appliance"],
+  [/roof|wall|floor|window|door|ceiling|drywall|paint|fence|gate|balcony|railing|stairs|concrete/i, "structural"],
+  [/pest|rodent|roach|mice|rat|ant|insect|bug|termite|bedbug/i, "pest"],
+  [/lock|key(?!pad)|deadbolt|keypad/i, "locksmith"],
+];
+
+export function categorizeWorkOrderType(rawType: unknown): MaintenanceCategory {
+  const t = String(rawType ?? "").toLowerCase().trim();
+  if (!t) return "general";
+  if (CATEGORY_MAP[t]) return CATEGORY_MAP[t];
+  for (const [pattern, category] of CATEGORY_PATTERNS) {
+    if (pattern.test(t)) return category;
+  }
+  return "general";
+}
 
 const PRIORITY_MAP: Record<string, MaintenancePriority> = {
   emergency: "emergency",
@@ -596,7 +619,7 @@ export function mapWorkOrderRow(wo: Record<string, any>, index = 0): Maintenance
     tenantName: String(wo.primary_tenant || "—"),
     tenantPhone: wo.primary_tenant_phone_number || undefined,
     tenantEmail: wo.primary_tenant_email || undefined,
-    category: CATEGORY_MAP[String(wo.work_order_type || "general").toLowerCase()] || "general",
+    category: categorizeWorkOrderType(wo.work_order_type),
     priority: PRIORITY_MAP[String(wo.priority || "normal").toLowerCase()] || "medium",
     status: STATUS_MAP[String(wo.status || "open").toLowerCase()] || "submitted",
     title: String(wo.job_description || wo.service_request_description || `Work Order #${wo.work_order_number || ""}`),

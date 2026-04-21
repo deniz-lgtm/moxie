@@ -32,6 +32,17 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+const CATEGORY_COLORS: Record<MaintenanceCategory, string> = {
+  plumbing: "bg-blue-500",
+  electrical: "bg-yellow-500",
+  hvac: "bg-cyan-500",
+  appliance: "bg-purple-500",
+  structural: "bg-stone-500",
+  pest: "bg-orange-500",
+  locksmith: "bg-gray-500",
+  general: "bg-slate-400",
+};
+
 type Metrics = {
   openCount: number;
   openEmergencies: number;
@@ -47,6 +58,7 @@ type Metrics = {
     total90d: number;
     emergencies30d: number;
   }[];
+  categoryBreakdown: { category: MaintenanceCategory; count: number }[];
 };
 
 function computeMetrics(requests: MaintenanceRequest[]): Metrics {
@@ -133,6 +145,16 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
     .filter((t) => t.total90d >= 3 || t.emergencies30d >= 2)
     .sort((a, b) => b.total90d - a.total90d || b.emergencies30d - a.emergencies30d);
 
+  // Category breakdown across all work orders
+  const byCategory = new Map<MaintenanceCategory, number>();
+  for (const r of requests) {
+    byCategory.set(r.category, (byCategory.get(r.category) ?? 0) + 1);
+  }
+  const categoryBreakdown = Array.from(byCategory.entries())
+    .map(([category, count]) => ({ category, count }))
+    .filter((c) => c.count > 0)
+    .sort((a, b) => b.count - a.count);
+
   return {
     openCount: open.length,
     openEmergencies: open.filter((r) => r.priority === "emergency").length,
@@ -146,6 +168,7 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
     oldest31Plus: b31,
     recurring,
     problemTenants,
+    categoryBreakdown,
   };
 }
 
@@ -174,6 +197,7 @@ export default function MaintenancePage() {
   const [selected, setSelected] = useState<MaintenanceRequest | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
+  const [filterCategory, setFilterCategory] = useState<string>("all");
   const [newNote, setNewNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -288,6 +312,7 @@ export default function MaintenancePage() {
     .filter((r) => {
       if (filterStatus !== "all" && r.status !== filterStatus) return false;
       if (filterPriority !== "all" && r.priority !== filterPriority) return false;
+      if (filterCategory !== "all" && r.category !== filterCategory) return false;
       return true;
     })
     .sort((a, b) => {
@@ -297,6 +322,7 @@ export default function MaintenancePage() {
 
   const metrics = useMemo(() => computeMetrics(allRequests), [allRequests]);
   const maxAging = Math.max(1, ...metrics.aging.map((a) => a.count));
+  const maxCategory = Math.max(1, ...metrics.categoryBreakdown.map((c) => c.count));
 
   async function saveAnnotation(body: Record<string, unknown>) {
     if (!selected) return;
@@ -663,22 +689,55 @@ export default function MaintenancePage() {
             </div>
           </div>
 
-          {/* Aging breakdown */}
-          <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
-            <h3 className="font-semibold text-sm mb-3">Open work order aging</h3>
-            <div className="space-y-2">
-              {metrics.aging.map((bucket) => (
-                <div key={bucket.bucket} className="flex items-center gap-3 text-sm">
-                  <span className="w-20 shrink-0 text-muted-foreground">{bucket.bucket}</span>
-                  <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${bucket.color} transition-all`}
-                      style={{ width: `${(bucket.count / maxAging) * 100}%` }}
-                    />
+          {/* Aging + Category breakdown */}
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+              <h3 className="font-semibold text-sm mb-3">Open work order aging</h3>
+              <div className="space-y-2">
+                {metrics.aging.map((bucket) => (
+                  <div key={bucket.bucket} className="flex items-center gap-3 text-sm">
+                    <span className="w-20 shrink-0 text-muted-foreground">{bucket.bucket}</span>
+                    <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${bucket.color} transition-all`}
+                        style={{ width: `${(bucket.count / maxAging) * 100}%` }}
+                      />
+                    </div>
+                    <span className="w-8 text-right font-medium">{bucket.count}</span>
                   </div>
-                  <span className="w-8 text-right font-medium">{bucket.count}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="font-semibold text-sm">By category</h3>
+                <span className="text-xs text-muted-foreground">all work orders</span>
+              </div>
+              {metrics.categoryBreakdown.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No data yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {metrics.categoryBreakdown.map((c) => (
+                    <button
+                      key={c.category}
+                      onClick={() => setFilterCategory(c.category)}
+                      className="w-full flex items-center gap-3 text-sm text-left hover:bg-muted rounded-md px-1 py-0.5 transition-colors"
+                    >
+                      <span className="w-20 shrink-0 text-muted-foreground capitalize">
+                        {c.category}
+                      </span>
+                      <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${CATEGORY_COLORS[c.category]} transition-all`}
+                          style={{ width: `${(c.count / maxCategory) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right font-medium">{c.count}</span>
+                    </button>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
@@ -741,11 +800,11 @@ export default function MaintenancePage() {
       )}
 
       {/* Filters */}
-      <div className="flex gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
-          className="flex-1 sm:flex-initial text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">All Statuses</option>
           {STATUS_OPTIONS.map((s) => (
@@ -757,13 +816,23 @@ export default function MaintenancePage() {
         <select
           value={filterPriority}
           onChange={(e) => setFilterPriority(e.target.value)}
-          className="flex-1 sm:flex-initial text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">All Priorities</option>
           <option value="emergency">Emergency</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
+        </select>
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card col-span-2 sm:col-span-1"
+        >
+          <option value="all">All Categories</option>
+          {CATEGORY_OPTIONS.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
         </select>
       </div>
 
@@ -786,7 +855,10 @@ export default function MaintenancePage() {
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <StatusBadge value={req.priority} />
                 <StatusBadge value={req.status} />
-                <span className="text-xs text-muted-foreground capitalize ml-auto">{req.category}</span>
+                <span className="text-xs capitalize ml-auto flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${CATEGORY_COLORS[req.category]}`} aria-hidden="true" />
+                  <span className="text-muted-foreground">{req.category}</span>
+                </span>
               </div>
               <h3 className="font-semibold break-words">{req.title}</h3>
               <p className="text-sm text-muted-foreground mt-1 break-words">
