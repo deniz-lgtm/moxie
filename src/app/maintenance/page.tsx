@@ -59,6 +59,12 @@ type Metrics = {
     emergencies30d: number;
   }[];
   categoryBreakdown: { category: MaintenanceCategory; count: number }[];
+  upcomingFollowUps: {
+    overdueCount: number;
+    thisWeekCount: number;
+    laterCount: number;
+    top: { id: string; title: string; property: string; unit: string; date: string; daysFromToday: number }[];
+  };
 };
 
 function computeMetrics(requests: MaintenanceRequest[]): Metrics {
@@ -155,6 +161,34 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
     .filter((c) => c.count > 0)
     .sort((a, b) => b.count - a.count);
 
+  // Upcoming follow-ups — overdue + this week, sorted by date (overdue first)
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayMs = startOfToday.getTime();
+  const weekFromNow = todayMs + 7 * DAY_MS;
+
+  const withFollowUp = requests
+    .filter((r) => r.followUpOn)
+    .map((r) => ({ req: r, dateMs: Date.parse(r.followUpOn!) }))
+    .filter((x) => !Number.isNaN(x.dateMs))
+    .sort((a, b) => a.dateMs - b.dateMs);
+
+  const overdueCount = withFollowUp.filter((x) => x.dateMs < todayMs).length;
+  const thisWeekCount = withFollowUp.filter((x) => x.dateMs >= todayMs && x.dateMs <= weekFromNow).length;
+  const laterCount = withFollowUp.filter((x) => x.dateMs > weekFromNow).length;
+
+  const followUpTop = withFollowUp
+    .filter((x) => x.dateMs <= weekFromNow)
+    .slice(0, 5)
+    .map(({ req, dateMs }) => ({
+      id: req.id,
+      title: req.title,
+      property: req.propertyName,
+      unit: req.unitNumber,
+      date: req.followUpOn!,
+      daysFromToday: Math.round((dateMs - todayMs) / DAY_MS),
+    }));
+
   return {
     openCount: open.length,
     openEmergencies: open.filter((r) => r.priority === "emergency").length,
@@ -169,6 +203,12 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
     recurring,
     problemTenants,
     categoryBreakdown,
+    upcomingFollowUps: {
+      overdueCount,
+      thisWeekCount,
+      laterCount,
+      top: followUpTop,
+    },
   };
 }
 
@@ -198,6 +238,7 @@ export default function MaintenancePage() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [filterQuery, setFilterQuery] = useState<string>("");
   const [newNote, setNewNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -308,11 +349,27 @@ export default function MaintenancePage() {
     setNewRequest({ unitId: "", title: "", description: "", category: "general", priority: "medium" });
   }
 
+  const trimmedQuery = filterQuery.trim().toLowerCase();
   const filtered = allRequests
     .filter((r) => {
       if (filterStatus !== "all" && r.status !== filterStatus) return false;
       if (filterPriority !== "all" && r.priority !== filterPriority) return false;
       if (filterCategory !== "all" && r.category !== filterCategory) return false;
+      if (trimmedQuery) {
+        const haystack = [
+          r.title,
+          r.description,
+          r.unitNumber,
+          r.propertyName,
+          r.tenantName,
+          r.vendor,
+          r.assignedTo,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(trimmedQuery)) return false;
+      }
       return true;
     })
     .sort((a, b) => {
@@ -381,11 +438,15 @@ export default function MaintenancePage() {
   }
 
   // Persist text-field edits on blur so we don't hit the API on every keystroke.
-  function persistField(field: "assignedTo" | "vendor" | "scheduledDate", value: string) {
+  function persistField(
+    field: "assignedTo" | "vendor" | "scheduledDate" | "followUpOn",
+    value: string
+  ) {
     const key = {
       assignedTo: "assigned_to_override",
       vendor: "vendor_override",
       scheduledDate: "scheduled_date_override",
+      followUpOn: "follow_up_on",
     }[field];
     void saveAnnotation({ [key]: value || null });
   }
@@ -494,6 +555,21 @@ export default function MaintenancePage() {
                 }}
                 className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
+            </div>
+            <div>
+              <label className="text-sm text-muted-foreground block mb-1">Follow-up Date</label>
+              <input
+                type="date"
+                value={selected.followUpOn || ""}
+                onChange={(e) => {
+                  updateField("followUpOn", e.target.value);
+                  persistField("followUpOn", e.target.value);
+                }}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Revisit date — shows up in the dashboard&apos;s Follow-ups widget.
+              </p>
             </div>
           </div>
         </div>
@@ -741,8 +817,8 @@ export default function MaintenancePage() {
             </div>
           </div>
 
-          {/* Problem tenants + Recurring issues */}
-          <div className="grid md:grid-cols-2 gap-3">
+          {/* Problem tenants + Recurring issues + Follow-ups */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
             <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
               <div className="flex items-baseline justify-between mb-3">
                 <h3 className="font-semibold text-sm">Problem tenants</h3>
@@ -795,11 +871,84 @@ export default function MaintenancePage() {
                 </ul>
               )}
             </div>
+
+            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="font-semibold text-sm">Follow-ups</h3>
+                <span className="text-xs text-muted-foreground">
+                  {metrics.upcomingFollowUps.overdueCount > 0 && (
+                    <span className="text-red-600 font-medium">
+                      {metrics.upcomingFollowUps.overdueCount} overdue
+                    </span>
+                  )}
+                  {metrics.upcomingFollowUps.overdueCount > 0 && " · "}
+                  {metrics.upcomingFollowUps.thisWeekCount} this week
+                </span>
+              </div>
+              {metrics.upcomingFollowUps.top.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No follow-ups due soon.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {metrics.upcomingFollowUps.top.map((f) => {
+                    const label =
+                      f.daysFromToday < 0
+                        ? `${Math.abs(f.daysFromToday)}d overdue`
+                        : f.daysFromToday === 0
+                        ? "today"
+                        : f.daysFromToday === 1
+                        ? "tomorrow"
+                        : `in ${f.daysFromToday}d`;
+                    return (
+                      <li key={f.id}>
+                        <button
+                          onClick={() => {
+                            const match = allRequests.find((r) => r.id === f.id);
+                            if (match) setSelected(match);
+                          }}
+                          className="w-full flex items-center justify-between gap-3 text-sm text-left hover:bg-muted rounded-md px-1 py-0.5 transition-colors"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{f.title}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {f.property} #{f.unit}
+                            </p>
+                          </div>
+                          <div className="text-right text-xs shrink-0">
+                            <p className={f.daysFromToday < 0 ? "text-red-600 font-medium" : "font-medium"}>
+                              {f.date}
+                            </p>
+                            <p className="text-muted-foreground">{label}</p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
         </section>
       )}
 
-      {/* Filters */}
+      {/* Search + Filters */}
+      <div className="relative">
+        <input
+          type="text"
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          placeholder="Search title, description, unit, tenant, vendor…"
+          className="w-full text-sm border border-border rounded-lg pl-3 pr-9 py-2 bg-card"
+        />
+        {filterQuery && (
+          <button
+            onClick={() => setFilterQuery("")}
+            aria-label="Clear search"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-lg leading-none px-1"
+          >
+            ×
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <select
           value={filterStatus}

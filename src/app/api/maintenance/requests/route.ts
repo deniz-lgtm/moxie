@@ -21,6 +21,7 @@ function applyAnnotation(
     assignedTo: ann.assigned_to_override ?? req.assignedTo,
     vendor: ann.vendor_override ?? req.vendor,
     scheduledDate: ann.scheduled_date_override ?? req.scheduledDate,
+    followUpOn: ann.follow_up_on ?? req.followUpOn,
     notes: [...req.notes, ...moxieNotes],
   };
 }
