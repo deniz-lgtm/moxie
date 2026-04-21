@@ -30,8 +30,8 @@ function isMissingTableError(error: { code?: string; message?: string } | null |
 
 export type CreateMeetingInput = {
   id: string;
-  property_id: string;
-  property_name: string;
+  property_id?: string | null;
+  property_name?: string | null;
   meeting_date: string;
   title?: string | null;
   agenda_snapshot?: DbAgendaSnapshot;
@@ -51,17 +51,15 @@ export type UpdateMeetingInput = Partial<{
   recording_duration_seconds: number | null;
 }>;
 
-export async function listMeetings(propertyId?: string): Promise<DbPropertyMeeting[]> {
+export async function listMeetings(): Promise<DbPropertyMeeting[]> {
   const sb = getSupabase();
   if (!sb) return [];
 
-  let query = sb
+  const { data, error } = await sb
     .from("property_meetings")
     .select("*")
     .order("meeting_date", { ascending: false });
-  if (propertyId) query = query.eq("property_id", propertyId);
 
-  const { data, error } = await query;
   if (error) {
     if (!isMissingTableError(error)) {
       console.warn("[meetings-db] listMeetings:", error.message);
@@ -94,8 +92,8 @@ export async function createMeeting(input: CreateMeetingInput): Promise<DbProper
 
   const row = {
     id: input.id,
-    property_id: input.property_id,
-    property_name: input.property_name,
+    property_id: input.property_id ?? null,
+    property_name: input.property_name ?? null,
     meeting_date: input.meeting_date,
     status: "scheduled" as MeetingStatus,
     title: input.title ?? null,
@@ -360,22 +358,21 @@ export async function deleteAttachment(
 }
 
 /**
- * Open action items for a property across all prior meetings. Used to
- * build the "carry-over" agenda block when a new meeting is generated.
+ * All open action items across prior meetings. Used to build the
+ * "carry-over" agenda block when a new meeting is generated.
  */
-export async function listOpenActionItemsForProperty(propertyId: string): Promise<DbMeetingActionItem[]> {
+export async function listOpenActionItems(): Promise<DbMeetingActionItem[]> {
   const sb = getSupabase();
   if (!sb) return [];
 
   const { data, error } = await sb
     .from("meeting_action_items")
     .select("*")
-    .eq("property_id", propertyId)
     .in("status", ["open", "in_progress"])
     .order("created_at", { ascending: true });
   if (error) {
     if (!isMissingTableError(error)) {
-      console.warn("[meetings-db] listOpenActionItemsForProperty:", error.message);
+      console.warn("[meetings-db] listOpenActionItems:", error.message);
     }
     return [];
   }

@@ -269,6 +269,7 @@ export type DbAgendaWorkOrder = {
   title: string;
   priority?: string | null;
   status?: string | null;
+  propertyName?: string | null;
   unitName?: string | null;
   vendor?: string | null;
 };
@@ -276,6 +277,7 @@ export type DbAgendaWorkOrder = {
 export type DbAgendaVacancy = {
   unitId: string;
   unitName: string;
+  propertyName?: string | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
   rent?: number | string | null;
@@ -301,8 +303,8 @@ export type DbAgendaSnapshot = {
 
 export type DbPropertyMeeting = {
   id: string;
-  property_id: string;
-  property_name: string;
+  property_id: string | null;
+  property_name: string | null;
   meeting_date: string;
   status: MeetingStatus;
   title: string | null;
@@ -339,7 +341,7 @@ export type DbActionItemAttachment = {
 export type DbMeetingActionItem = {
   id: string;
   meeting_id: string;
-  property_id: string;
+  property_id: string | null;
   title: string;
   description: string | null;
   assigned_to: string | null;
