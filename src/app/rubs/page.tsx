@@ -35,6 +35,7 @@ import {
   generateAppFolioExport,
   getExportTotal,
 } from "@/lib/rubs-appfolio-export";
+import { uploadBillPdf } from "@/lib/rubs-storage";
 
 // ─── Main Page ─────────────────────────────────────────────────
 
@@ -857,6 +858,42 @@ function ImportBillsFlow({
   const [scanLoading, setScanLoading] = useState(false);
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
+  const [uploading, setUploading] = useState({ current: 0, total: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(fileList: File[]) {
+    const pdfs = fileList.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+    if (pdfs.length === 0) {
+      setError("No PDF files in the selection.");
+      return;
+    }
+    setError("");
+    setUploading({ current: 0, total: pdfs.length });
+    const folder = new Date().toISOString().slice(0, 7); // YYYY-MM
+    for (let i = 0; i < pdfs.length; i++) {
+      setUploading({ current: i + 1, total: pdfs.length });
+      try {
+        await uploadBillPdf(pdfs[i], folder);
+      } catch (err: any) {
+        setError(err.message || `Upload failed for ${pdfs[i].name}`);
+      }
+    }
+    setUploading({ current: 0, total: 0 });
+    // Refresh the list so the new files appear
+    await scanFolder();
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    handleUpload(Array.from(e.dataTransfer.files));
+  }
+
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) handleUpload(Array.from(e.target.files));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   function inBillingPeriod(p: ParsedBill): boolean {
     if (!periodFrom && !periodTo) return true;
@@ -970,64 +1007,87 @@ function ImportBillsFlow({
 
   // ─── Scan Step ──────────────────────────────────────────
   if (step === "scan") {
+    const isUploading = uploading.total > 0;
     return (
       <div className="bg-card rounded-xl border border-border p-5 space-y-4">
         <h2 className="font-semibold">Import Utility Bills</h2>
         <p className="text-sm text-muted-foreground">
-          Scan your bills folder for PDFs, then AI will extract billing data automatically.
+          Drop PDF bills below. They upload to secure cloud storage, then AI extracts billing data automatically.
         </p>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={scanFolder}
-            disabled={scanLoading}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
-          >
-            {scanLoading ? "Scanning..." : "Scan Folder for New Bills"}
-          </button>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
+            isDragging ? "border-accent bg-accent/5" : "border-border hover:bg-muted/30"
+          } ${isUploading ? "pointer-events-none opacity-60" : ""}`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            multiple
+            onChange={handleFilePick}
+            className="hidden"
+          />
+          {isUploading ? (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Uploading {uploading.current} of {uploading.total}...</p>
+              <div className="w-full max-w-sm mx-auto bg-muted rounded-full h-2">
+                <div
+                  className="bg-accent h-2 rounded-full transition-all"
+                  style={{ width: `${(uploading.current / uploading.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm font-medium">Drop PDFs here, or click to choose files</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Multi-select works. Upload as many bills as you&apos;d like.
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between">
           <button
             onClick={() => setShowCoworkInstructions(!showCoworkInstructions)}
-            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+            className="text-xs text-accent hover:underline"
           >
-            Need to download new bills?
+            How to download bills with Claude Cowork
+          </button>
+          <button
+            onClick={scanFolder}
+            disabled={scanLoading || isUploading}
+            className="text-xs text-accent hover:underline disabled:opacity-50"
+          >
+            {scanLoading ? "Refreshing..." : "Refresh list"}
           </button>
         </div>
 
         {showCoworkInstructions && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-            <h3 className="font-semibold text-sm text-blue-900">Download bills with Cowork</h3>
+            <h3 className="font-semibold text-sm text-blue-900">Typical workflow</h3>
             <ol className="text-sm text-blue-900 space-y-2 list-decimal list-inside">
               <li>
-                Open <strong>Cowork</strong> on the always-on Windows computer.
+                Open <strong>Claude Cowork</strong> on the Windows computer and ask it to download
+                this month&apos;s LADWP and SoCal Gas bills to any local folder (e.g. Downloads or Dropbox).
               </li>
               <li>
-                Mount this folder when starting the session:
-                <code className="block mt-1 px-2 py-1 bg-blue-100 rounded text-xs font-mono break-all">
-                  C:\Users\deniz\Simpatico Systems Dropbox\Brad Management\MOXIE MANAGEMENT\AI\RUBs\Utility Bills
-                </code>
+                Once Cowork is done, come back to this page and drag the PDFs from that folder into
+                the drop zone above. They&apos;ll upload straight to secure cloud storage.
               </li>
               <li>
-                Tell Cowork: <em>&quot;Download this month&apos;s LADWP and SoCal Gas bills for all
-                accounts and save them to the mounted folder.&quot;</em>
-              </li>
-              <li>
-                Wait for Cowork to finish (usually a few minutes). Bills will sync to Dropbox
-                automatically.
-              </li>
-              <li>
-                Click <strong>I&apos;ve Downloaded the Bills</strong> below to scan the folder and
-                continue with AI parsing.
+                Select the ones you want to parse and click <strong>Parse with AI</strong>. Review
+                the extracted data before importing.
               </li>
             </ol>
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                onClick={scanFolder}
-                disabled={scanLoading}
-                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
-              >
-                {scanLoading ? "Scanning..." : "I've Downloaded the Bills — Scan Now"}
-              </button>
-            </div>
+            <p className="text-xs text-blue-800">
+              No PowerShell, ngrok tunnels, or local services required — everything happens in your browser.
+            </p>
           </div>
         )}
 
@@ -1076,14 +1136,11 @@ function ImportBillsFlow({
           </>
         )}
 
-        {files.length === 0 && !scanLoading && !error && !showCoworkInstructions && scannedFolder && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm space-y-2">
-            <p className="font-semibold text-amber-900">No PDFs found in the folder</p>
-            <p className="text-amber-800 text-xs break-all">Scanned: <code>{scannedFolder}</code></p>
-            <p className="text-amber-800">
-              Either the folder is empty, Dropbox hasn&apos;t finished syncing yet, or the files
-              don&apos;t have a <code>.pdf</code> extension. Make sure Cowork saved the bills to
-              the exact path above.
+        {files.length === 0 && !scanLoading && !error && scannedFolder && uploading.total === 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm space-y-1">
+            <p className="font-semibold text-amber-900">No PDFs stored yet</p>
+            <p className="text-amber-800 text-xs">
+              Drop PDFs into the box above to upload your first bills.
             </p>
           </div>
         )}
