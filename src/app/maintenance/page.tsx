@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
   MaintenanceRequest,
@@ -235,10 +236,14 @@ const CATEGORY_OPTIONS: { value: MaintenanceCategory; label: string }[] = [
 export default function MaintenancePage() {
   const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>([]);
   const [selected, setSelected] = useState<MaintenanceRequest | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [filterPriority, setFilterPriority] = useState<string>("all");
-  const [filterCategory, setFilterCategory] = useState<string>("all");
-  const [filterQuery, setFilterQuery] = useState<string>("");
+  const searchParams = useSearchParams();
+  const [filterStatus, setFilterStatus] = useState<string>(() => searchParams.get("status") ?? "all");
+  const [filterPriority, setFilterPriority] = useState<string>(() => searchParams.get("priority") ?? "all");
+  const [filterCategory, setFilterCategory] = useState<string>(() => searchParams.get("category") ?? "all");
+  const [filterAging, setFilterAging] = useState<string>(() => searchParams.get("aging") ?? "all");
+  const [filterQuery, setFilterQuery] = useState<string>(() => searchParams.get("q") ?? "");
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const recurringRef = useRef<HTMLDivElement | null>(null);
   const [newNote, setNewNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -350,11 +355,26 @@ export default function MaintenancePage() {
   }
 
   const trimmedQuery = filterQuery.trim().toLowerCase();
+  const nowForAging = Date.now();
   const filtered = allRequests
     .filter((r) => {
-      if (filterStatus !== "all" && r.status !== filterStatus) return false;
+      if (filterStatus === "open") {
+        if (!OPEN_STATUSES.has(r.status)) return false;
+      } else if (filterStatus !== "all" && r.status !== filterStatus) {
+        return false;
+      }
       if (filterPriority !== "all" && r.priority !== filterPriority) return false;
       if (filterCategory !== "all" && r.category !== filterCategory) return false;
+      if (filterAging !== "all") {
+        const created = Date.parse(r.createdAt);
+        if (Number.isNaN(created)) return false;
+        const days = (nowForAging - created) / DAY_MS;
+        if (filterAging === "0-7" && days > 7) return false;
+        if (filterAging === "8-30" && (days <= 7 || days > 30)) return false;
+        if (filterAging === "31+" && days <= 30) return false;
+        // Aging filter only makes sense for open work orders.
+        if (!OPEN_STATUSES.has(r.status)) return false;
+      }
       if (trimmedQuery) {
         const haystack = [
           r.title,
@@ -380,6 +400,20 @@ export default function MaintenancePage() {
   const metrics = useMemo(() => computeMetrics(allRequests), [allRequests]);
   const maxAging = Math.max(1, ...metrics.aging.map((a) => a.count));
   const maxCategory = Math.max(1, ...metrics.categoryBreakdown.map((c) => c.count));
+
+  function scrollToList() {
+    listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function scrollToRecurring() {
+    recurringRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function resetFiltersExcept(keep: Partial<{ status: string; priority: string; category: string; aging: string; query: string }>) {
+    setFilterStatus(keep.status ?? "all");
+    setFilterPriority(keep.priority ?? "all");
+    setFilterCategory(keep.category ?? "all");
+    setFilterAging(keep.aging ?? "all");
+    setFilterQuery(keep.query ?? "");
+  }
 
   async function saveAnnotation(body: Record<string, unknown>) {
     if (!selected) return;
@@ -731,7 +765,13 @@ export default function MaintenancePage() {
         <section className="space-y-3">
           {/* Top-line stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-card rounded-xl border border-border p-4">
+            <button
+              onClick={() => {
+                resetFiltersExcept({ status: "open" });
+                scrollToList();
+              }}
+              className="bg-card rounded-xl border border-border p-4 text-left hover:shadow-md transition-shadow cursor-pointer"
+            >
               <p className="text-xs text-muted-foreground">Open work orders</p>
               <p className="text-2xl font-bold mt-1">{metrics.openCount}</p>
               {metrics.openEmergencies > 0 && (
@@ -739,8 +779,14 @@ export default function MaintenancePage() {
                   {metrics.openEmergencies} emergency
                 </p>
               )}
-            </div>
-            <div className="bg-card rounded-xl border border-border p-4">
+            </button>
+            <button
+              onClick={() => {
+                resetFiltersExcept({ status: "completed" });
+                scrollToList();
+              }}
+              className="bg-card rounded-xl border border-border p-4 text-left hover:shadow-md transition-shadow cursor-pointer"
+            >
               <p className="text-xs text-muted-foreground">Avg resolution</p>
               <p className="text-2xl font-bold mt-1">
                 {metrics.avgResolutionDays != null
@@ -750,19 +796,28 @@ export default function MaintenancePage() {
               <p className="text-xs text-muted-foreground mt-1">
                 {metrics.resolvedSample} resolved (90d)
               </p>
-            </div>
-            <div className="bg-card rounded-xl border border-border p-4">
+            </button>
+            <button
+              onClick={() => {
+                resetFiltersExcept({ aging: "31+" });
+                scrollToList();
+              }}
+              className="bg-card rounded-xl border border-border p-4 text-left hover:shadow-md transition-shadow cursor-pointer"
+            >
               <p className="text-xs text-muted-foreground">Aging 31+ days</p>
               <p className={`text-2xl font-bold mt-1 ${metrics.oldest31Plus > 0 ? "text-red-600" : ""}`}>
                 {metrics.oldest31Plus}
               </p>
               <p className="text-xs text-muted-foreground mt-1">still open</p>
-            </div>
-            <div className="bg-card rounded-xl border border-border p-4">
+            </button>
+            <button
+              onClick={scrollToRecurring}
+              className="bg-card rounded-xl border border-border p-4 text-left hover:shadow-md transition-shadow cursor-pointer"
+            >
               <p className="text-xs text-muted-foreground">Recurring issues</p>
               <p className="text-2xl font-bold mt-1">{metrics.recurring.length}</p>
               <p className="text-xs text-muted-foreground mt-1">unit+category, 30d</p>
-            </div>
+            </button>
           </div>
 
           {/* Aging + Category breakdown */}
@@ -770,18 +825,32 @@ export default function MaintenancePage() {
             <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
               <h3 className="font-semibold text-sm mb-3">Open work order aging</h3>
               <div className="space-y-2">
-                {metrics.aging.map((bucket) => (
-                  <div key={bucket.bucket} className="flex items-center gap-3 text-sm">
-                    <span className="w-20 shrink-0 text-muted-foreground">{bucket.bucket}</span>
-                    <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${bucket.color} transition-all`}
-                        style={{ width: `${(bucket.count / maxAging) * 100}%` }}
-                      />
-                    </div>
-                    <span className="w-8 text-right font-medium">{bucket.count}</span>
-                  </div>
-                ))}
+                {metrics.aging.map((bucket) => {
+                  const key = bucket.bucket.startsWith("0")
+                    ? "0-7"
+                    : bucket.bucket.startsWith("8")
+                    ? "8-30"
+                    : "31+";
+                  return (
+                    <button
+                      key={bucket.bucket}
+                      onClick={() => {
+                        resetFiltersExcept({ aging: key });
+                        scrollToList();
+                      }}
+                      className="w-full flex items-center gap-3 text-sm text-left hover:bg-muted rounded-md px-1 py-0.5 transition-colors"
+                    >
+                      <span className="w-20 shrink-0 text-muted-foreground">{bucket.bucket}</span>
+                      <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${bucket.color} transition-all`}
+                          style={{ width: `${(bucket.count / maxAging) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right font-medium">{bucket.count}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -797,7 +866,10 @@ export default function MaintenancePage() {
                   {metrics.categoryBreakdown.map((c) => (
                     <button
                       key={c.category}
-                      onClick={() => setFilterCategory(c.category)}
+                      onClick={() => {
+                        resetFiltersExcept({ category: c.category });
+                        scrollToList();
+                      }}
                       className="w-full flex items-center gap-3 text-sm text-left hover:bg-muted rounded-md px-1 py-0.5 transition-colors"
                     >
                       <span className="w-20 shrink-0 text-muted-foreground capitalize">
@@ -829,26 +901,34 @@ export default function MaintenancePage() {
               ) : (
                 <ul className="space-y-2">
                   {metrics.problemTenants.slice(0, 5).map((t) => (
-                    <li key={`${t.name}-${t.unit}`} className="flex items-center justify-between gap-3 text-sm">
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{t.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {t.property} #{t.unit}
-                        </p>
-                      </div>
-                      <div className="text-right text-xs shrink-0">
-                        <p className="font-medium">{t.total90d} in 90d</p>
-                        {t.emergencies30d > 0 && (
-                          <p className="text-red-600">{t.emergencies30d} emergency</p>
-                        )}
-                      </div>
+                    <li key={`${t.name}-${t.unit}`}>
+                      <button
+                        onClick={() => {
+                          resetFiltersExcept({ query: t.name });
+                          scrollToList();
+                        }}
+                        className="w-full flex items-center justify-between gap-3 text-sm text-left hover:bg-muted rounded-md px-1 py-0.5 transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{t.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {t.property} #{t.unit}
+                          </p>
+                        </div>
+                        <div className="text-right text-xs shrink-0">
+                          <p className="font-medium">{t.total90d} in 90d</p>
+                          {t.emergencies30d > 0 && (
+                            <p className="text-red-600">{t.emergencies30d} emergency</p>
+                          )}
+                        </div>
+                      </button>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
 
-            <div className="bg-card rounded-xl border border-border p-4 sm:p-5">
+            <div ref={recurringRef} className="bg-card rounded-xl border border-border p-4 sm:p-5">
               <div className="flex items-baseline justify-between mb-3">
                 <h3 className="font-semibold text-sm">Recurring issues</h3>
                 <span className="text-xs text-muted-foreground">same unit + category, 30d</span>
@@ -858,14 +938,22 @@ export default function MaintenancePage() {
               ) : (
                 <ul className="space-y-2">
                   {metrics.recurring.slice(0, 5).map((r) => (
-                    <li key={r.key} className="flex items-center justify-between gap-3 text-sm">
-                      <div className="min-w-0">
-                        <p className="font-medium capitalize truncate">{r.category}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {r.propertyName} #{r.unitNumber}
-                        </p>
-                      </div>
-                      <span className="text-xs font-medium shrink-0">{r.count}x</span>
+                    <li key={r.key}>
+                      <button
+                        onClick={() => {
+                          resetFiltersExcept({ category: r.category, query: r.unitNumber });
+                          scrollToList();
+                        }}
+                        className="w-full flex items-center justify-between gap-3 text-sm text-left hover:bg-muted rounded-md px-1 py-0.5 transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium capitalize truncate">{r.category}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {r.propertyName} #{r.unitNumber}
+                          </p>
+                        </div>
+                        <span className="text-xs font-medium shrink-0">{r.count}x</span>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -956,6 +1044,7 @@ export default function MaintenancePage() {
           className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">All Statuses</option>
+          <option value="open">Open (any)</option>
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
               {s.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -992,9 +1081,26 @@ export default function MaintenancePage() {
         </div>
       )}
 
+      {/* Active filter chips (for filters that don't have their own visible UI) */}
+      {filterAging !== "all" && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Aging:</span>
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 text-red-700">
+            {filterAging} days
+            <button
+              onClick={() => setFilterAging("all")}
+              aria-label="Clear aging filter"
+              className="ml-1 leading-none"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* Request Cards */}
       {!loading && (
-        <div className="space-y-3">
+        <div ref={listRef} className="space-y-3">
           {filtered.map((req) => (
             <button
               key={req.id}

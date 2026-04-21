@@ -197,21 +197,33 @@ export default function Dashboard() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <Link
+          href="/portfolio"
+          className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+          style={{ boxShadow: "var(--shadow-sm)" }}
+        >
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pre-Leased</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{preLeasedPct}%</p>
           <p className="text-xs text-muted-foreground mt-1">{stats.preLeasedUnits} of {stats.totalUnits} units</p>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+        </Link>
+        <Link
+          href="/maintenance?status=open"
+          className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+          style={{ boxShadow: "var(--shadow-sm)" }}
+        >
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Open Work Orders</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-blue-600">{stats.openMaintenanceRequests}</p>
           <p className="text-xs text-muted-foreground mt-1">maintenance requests</p>
-        </div>
-        <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+        </Link>
+        <Link
+          href="/leasing/applications"
+          className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+          style={{ boxShadow: "var(--shadow-sm)" }}
+        >
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Leasing</p>
           <p className="text-3xl font-bold mt-2 tracking-tight text-purple-600">{stats.activeApplications}</p>
           <p className="text-xs text-muted-foreground mt-1">pending applications</p>
-        </div>
+        </Link>
       </div>
 
       {/* Category Cards Grid */}
