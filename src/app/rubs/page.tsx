@@ -665,6 +665,7 @@ function BillDetailView({
   const [showAppFolioExport, setShowAppFolioExport] = useState(false);
 
   const totalAllocated = bill.allocations.reduce((s, a) => s + a.amount, 0);
+  const totalTenants = bill.allocations.reduce((s, a) => s + (a.occupants || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -702,15 +703,15 @@ function BillDetailView({
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-card rounded-xl border border-border p-4">
-          <p className="text-sm text-muted-foreground">Units</p>
-          <p className="text-2xl font-bold mt-1">{bill.allocations.length}</p>
+          <p className="text-sm text-muted-foreground">Tenants</p>
+          <p className="text-2xl font-bold mt-1">{totalTenants}</p>
         </div>
         <div className="bg-card rounded-xl border border-border p-4">
-          <p className="text-sm text-muted-foreground">Avg Per Unit</p>
+          <p className="text-sm text-muted-foreground">Avg Per Tenant</p>
           <p className="text-2xl font-bold mt-1">
-            ${bill.allocations.length > 0
-              ? Math.round(bill.totalAmount / bill.allocations.length).toLocaleString()
-              : "0"}
+            ${totalTenants > 0
+              ? (bill.totalAmount / totalTenants).toFixed(2)
+              : "0.00"}
           </p>
         </div>
         <div className="bg-card rounded-xl border border-border p-4">
