@@ -320,6 +320,23 @@ export async function clearAllRubsData(): Promise<void> {
   saveToStorage(ALIASES_KEY, []);
 }
 
+/**
+ * Wipe per-cycle workspace state — bills + occupancy template — but keep
+ * meter mappings and property aliases since those are static property setup.
+ * Used by the "Clear All Bills" button to start a new billing cycle.
+ */
+export async function clearWorkspaceData(): Promise<void> {
+  const sb = getSupabase();
+  if (sb) {
+    await Promise.all([
+      sb.from("rubs_bills").delete().neq("id", ""),
+      sb.from("rubs_occupancy").delete().eq("id", "singleton"),
+    ]);
+  }
+  saveToStorage(BILLS_KEY, []);
+  saveToStorage(OCCUPANCY_KEY, null);
+}
+
 // ─── One-time localStorage → Supabase migration ────────────────
 // On first successful connection to Supabase, copy any existing
 // localStorage data up so the user doesn't lose state they built

@@ -26,6 +26,7 @@ import {
   saveOccupancyData,
   getPropertyAliases,
   migrateLocalToSupabaseIfNeeded,
+  clearWorkspaceData,
 } from "@/lib/rubs-db";
 import { seedRubsData } from "@/lib/rubs-seed";
 import { calculateAllocations } from "@/lib/rubs-calc";
@@ -35,7 +36,7 @@ import {
   generateAppFolioExport,
   getExportTotal,
 } from "@/lib/rubs-appfolio-export";
-import { uploadBillPdf } from "@/lib/rubs-storage";
+import { uploadBillPdf, deleteAllBillPdfs } from "@/lib/rubs-storage";
 
 // ─── Main Page ─────────────────────────────────────────────────
 
@@ -109,6 +110,38 @@ export default function RubsPage() {
     await saveBillToStorage(updated);
     setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
     setSelected(updated);
+  }
+
+  async function handleClearAll() {
+    const billCount = bills.length;
+    const hasOccupancy = Boolean(occupancy);
+    const summary = [
+      billCount > 0 && `${billCount} bill${billCount !== 1 ? "s" : ""}`,
+      hasOccupancy && "the AppFolio template",
+      "every uploaded PDF",
+    ].filter(Boolean).join(", ");
+    const ok = confirm(
+      `Clear ${summary}?\n\nMeter mappings and property aliases are kept. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setLoading(true);
+    try {
+      await clearWorkspaceData();
+      const removed = await deleteAllBillPdfs();
+      setBills([]);
+      setOccupancy(null);
+      setSelected(null);
+      setShowImport(false);
+      setShowExport(false);
+      setShowCreateForm(false);
+      alert(
+        `Cleared. ${billCount} bill${billCount !== 1 ? "s" : ""} and ${removed} PDF${removed !== 1 ? "s" : ""} removed. Upload a fresh template and bills to start the next cycle.`,
+      );
+    } catch (err: any) {
+      alert(`Clear failed: ${err.message || err}`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleCalculateAll(method: SplitMethod = "occupancy") {
@@ -274,6 +307,15 @@ export default function RubsPage() {
           >
             Settings
           </Link>
+          {(bills.length > 0 || occupancy) && (
+            <button
+              onClick={handleClearAll}
+              className="px-4 py-2 text-sm border border-red-200 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+              title="Wipe all bills, uploaded PDFs, and the AppFolio template. Meter mappings stay."
+            >
+              Clear All
+            </button>
+          )}
           <button
             onClick={() => { setShowImport(!showImport); setShowCreateForm(false); setShowExport(false); }}
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
