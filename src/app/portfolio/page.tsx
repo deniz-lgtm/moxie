@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import PropertyMeetings from "@/components/PropertyMeetings";
 import type { Property, Unit, DashboardStats } from "@/lib/types";
 
 type PropertySummary = {
@@ -104,13 +103,6 @@ export default function PortfolioPage() {
             <p className="text-2xl font-bold mt-1">${selected.avgRent.toLocaleString()}</p>
           </div>
         </div>
-
-        {/* Monday morning meetings */}
-        <PropertyMeetings
-          propertyId={selected.property.id}
-          propertyName={selected.property.name}
-          units={selected.units}
-        />
 
         {/* Unit breakdown */}
         <div className="bg-card rounded-xl border border-border overflow-hidden">
