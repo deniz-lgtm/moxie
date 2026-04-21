@@ -83,6 +83,7 @@ const navItems: NavItem[] = [
   // Legacy items (to be reviewed)
   { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw, category: "Property Management" },
   { label: "Vendors", href: "/vendors", icon: Users, category: "Property Management" },
+  { label: "Contacts", href: "/contacts", icon: Users, category: "Property Management" },
   {
     label: "RUBs",
     href: "/rubs",

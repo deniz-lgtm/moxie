@@ -196,6 +196,52 @@ export interface MaintenanceRequest {
   followUpOn?: string;
 }
 
+// --- Vendors ---
+export type VendorStatus = "active" | "inactive" | "preferred";
+
+export interface Vendor {
+  id: string;
+  name: string;
+  category?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  contactName?: string;
+  licenseNumber?: string;
+  insuranceExpiry?: string;
+  status?: VendorStatus;
+  rating?: number;
+  notes?: string;
+  isInternal: boolean;
+  notionPageId?: string;
+  notionLastSyncedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- Contacts (internal team directory) ---
+export type ContactRole =
+  | "property_manager"
+  | "maintenance"
+  | "leasing"
+  | "asset_manager"
+  | "owner_rep"
+  | "other";
+
+export interface Contact {
+  id: string;
+  name: string;
+  role?: ContactRole;
+  email?: string;
+  phone?: string;
+  department?: string;
+  notes?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // --- Leasing: Applications ---
 export type ApplicantRole = "primary" | "co_applicant" | "guarantor";
 export type StepStatus = "pending" | "complete" | "in_review" | "rejected";

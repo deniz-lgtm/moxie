@@ -216,3 +216,41 @@ export type DbWorkOrderAnnotation = {
   created_at: string;
   updated_at: string;
 };
+
+// ─── Vendors + Contacts ─────────────────────────────────────────
+// Mirrors supabase/migrations/20260421_vendors_contacts.sql.
+
+export type DbVendor = {
+  id: string;
+  name: string;
+  category: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+  contact_name: string | null;
+  license_number: string | null;
+  insurance_expiry: string | null;
+  status: string | null;
+  rating: number | null;
+  notes: string | null;
+  is_internal: boolean;
+  notion_page_id: string | null;
+  notion_last_synced_at: string | null;
+  raw: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbContact = {
+  id: string;
+  name: string;
+  role: string | null;
+  email: string | null;
+  phone: string | null;
+  department: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
