@@ -101,7 +101,7 @@ export type DbPhoto = {
 export type DbMeterMapping = {
   id: string;
   property_name: string;
-  meter_type: "water" | "gas" | "electric" | "trash";
+  meter_type: "water" | "gas" | "electric" | "sewer";
   metering_method: "master" | "sub_metered";
   meter_id: string;
   unit_ids: string[];
@@ -115,7 +115,7 @@ export type DbRubsBill = {
   id: string;
   property_name: string;
   month: string;
-  meter_type: "water" | "gas" | "electric" | "trash";
+  meter_type: "water" | "gas" | "electric" | "sewer";
   total_amount: number;
   mapping_id: string;
   status: "draft" | "calculated" | "posted";

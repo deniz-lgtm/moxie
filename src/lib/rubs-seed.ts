@@ -34,7 +34,7 @@ const PROPERTIES: PropertyConfig[] = [
     meters: [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-ELL-001", splitMethod: "sqft" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-ELL-001", splitMethod: "sqft" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-ELL-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-ELL-001", splitMethod: "equal" },
     ],
   },
   {
@@ -53,7 +53,7 @@ const PROPERTIES: PropertyConfig[] = [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-30TH-001", splitMethod: "occupancy" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-30TH-001", splitMethod: "sqft" },
       { meterType: "electric", meteringMethod: "sub_metered", meterId: "ELEC-30TH-SUB", splitMethod: "equal" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-30TH-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-30TH-001", splitMethod: "equal" },
     ],
   },
   {
@@ -67,7 +67,7 @@ const PROPERTIES: PropertyConfig[] = [
     meters: [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-27TH-001", splitMethod: "sqft" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-27TH-001", splitMethod: "equal" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-27TH-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-27TH-001", splitMethod: "equal" },
     ],
   },
   {
@@ -88,7 +88,7 @@ const PROPERTIES: PropertyConfig[] = [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-HOO-001", splitMethod: "sqft" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-HOO-001", splitMethod: "sqft" },
       { meterType: "electric", meteringMethod: "master", meterId: "ELEC-HOO-001", splitMethod: "sqft" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-HOO-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-HOO-001", splitMethod: "equal" },
     ],
   },
   {
@@ -103,7 +103,7 @@ const PROPERTIES: PropertyConfig[] = [
     meters: [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-955-001", splitMethod: "occupancy" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-955-001", splitMethod: "occupancy" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-955-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-955-001", splitMethod: "equal" },
     ],
   },
   {
@@ -126,7 +126,7 @@ const PROPERTIES: PropertyConfig[] = [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-ADA-001", splitMethod: "sqft" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-ADA-001", splitMethod: "sqft" },
       { meterType: "electric", meteringMethod: "sub_metered", meterId: "ELEC-ADA-SUB", splitMethod: "equal" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-ADA-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-ADA-001", splitMethod: "equal" },
     ],
   },
   {
@@ -142,7 +142,7 @@ const PROPERTIES: PropertyConfig[] = [
     meters: [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-FIG-001", splitMethod: "sqft" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-FIG-001", splitMethod: "equal" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-FIG-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-FIG-001", splitMethod: "equal" },
     ],
   },
   {
@@ -163,17 +163,17 @@ const PROPERTIES: PropertyConfig[] = [
       { meterType: "water", meteringMethod: "master", meterId: "WTR-28TH-001", splitMethod: "sqft" },
       { meterType: "gas", meteringMethod: "master", meterId: "GAS-28TH-001", splitMethod: "sqft" },
       { meterType: "electric", meteringMethod: "master", meterId: "ELEC-28TH-001", splitMethod: "occupancy" },
-      { meterType: "trash", meteringMethod: "master", meterId: "TRS-28TH-001", splitMethod: "equal" },
+      { meterType: "sewer", meteringMethod: "master", meterId: "SWR-28TH-001", splitMethod: "equal" },
     ],
   },
 ];
 
 // ─── Sample bill amounts (realistic LA utility costs) ──────────
-// Monthly ranges: Water $400-900, Gas $200-600, Electric $300-800, Trash $150-300
+// Monthly ranges: Water $400-900, Gas $200-600, Electric $300-800, Sewer $150-300
 const BILL_AMOUNTS: Record<string, Record<string, number>> = {
-  "2026-01": { water: 680, gas: 420, electric: 540, trash: 210 },
-  "2026-02": { water: 720, gas: 380, electric: 490, trash: 210 },
-  "2026-03": { water: 650, gas: 350, electric: 520, trash: 210 },
+  "2026-01": { water: 680, gas: 420, electric: 540, sewer: 210 },
+  "2026-02": { water: 720, gas: 380, electric: 490, sewer: 210 },
+  "2026-03": { water: 650, gas: 350, electric: 520, sewer: 210 },
 };
 
 function generateBillAmount(baseCost: number, unitCount: number): number {

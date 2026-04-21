@@ -45,6 +45,7 @@ export default function RubsPage() {
   const [selected, setSelected] = useState<RubsBill | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [loading, setLoading] = useState(true);
   const [seeded, setSeeded] = useState(true);
   const [filterMonth, setFilterMonth] = useState("");
@@ -273,10 +274,16 @@ export default function RubsPage() {
             Settings
           </Link>
           <button
-            onClick={() => { setShowImport(!showImport); setShowCreateForm(false); }}
+            onClick={() => { setShowImport(!showImport); setShowCreateForm(false); setShowExport(false); }}
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
             {showImport ? "Cancel Import" : "Import Bills"}
+          </button>
+          <button
+            onClick={() => { setShowExport(!showExport); setShowImport(false); setShowCreateForm(false); }}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            {showExport ? "Cancel Export" : "Export to AppFolio"}
           </button>
           {bills.filter((b) => b.status === "draft").length > 0 && (
             <button
@@ -288,7 +295,7 @@ export default function RubsPage() {
             </button>
           )}
           <button
-            onClick={() => { setShowCreateForm(!showCreateForm); setShowImport(false); }}
+            onClick={() => { setShowCreateForm(!showCreateForm); setShowImport(false); setShowExport(false); }}
             className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
           >
             {showCreateForm ? "Cancel" : "+ New Bill"}
@@ -377,6 +384,15 @@ export default function RubsPage() {
             setBills((prev) => [...prev, ...newBills]);
             setShowImport(false);
           }}
+        />
+      )}
+
+      {/* Export All Flow */}
+      {showExport && (
+        <ExportAllPanel
+          bills={bills}
+          occupancy={occupancy}
+          aliases={aliases}
         />
       )}
 
@@ -579,7 +595,7 @@ function CreateBillForm({
           >
             {(availableMeters.length > 0
               ? availableMeters
-              : (["water", "gas", "electric", "trash"] as MeterType[])
+              : (["water", "gas", "electric", "sewer"] as MeterType[])
             ).map((t) => (
               <option key={t} value={t}>{METER_TYPE_LABELS[t]}</option>
             ))}
@@ -839,6 +855,16 @@ function ImportBillsFlow({
   const [error, setError] = useState("");
   const [showCoworkInstructions, setShowCoworkInstructions] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
+
+  function inBillingPeriod(p: ParsedBill): boolean {
+    if (!periodFrom && !periodTo) return true;
+    if (!p.billingPeriod) return false;
+    if (periodFrom && p.billingPeriod < periodFrom) return false;
+    if (periodTo && p.billingPeriod > periodTo) return false;
+    return true;
+  }
 
   async function scanFolder() {
     setScanLoading(true);
@@ -904,7 +930,9 @@ function ImportBillsFlow({
   }
 
   async function handleSaveImported() {
-    const validBills = parsedBills.filter((p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod);
+    const validBills = parsedBills.filter(
+      (p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod && inBillingPeriod(p),
+    );
     const newBills: RubsBill[] = [];
     for (const p of validBills) {
       const mapping = mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
@@ -1089,15 +1117,51 @@ function ImportBillsFlow({
   }
 
   // ─── Preview Step ───────────────────────────────────────
-  const validCount = parsedBills.filter((p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod).length;
+  const validCount = parsedBills.filter(
+    (p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod && inBillingPeriod(p),
+  ).length;
+  const outOfPeriodCount = parsedBills.filter((p) => p.billingPeriod && !inBillingPeriod(p)).length;
 
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
-      <div className="p-5 border-b border-border">
-        <h2 className="font-semibold">Review Extracted Bills ({parsedBills.length} found)</h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          Verify and edit the extracted data before importing. Rows with missing property matches will be skipped.
-        </p>
+      <div className="p-5 border-b border-border space-y-3">
+        <div>
+          <h2 className="font-semibold">Review Extracted Bills ({parsedBills.length} found)</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Verify and edit the extracted data before importing. Rows with missing property matches or outside the billing period will be skipped.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-medium">Billing Period:</span>
+          <input
+            type="month"
+            value={periodFrom}
+            onChange={(e) => setPeriodFrom(e.target.value)}
+            className="text-xs border border-border rounded px-2 py-1"
+            placeholder="From"
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input
+            type="month"
+            value={periodTo}
+            onChange={(e) => setPeriodTo(e.target.value)}
+            className="text-xs border border-border rounded px-2 py-1"
+            placeholder="To"
+          />
+          {(periodFrom || periodTo) && (
+            <button
+              onClick={() => { setPeriodFrom(""); setPeriodTo(""); }}
+              className="text-xs text-accent hover:underline"
+            >
+              Clear
+            </button>
+          )}
+          {outOfPeriodCount > 0 && (
+            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+              {outOfPeriodCount} bill{outOfPeriodCount !== 1 ? "s" : ""} outside this range — will be skipped
+            </span>
+          )}
+        </div>
       </div>
       {parsedBills.length > 0 ? (
         <div className="overflow-x-auto">
@@ -1116,8 +1180,10 @@ function ImportBillsFlow({
             <tbody>
               {parsedBills.map((p, i) => {
                 const hasMatch = Boolean(p.matchedProperty);
+                const outOfPeriod = Boolean(p.billingPeriod) && !inBillingPeriod(p);
+                const rowBg = outOfPeriod ? "bg-slate-100 opacity-60" : !hasMatch ? "bg-amber-50" : "";
                 return (
-                  <tr key={i} className={`border-b border-border last:border-0 ${!hasMatch ? "bg-amber-50" : ""}`}>
+                  <tr key={i} className={`border-b border-border last:border-0 ${rowBg}`}>
                     <td className="px-4 py-2 text-xs text-muted-foreground max-w-32 truncate">{p.sourceFile}</td>
                     <td className="px-4 py-2 text-muted-foreground">{p.utilityProvider}</td>
                     <td className="px-4 py-2">
@@ -1197,6 +1263,186 @@ function ImportBillsFlow({
 
 // ─── AppFolio Export Panel ────────────────────────────────────
 
+// ─── Export All Panel (top-level /rubs export) ────────────────
+
+function ExportAllPanel({
+  bills,
+  occupancy,
+  aliases,
+}: {
+  bills: RubsBill[];
+  occupancy: OccupancyData | null;
+  aliases: PropertyAlias[];
+}) {
+  const ALL_TYPES: MeterType[] = ["water", "gas", "electric", "sewer"];
+  const postable = bills.filter((b) => b.status === "calculated" || b.status === "posted");
+  const months = Array.from(new Set(postable.map((b) => b.month))).sort().reverse();
+
+  const [month, setMonth] = useState(months[0] ?? "");
+  const [selected, setSelected] = useState<Set<MeterType>>(new Set(ALL_TYPES));
+
+  const monthBills = postable.filter((b) => b.month === month);
+  const recon = reconcile(monthBills, occupancy, aliases);
+
+  function toggle(t: MeterType) {
+    const next = new Set(selected);
+    if (next.has(t)) next.delete(t);
+    else next.add(t);
+    setSelected(next);
+  }
+
+  function triggerDownload(csv: string, filename: string) {
+    const blob = new Blob([csv], { type: "text/tab-separated-values" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadSeparate() {
+    if (!occupancy) return;
+    let count = 0;
+    for (const t of ALL_TYPES) {
+      if (!selected.has(t)) continue;
+      const { csv, rows } = generateAppFolioExport(monthBills, t, occupancy, month, aliases);
+      if (rows.length === 0) continue;
+      triggerDownload(csv, `appfolio-${t}-${month}.tsv`);
+      count++;
+    }
+    if (count === 0) alert("No calculated bills match the selected utilities for this month.");
+  }
+
+  function downloadCombined() {
+    if (!occupancy) return;
+    const headers = ["Property Name", "Unit Name", "Occupancy UID", "Tenant Name", "Occupancy ID", "Amount", "Description"];
+    const lines: string[] = [headers.join("\t")];
+    let rowCount = 0;
+    for (const t of ALL_TYPES) {
+      if (!selected.has(t)) continue;
+      const { rows } = generateAppFolioExport(monthBills, t, occupancy, month, aliases);
+      for (const r of rows) {
+        lines.push([r.propertyName, r.unitName, r.occupancyUid, r.tenantName, r.occupancyId, r.amount, r.description].join("\t"));
+        rowCount++;
+      }
+    }
+    if (rowCount === 0) { alert("No rows to export."); return; }
+    triggerDownload(lines.join("\n"), `appfolio-combined-${month}.tsv`);
+  }
+
+  const perUtility = ALL_TYPES.map((t) => {
+    const tBills = monthBills.filter((b) => b.meterType === t);
+    return {
+      type: t,
+      billCount: tBills.length,
+      total: tBills.reduce((s, b) => s + b.totalAmount, 0),
+    };
+  });
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border">
+        <h2 className="font-semibold">Export to AppFolio</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Pick a billing month and which utilities to include. Download one combined file or a separate file per utility.
+        </p>
+      </div>
+
+      <div className="p-5 space-y-4">
+        {!occupancy && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            No AppFolio template loaded. Upload the Bulk Charges template at the top of the RUBs page first.
+          </div>
+        )}
+
+        {months.length === 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+            No calculated bills available to export. Calculate bills first.
+          </div>
+        )}
+
+        {months.length > 0 && (
+          <>
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium">Billing Month:</label>
+              <select
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                {months.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <span className="text-xs text-muted-foreground">
+                {monthBills.length} bill{monthBills.length !== 1 ? "s" : ""} in this month
+              </span>
+            </div>
+
+            <div>
+              <p className="text-sm font-medium mb-2">Utilities to include:</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {perUtility.map(({ type, billCount, total }) => (
+                  <label
+                    key={type}
+                    className={`flex items-center gap-2 border rounded-lg px-3 py-2 text-sm cursor-pointer ${
+                      selected.has(type) ? "border-accent bg-accent/5" : "border-border"
+                    } ${billCount === 0 ? "opacity-50" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(type)}
+                      onChange={() => toggle(type)}
+                      disabled={billCount === 0}
+                    />
+                    <span className="font-medium">{METER_TYPE_LABELS[type]}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {billCount > 0 ? `${billCount} · $${total.toFixed(0)}` : "—"}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {occupancy && (
+              <div className="flex items-center gap-6 text-sm">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 bg-green-500 rounded-full" />
+                  {recon.matchedCount} matched
+                </span>
+                {recon.unmatchedAllocations.length > 0 && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 bg-red-500 rounded-full" />
+                    {recon.unmatchedAllocations.length} unmatched
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={downloadCombined}
+                disabled={!occupancy || selected.size === 0}
+                className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+              >
+                Download Combined TSV
+              </button>
+              <button
+                onClick={downloadSeparate}
+                disabled={!occupancy || selected.size === 0}
+                className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                Download One File per Utility
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppFolioExportPanel({
   bill,
   bills,
@@ -1243,7 +1489,7 @@ function AppFolioExportPanel({
 
   function downloadAllUtilities() {
     if (!occupancy) return;
-    const types: MeterType[] = ["water", "gas", "electric", "trash"];
+    const types: MeterType[] = ["water", "gas", "electric", "sewer"];
     let downloadCount = 0;
     for (const type of types) {
       const { csv, rows } = generateAppFolioExport(bills, type, occupancy, bill.month, aliases);

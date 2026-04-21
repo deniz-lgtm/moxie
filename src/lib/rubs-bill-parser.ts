@@ -152,6 +152,6 @@ function normalizeMeterType(raw?: string): MeterType {
   const lower = raw.toLowerCase();
   if (lower.includes("gas")) return "gas";
   if (lower.includes("electric") || lower.includes("power") || lower.includes("kwh")) return "electric";
-  if (lower.includes("trash") || lower.includes("refuse") || lower.includes("waste")) return "trash";
+  if (lower.includes("sewer") || lower.includes("sewage") || lower.includes("wastewater")) return "sewer";
   return "water";
 }
