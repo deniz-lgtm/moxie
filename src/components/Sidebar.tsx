@@ -95,7 +95,10 @@ const navItems: NavItem[] = [
     ],
   },
   { label: "Capital Projects", href: "/capital-projects", icon: HardHat, category: "Asset Management" },
-  { label: "Notices", href: "/notices", icon: Bell, category: "Leasing & Operations" },
+
+  // Communications
+  { label: "Meetings", href: "/meetings", icon: Calendar, category: "Communications" },
+  { label: "Notices", href: "/notices", icon: Bell, category: "Communications" },
   {
     label: "Marketing",
     href: "/marketing",
@@ -113,9 +116,10 @@ const navItems: NavItem[] = [
 const categoryOrder = [
   "Primary",
   "Leasing & Operations",
-  "Property Management", 
+  "Property Management",
   "Revenue & Finance",
   "Asset Management",
+  "Communications",
   "Admin"
 ];
 

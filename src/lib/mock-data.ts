@@ -217,6 +217,18 @@ export const apps: AppConfig[] = [
   },
   // --- Communications ---
   {
+    id: "meetings",
+    name: "Meetings",
+    description: "Weekly property meetings with live transcription, AI-extracted action items, comments, and attachments — carry-over tasks surface automatically at the next meeting",
+    href: "/meetings",
+    icon: "Calendar",
+    category: "communications",
+    categoryLabel: "Communications",
+    categoryColor: "rose",
+    roles: ["property_manager", "asset_manager", "owner"],
+    isBuilt: true,
+  },
+  {
     id: "notices",
     name: "Tenant Notices",
     description: "Draft and send lease violation notices, rent reminders, and building-wide announcements",
