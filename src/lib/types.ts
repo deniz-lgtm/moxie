@@ -192,6 +192,8 @@ export interface MaintenanceRequest {
   createdAt: string;
   updatedAt: string;
   appfolioWorkOrderId?: string;
+  /** Moxie-side follow-up date from work_order_annotations.follow_up_on. */
+  followUpOn?: string;
 }
 
 // --- Leasing: Applications ---
