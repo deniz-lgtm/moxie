@@ -318,12 +318,9 @@ export function vendorToNotionProps(
   // Insurance expiry → date property
   const insurance = resolve(VENDOR_FIELD_ALIASES.insurance_expiry);
   if (insurance && insurance.type === "date") {
-    out[insurance.key] = vendor.insuranceExpiry ? { date: { start: vendor.insuranceExpiry } } : { date: null };
-  }
-  // (backwards-compat: accept snake_case field name from raw DB vendor)
-  const insuranceSnake = (vendor as any).insurance_expiry as string | null | undefined;
-  if (insurance && insurance.type === "date" && insuranceSnake) {
-    out[insurance.key] = { date: { start: insuranceSnake } };
+    out[insurance.key] = vendor.insurance_expiry
+      ? { date: { start: vendor.insurance_expiry } }
+      : { date: null };
   }
 
   // Rating → number
