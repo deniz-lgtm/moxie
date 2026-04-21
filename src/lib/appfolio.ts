@@ -99,7 +99,7 @@ export async function getTenants(params?: { property_id?: string; status?: strin
 }
 
 // --- Work Orders ---
-// work_order_detail requires from_date and to_date (ISO 8601: YYYY-MM-DD)
+// work_order requires from_date and to_date (ISO 8601: YYYY-MM-DD)
 export async function getWorkOrders(params?: {
   property_id?: string;
   status?: string;
@@ -114,7 +114,7 @@ export async function getWorkOrders(params?: {
   fromDate.setFullYear(fromDate.getFullYear() - 1);
   body.from_date = params?.created_after || formatDate(fromDate);
   body.to_date = formatDate(toDate);
-  return appfolioFetchAll("/reports/work_order_detail.json", body);
+  return appfolioFetchAll("/reports/work_order.json", body);
 }
 
 function formatDate(d: Date): string {

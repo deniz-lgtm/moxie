@@ -83,12 +83,13 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
   if (!rows || rows.length === 0) return [];
   const moxieIds = await getMoxiePropertyIds();
   const filtered = rows.filter((row) => {
-    // Direct portfolio_id match (snake_case on most reports, PascalCase on work_order_detail)
-    const pid = String(row.portfolio_id ?? row.PortfolioId ?? "").trim();
+    // Direct portfolio_id match (present on rent_roll, property_directory, etc.)
+    const pid = String(row.portfolio_id ?? "").trim();
     if (pid === MOXIE_PORTFOLIO_ID) return true;
 
-    // Fallback: property_id membership (for rows with null portfolio_id)
-    const propId = String(row.property_id ?? row.PropertyId ?? "");
+    // Fallback: property_id membership — used by reports that don't carry
+    // portfolio_id, e.g. work_order.
+    const propId = String(row.property_id ?? "");
     if (propId && moxieIds.has(propId)) return true;
 
     return false;
@@ -97,8 +98,7 @@ async function filterToMoxie(rows: any[]): Promise<any[]> {
     console.warn(
       `[Moxie] filterToMoxie: 0/${rows.length} rows matched. ` +
       `Moxie property IDs: ${moxieIds.size}. ` +
-      `Sample: portfolio_id=${rows[0]?.portfolio_id ?? rows[0]?.PortfolioId}, ` +
-      `property_id=${rows[0]?.property_id ?? rows[0]?.PropertyId}`
+      `Sample: portfolio_id=${rows[0]?.portfolio_id}, property_id=${rows[0]?.property_id}`
     );
   }
   return filtered;
@@ -591,32 +591,32 @@ export async function fetchMaintenanceRequests(params?: {
   }
   const rows = await filterToMoxie(allRows || []);
   console.log(`[Moxie] Work orders after filter: ${rows.length} rows`);
+  // Field names map to AppFolio v2 `work_order` report schema (all snake_case).
   const requests: MaintenanceRequest[] = rows.map((wo: any, i: number) => ({
-    id: String(wo.WorkOrderId || wo.work_order_id || wo.Id || `wo-${i}`),
-    unitId: String(wo.UnitId || wo.unit_id || ""),
-    propertyId: String(wo.PropertyId || wo.property_id || ""),
-    unitNumber: String(
-      wo.UnitStreetAddress1 || wo["Unit Street Address 1"] || wo.Unit || wo.unit_name || wo.UnitName || ""
-    ),
-    propertyName: String(wo.PropertyName || wo.property_name || ""),
-    tenantName: String(wo.TenantName || wo.tenant_name || wo.Tenant || "—"),
-    tenantPhone: wo.TenantPhone || wo.tenant_phone || undefined,
-    tenantEmail: wo.TenantEmail || wo.tenant_email || undefined,
-    category: CATEGORY_MAP[String(wo.Category || wo.WorkOrderCategory || "general").toLowerCase()] || "general",
-    priority: PRIORITY_MAP[String(wo.Priority || "normal").toLowerCase()] || "medium",
-    status: STATUS_MAP[String(wo.Status || wo.WorkOrderStatus || "open").toLowerCase()] || "submitted",
-    title: String(wo.JobDescription || wo.Description || wo.Summary || "Work Order"),
-    description: String(wo.Detail || wo.JobDescription || wo.Description || ""),
+    id: String(wo.work_order_id || wo.work_order_number || `wo-${i}`),
+    unitId: String(wo.unit_id || ""),
+    propertyId: String(wo.property_id || ""),
+    unitNumber: String(wo.unit_name || wo.unit_address || ""),
+    propertyName: String(wo.property_name || ""),
+    tenantName: String(wo.primary_tenant || "—"),
+    tenantPhone: wo.primary_tenant_phone_number || undefined,
+    tenantEmail: wo.primary_tenant_email || undefined,
+    category: CATEGORY_MAP[String(wo.work_order_type || "general").toLowerCase()] || "general",
+    priority: PRIORITY_MAP[String(wo.priority || "normal").toLowerCase()] || "medium",
+    status: STATUS_MAP[String(wo.status || "open").toLowerCase()] || "submitted",
+    title: String(wo.job_description || wo.service_request_description || `Work Order #${wo.work_order_number || ""}`),
+    description: String(wo.instructions || wo.service_request_description || wo.job_description || ""),
     photos: [],
-    assignedTo: wo.AssignedTo || wo.AssignedUsers || undefined,
-    vendor: wo.VendorName || wo.Vendor || undefined,
-    estimatedCost: wo.EstimatedCost ? Number(wo.EstimatedCost) : undefined,
-    actualCost: wo.ActualCost || wo.TotalCost ? Number(wo.ActualCost || wo.TotalCost) : undefined,
-    scheduledDate: wo.ScheduledEnd || wo.ScheduledDate || wo.DueDate || undefined,
-    completedDate: wo.CompletedOn || wo.CompletedDate || undefined,
-    notes: [],
-    createdAt: wo.CreatedAt || wo.CreatedDate || new Date().toISOString(),
-    updatedAt: wo.UpdatedAt || wo.LastUpdated || new Date().toISOString(),
+    assignedTo: wo.assigned_user || undefined,
+    vendor: wo.vendor || undefined,
+    estimatedCost: wo.estimate_amount ? Number(wo.estimate_amount) : undefined,
+    actualCost: wo.amount ? Number(wo.amount) : undefined,
+    scheduledDate: wo.scheduled_end || wo.scheduled_start || undefined,
+    completedDate: wo.completed_on || wo.work_completed_on || undefined,
+    notes: wo.status_notes ? [String(wo.status_notes)] : [],
+    createdAt: wo.created_at || new Date().toISOString(),
+    updatedAt: wo.created_at || new Date().toISOString(),
+    appfolioWorkOrderId: wo.work_order_id ? String(wo.work_order_id) : undefined,
   }));
   return { data: requests, source: "appfolio" };
 }
