@@ -603,6 +603,36 @@ const STATUS_MAP: Record<string, MaintenanceStatus> = {
   resolved: "closed",
 };
 
+/** Truncate to the first N words; strip trailing punctuation and add an ellipsis. */
+function summarizeText(text: string, maxWords = 12): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  const words = clean.split(/\s+/);
+  if (words.length <= maxWords) return clean;
+  return words.slice(0, maxWords).join(" ").replace(/[,;:.]$/, "") + "…";
+}
+
+/**
+ * Decide a scannable heading for a work order.
+ * - Prefer `job_description` if it's already a short PM-written summary and
+ *   meaningfully different from the body text.
+ * - Otherwise summarize the body text (what the tenant/submitter wrote) to
+ *   roughly 12 words so the card heading stays glanceable.
+ */
+function workOrderTitle(jobDescription: string, description: string, workOrderNumber: string): string {
+  const jd = jobDescription.trim();
+  const jdWordCount = jd ? jd.split(/\s+/).length : 0;
+  const normalize = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const jdIsConciseSummary =
+    jd.length > 0 &&
+    jd.length <= 80 &&
+    jdWordCount <= 14 &&
+    normalize(jd) !== normalize(description);
+  if (jdIsConciseSummary) return jd;
+  if (description) return summarizeText(description, 12);
+  return `Work Order #${workOrderNumber}`;
+}
+
 /**
  * Map a single AppFolio `work_order` row (snake_case JSON from the
  * Reports API) to the internal `MaintenanceRequest` shape. Exported so
@@ -622,8 +652,18 @@ export function mapWorkOrderRow(wo: Record<string, any>, index = 0): Maintenance
     category: categorizeWorkOrderType(wo.work_order_type),
     priority: PRIORITY_MAP[String(wo.priority || "normal").toLowerCase()] || "medium",
     status: STATUS_MAP[String(wo.status || "open").toLowerCase()] || "submitted",
-    title: String(wo.job_description || wo.service_request_description || `Work Order #${wo.work_order_number || ""}`),
-    description: String(wo.instructions || wo.service_request_description || wo.job_description || ""),
+    // Body: the verbatim text the tenant / submitter wrote. Prefer
+    // service_request_description, then instructions, then job_description.
+    description: String(
+      wo.service_request_description || wo.instructions || wo.job_description || ""
+    ),
+    // Heading: a scannable summary. Computed below so it can reference the
+    // resolved description.
+    title: workOrderTitle(
+      String(wo.job_description || ""),
+      String(wo.service_request_description || wo.instructions || wo.job_description || ""),
+      String(wo.work_order_number || "")
+    ),
     photos: [],
     assignedTo: wo.assigned_user || undefined,
     vendor: wo.vendor || undefined,
