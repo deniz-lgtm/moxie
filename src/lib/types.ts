@@ -203,6 +203,8 @@ export interface Vendor {
   id: string;
   name: string;
   category?: string;
+  /** Free-form description of what the vendor does — e.g. "drain cleaning, water heaters". */
+  scope?: string;
   phone?: string;
   email?: string;
   website?: string;

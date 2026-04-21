@@ -224,6 +224,7 @@ export type DbVendor = {
   id: string;
   name: string;
   category: string | null;
+  scope: string | null;
   phone: string | null;
   email: string | null;
   website: string | null;

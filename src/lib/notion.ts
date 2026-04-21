@@ -203,7 +203,8 @@ function readProp(prop: any): string | number | boolean | null {
 }
 
 const VENDOR_FIELD_ALIASES: Record<string, string[]> = {
-  category: ["Category", "Type", "Trade", "Vendor Type", "Service"],
+  category: ["Category", "Type", "Trade", "Vendor Type"],
+  scope: ["Scope", "Services", "Specialties", "Skills", "Scope of Work", "Service"],
   phone: ["Phone", "Phone Number", "Contact Phone"],
   email: ["Email", "Contact Email"],
   website: ["Website", "URL", "Site"],
@@ -222,6 +223,7 @@ export type NotionVendorFields = {
   notion_page_id: string;
   notion_last_edited: string;
   category: string | null;
+  scope: string | null;
   phone: string | null;
   email: string | null;
   website: string | null;
@@ -256,6 +258,7 @@ export function notionPageToVendor(page: any): NotionVendorFields | null {
     notion_page_id: page.id,
     notion_last_edited: page.last_edited_time,
     category: (get("category") as string | null) ?? null,
+    scope: (get("scope") as string | null) ?? null,
     phone: (get("phone") as string | null) ?? null,
     email: (get("email") as string | null) ?? null,
     website: (get("website") as string | null) ?? null,
@@ -285,6 +288,7 @@ export function vendorToNotionProps(
   vendor: {
     name: string;
     category?: string | null;
+    scope?: string | null;
     phone?: string | null;
     email?: string | null;
     website?: string | null;
@@ -340,6 +344,7 @@ export function vendorToNotionProps(
   };
 
   setString(VENDOR_FIELD_ALIASES.category, vendor.category ?? null);
+  setString(VENDOR_FIELD_ALIASES.scope, vendor.scope ?? null);
   setString(VENDOR_FIELD_ALIASES.phone, vendor.phone ?? null);
   setString(VENDOR_FIELD_ALIASES.email, vendor.email ?? null);
   setString(VENDOR_FIELD_ALIASES.website, vendor.website ?? null);
