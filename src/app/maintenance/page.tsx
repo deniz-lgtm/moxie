@@ -162,14 +162,14 @@ export default function MaintenancePage() {
           &larr; Back to Maintenance
         </button>
 
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{selected.title}</h1>
-            <p className="text-muted-foreground mt-1">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold break-words">{selected.title}</h1>
+            <p className="text-muted-foreground mt-1 break-words">
               {selected.propertyName} #{selected.unitNumber} &middot; {selected.tenantName}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
             <StatusBadge value={selected.priority} />
             <StatusBadge value={selected.status} />
           </div>
@@ -292,7 +292,7 @@ export default function MaintenancePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Maintenance Requests</h1>
           <p className="text-muted-foreground mt-1">
@@ -300,12 +300,12 @@ export default function MaintenancePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">
+          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium whitespace-nowrap">
             Live from AppFolio
           </span>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors whitespace-nowrap"
           >
             {showCreateForm ? "Cancel" : "+ New Request"}
           </button>
@@ -397,7 +397,7 @@ export default function MaintenancePage() {
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
-          className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          className="flex-1 sm:flex-initial text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">All Statuses</option>
           {STATUS_OPTIONS.map((s) => (
@@ -409,7 +409,7 @@ export default function MaintenancePage() {
         <select
           value={filterPriority}
           onChange={(e) => setFilterPriority(e.target.value)}
-          className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          className="flex-1 sm:flex-initial text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">All Priorities</option>
           <option value="emergency">Emergency</option>
@@ -433,32 +433,28 @@ export default function MaintenancePage() {
             <button
               key={req.id}
               onClick={() => setSelected(req)}
-              className="w-full text-left bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow cursor-pointer"
+              className="w-full text-left bg-card rounded-xl border border-border p-4 sm:p-5 hover:shadow-md transition-shadow cursor-pointer"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold truncate">{req.title}</h3>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
-                  </p>
-                  <p className="text-sm text-muted-foreground mt-1 truncate">
-                    {req.description}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 ml-4 shrink-0">
-                  <StatusBadge value={req.priority} />
-                  <StatusBadge value={req.status} />
-                </div>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <StatusBadge value={req.priority} />
+                <StatusBadge value={req.status} />
+                <span className="text-xs text-muted-foreground capitalize ml-auto">{req.category}</span>
               </div>
-              <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-                <span className="capitalize">{req.category}</span>
-                <div className="flex items-center gap-3">
+              <h3 className="font-semibold break-words">{req.title}</h3>
+              <p className="text-sm text-muted-foreground mt-1 break-words">
+                {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
+              </p>
+              {req.description && (
+                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                  {req.description}
+                </p>
+              )}
+              {(req.assignedTo || req.scheduledDate) && (
+                <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   {req.assignedTo && <span>Assigned: {req.assignedTo}</span>}
                   {req.scheduledDate && <span>Scheduled: {req.scheduledDate}</span>}
                 </div>
-              </div>
+              )}
             </button>
           ))}
         </div>
