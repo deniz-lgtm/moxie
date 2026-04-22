@@ -52,6 +52,24 @@ export interface Unit {
   appfolioId?: string;
 }
 
+// A unit that has no lease covering a given target date. Produced by
+// `fetchVacanciesOnDate` in lib/data.ts; consumed by the meetings agenda
+// to answer "which units will be empty on 2026-08-15?"
+export interface VacantUnit {
+  unitId: string;
+  unitName: string;
+  propertyId: string | null;
+  propertyName: string;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  sqft: number | null;
+  rent: string | number | null;
+  lastTenant: string | null;
+  lastLeaseTo: string | null;
+  nextLeaseFrom: string | null;
+  daysVacantOnTarget: number | null;
+}
+
 // --- Inspections ---
 export type InspectionType = "move_in" | "move_out" | "onboarding" | "quarterly" | "punch_list";
 export type InspectionStatus = "not_started" | "draft" | "walking" | "ai_review" | "team_review" | "completed";
