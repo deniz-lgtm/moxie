@@ -196,13 +196,17 @@ export default function PortfolioPage() {
     const asOfMs = new Date(asOfDate).getTime();
     const yearStart = new Date(new Date(asOfDate).getFullYear(), 0, 1).getTime();
     const openWoStatuses = new Set(["submitted", "assigned", "in_progress", "awaiting_parts"]);
+    // If coveredUnitIds hasn't populated yet (initial load, vacancy fetch
+    // still in flight, or it failed and returned []), don't pretend every
+    // unit is under construction — fall back to treating all units as
+    // covered. Real "under construction" is only meaningful once we have
+    // an actual rent-roll-derived covered set to compare against.
+    const haveCoverage = coveredUnitIds.size > 0;
     return properties.map((p) => {
       const propUnits = units.filter((u) => u.propertyId === p.id);
-      // A unit is considered "leaseable" if it has any presence on the
-      // rent roll (coveredUnitIds). Units without rent-roll history
-      // are under construction / pre-onboarding — don't count them
-      // toward either occupied or unleased.
-      const leaseableUnits = propUnits.filter((u) => coveredUnitIds.has(u.id));
+      const leaseableUnits = haveCoverage
+        ? propUnits.filter((u) => coveredUnitIds.has(u.id))
+        : propUnits;
       const underConstruction = propUnits.length - leaseableUnits.length;
       const occupiedUnits = leaseableUnits.filter((u) => !vacantUnitIds.has(u.id));
       const occupied = occupiedUnits.length;
