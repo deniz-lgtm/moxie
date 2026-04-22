@@ -36,7 +36,20 @@ type PropertySummary = {
   occupied: number;
   vacant: number;
   notice: number;
-  occupancyRate: number;
+  /**
+   * Units in AppFolio that have NO rent-roll row at all. Treated as
+   * "not yet leaseable" (under construction / data gap) and kept out
+   * of the occupancy denominator so a brand-new empty building
+   * doesn't score 100 % occupied.
+   */
+  underConstruction: number;
+  /** occupied + vacant; the denominator used for occupancyRate. */
+  leaseable: number;
+  /**
+   * Percent occupied of the *leaseable* stock. `null` when leaseable
+   * is 0 (every unit is still under construction / has no history).
+   */
+  occupancyRate: number | null;
   totalMonthlyRent: number;
   avgRent: number;
   totalSqft: number;
@@ -91,6 +104,11 @@ export default function PortfolioPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [vacantUnitIds, setVacantUnitIds] = useState<Set<string>>(new Set());
+  // Unit IDs that show up on the rent roll at all. Anything in the
+  // app's unit list but NOT here has no rent-roll history yet (likely
+  // under construction) — we surface those separately and keep them
+  // out of the occupancy denominator.
+  const [coveredUnitIds, setCoveredUnitIds] = useState<Set<string>>(new Set());
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
   const [capitalProjects, setCapitalProjects] = useState<CapitalProject[]>([]);
   const [attributes, setAttributes] = useState<Record<string, PropertyAttribute>>({});
@@ -158,9 +176,13 @@ export default function PortfolioPage() {
         setVacantUnitIds(
           new Set((j.vacancies as VacantUnit[] | undefined)?.map((v) => v.unitId) ?? [])
         );
+        setCoveredUnitIds(new Set((j.coveredUnitIds as string[] | undefined) ?? []));
       })
       .catch(() => {
-        if (!cancelled) setVacantUnitIds(new Set());
+        if (!cancelled) {
+          setVacantUnitIds(new Set());
+          setCoveredUnitIds(new Set());
+        }
       })
       .finally(() => {
         if (!cancelled) setVacancyLoading(false);
@@ -176,9 +198,16 @@ export default function PortfolioPage() {
     const openWoStatuses = new Set(["submitted", "assigned", "in_progress", "awaiting_parts"]);
     return properties.map((p) => {
       const propUnits = units.filter((u) => u.propertyId === p.id);
-      const occupiedUnits = propUnits.filter((u) => !vacantUnitIds.has(u.id));
+      // A unit is considered "leaseable" if it has any presence on the
+      // rent roll (coveredUnitIds). Units without rent-roll history
+      // are under construction / pre-onboarding — don't count them
+      // toward either occupied or unleased.
+      const leaseableUnits = propUnits.filter((u) => coveredUnitIds.has(u.id));
+      const underConstruction = propUnits.length - leaseableUnits.length;
+      const occupiedUnits = leaseableUnits.filter((u) => !vacantUnitIds.has(u.id));
       const occupied = occupiedUnits.length;
-      const vacant = propUnits.length - occupied;
+      const vacant = leaseableUnits.length - occupied;
+      const leaseable = leaseableUnits.length;
       const notice = propUnits.filter((u) => u.status === "notice").length;
       const totalRent = occupiedUnits.reduce((s, u) => s + (Number(u.rent) || 0), 0);
       const totalSqft = occupiedUnits.reduce((s, u) => s + (u.sqft || 0), 0);
@@ -229,8 +258,9 @@ export default function PortfolioPage() {
         occupied,
         vacant,
         notice,
-        occupancyRate:
-          propUnits.length > 0 ? Math.round((occupied / propUnits.length) * 100) : 0,
+        underConstruction,
+        leaseable,
+        occupancyRate: leaseable > 0 ? Math.round((occupied / leaseable) * 100) : null,
         totalMonthlyRent: totalRent,
         avgRent,
         totalSqft,
@@ -267,7 +297,8 @@ export default function PortfolioPage() {
         case "units":
           return s.units.length;
         case "occupancy":
-          return s.occupancyRate;
+          // Push null (under-construction-only) to the end of asc sort.
+          return s.occupancyRate ?? Number.POSITIVE_INFINITY;
         case "vacant":
           return s.vacant;
         case "rent":
@@ -308,14 +339,22 @@ export default function PortfolioPage() {
   const totals = useMemo(() => {
     const totalUnits = summaries.reduce((s, p) => s + p.units.length, 0);
     const totalOccupied = summaries.reduce((s, p) => s + p.occupied, 0);
-    const totalRent = summaries.reduce((s, p) => s + p.totalMonthlyRent, 0);
     const totalVacant = summaries.reduce((s, p) => s + p.vacant, 0);
+    const totalUnderConstruction = summaries.reduce((s, p) => s + p.underConstruction, 0);
+    const totalLeaseable = summaries.reduce((s, p) => s + p.leaseable, 0);
+    const totalRent = summaries.reduce((s, p) => s + p.totalMonthlyRent, 0);
     return {
       totalUnits,
       totalOccupied,
       totalVacant,
+      totalUnderConstruction,
+      totalLeaseable,
       totalRent,
-      occupancy: totalUnits > 0 ? Math.round((totalOccupied / totalUnits) * 100) : 0,
+      // Occupancy is measured against leaseable units only; a fleet of
+      // under-construction units doesn't depress it. Null when nothing
+      // on the rent roll yet (all properties pre-leaseable).
+      occupancy:
+        totalLeaseable > 0 ? Math.round((totalOccupied / totalLeaseable) * 100) : null,
     };
   }, [summaries]);
 
@@ -497,11 +536,19 @@ export default function PortfolioPage() {
       {/* Portfolio totals */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <KpiCard label="Properties" value={summaries.length} />
-        <KpiCard label="Total Units" value={totals.totalUnits} />
+        <KpiCard
+          label="Total Units"
+          value={totals.totalUnits}
+          hint={
+            totals.totalUnderConstruction > 0
+              ? `${totals.totalLeaseable} leaseable · ${totals.totalUnderConstruction} under construction`
+              : undefined
+          }
+        />
         <KpiCard
           label="Occupancy"
-          value={`${totals.occupancy}%`}
-          hint={`${totals.totalOccupied} of ${totals.totalUnits}`}
+          value={totals.occupancy == null ? "—" : `${totals.occupancy}%`}
+          hint={`${totals.totalOccupied} of ${totals.totalLeaseable} leaseable`}
         />
         <KpiCard label="Unleased" value={totals.totalVacant} accent="red" />
         <KpiCard
@@ -1184,11 +1231,13 @@ function PropertyTable({
           <tbody>
             {summaries.map((s) => {
               const occColor =
-                s.occupancyRate >= 90
-                  ? "text-green-600"
-                  : s.occupancyRate >= 70
-                    ? "text-yellow-600"
-                    : "text-red-600";
+                s.occupancyRate == null
+                  ? "text-muted-foreground"
+                  : s.occupancyRate >= 90
+                    ? "text-green-600"
+                    : s.occupancyRate >= 70
+                      ? "text-yellow-600"
+                      : "text-red-600";
               return (
                 <tr
                   key={s.property.id}
@@ -1199,11 +1248,23 @@ function PropertyTable({
                     <div className="font-medium">{s.property.name}</div>
                     <div className="text-xs text-muted-foreground truncate max-w-sm">
                       {s.property.address}
+                      {s.underConstruction > 0 && (
+                        <span className="ml-2 text-[11px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                          {s.underConstruction} under construction
+                        </span>
+                      )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{s.units.length}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {s.units.length}
+                    {s.underConstruction > 0 && (
+                      <span className="text-[11px] text-amber-700 ml-1">
+                        ({s.leaseable} leaseable)
+                      </span>
+                    )}
+                  </td>
                   <td className={`px-4 py-3 text-right font-medium tabular-nums ${occColor}`}>
-                    {s.occupancyRate}%
+                    {s.occupancyRate == null ? "—" : `${s.occupancyRate}%`}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {s.vacant > 0 ? (
@@ -1284,14 +1345,16 @@ function PropertyCards({
             <div>
               <p
                 className={`text-lg font-bold ${
-                  s.occupancyRate >= 90
-                    ? "text-green-600"
-                    : s.occupancyRate >= 70
-                      ? "text-yellow-600"
-                      : "text-red-600"
+                  s.occupancyRate == null
+                    ? "text-muted-foreground"
+                    : s.occupancyRate >= 90
+                      ? "text-green-600"
+                      : s.occupancyRate >= 70
+                        ? "text-yellow-600"
+                        : "text-red-600"
                 }`}
               >
-                {s.occupancyRate}%
+                {s.occupancyRate == null ? "—" : `${s.occupancyRate}%`}
               </p>
               <p className="text-xs text-muted-foreground">Occupied</p>
             </div>
@@ -1301,16 +1364,24 @@ function PropertyCards({
             </div>
           </div>
 
+          {s.underConstruction > 0 && (
+            <p className="mt-2 text-[11px] text-amber-700">
+              {s.underConstruction} unit{s.underConstruction === 1 ? "" : "s"} under construction
+            </p>
+          )}
+
           <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full ${
-                s.occupancyRate >= 90
-                  ? "bg-green-500"
-                  : s.occupancyRate >= 70
-                    ? "bg-yellow-500"
-                    : "bg-red-500"
+                s.occupancyRate == null
+                  ? "bg-muted-foreground/30"
+                  : s.occupancyRate >= 90
+                    ? "bg-green-500"
+                    : s.occupancyRate >= 70
+                      ? "bg-yellow-500"
+                      : "bg-red-500"
               }`}
-              style={{ width: `${s.occupancyRate}%` }}
+              style={{ width: `${s.occupancyRate ?? 0}%` }}
             />
           </div>
 
@@ -1349,7 +1420,15 @@ function PropertyDetailView({
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <KpiCard label="Total Units" value={selected.units.length} />
-        <KpiCard label="Occupancy" value={`${selected.occupancyRate}%`} />
+        <KpiCard
+          label="Occupancy"
+          value={selected.occupancyRate == null ? "—" : `${selected.occupancyRate}%`}
+          hint={
+            selected.underConstruction > 0
+              ? `${selected.underConstruction} under construction · ${selected.leaseable} leaseable`
+              : undefined
+          }
+        />
         <KpiCard
           label="Monthly Rent"
           value={`$${selected.totalMonthlyRent.toLocaleString()}`}

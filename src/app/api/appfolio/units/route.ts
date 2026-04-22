@@ -30,8 +30,8 @@ export async function GET(request: Request) {
       const target = vacanciesOn
         ? vacanciesOn
         : academicYearDates(vacanciesAy as AcademicYear).leaseStart;
-      const { data, source } = await fetchVacanciesOnDate(target);
-      return NextResponse.json({ vacancies: data, target, source });
+      const { data, coveredUnitIds, source } = await fetchVacanciesOnDate(target);
+      return NextResponse.json({ vacancies: data, coveredUnitIds, target, source });
     }
     // Add ?debug=1 to see cross-reference diagnostics
     if (url.searchParams.get("debug")) {

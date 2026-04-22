@@ -715,7 +715,20 @@ async function fetchLeaseUniverse(): Promise<{
 
 export async function fetchVacanciesOnDate(
   targetDate: string
-): Promise<{ data: VacantUnit[]; target: string; source: "appfolio" }> {
+): Promise<{
+  data: VacantUnit[];
+  /**
+   * Unit IDs that have at least one rent-roll row (i.e. we have data
+   * for them). A portfolio unit that is NOT in this set has no rent
+   * roll presence at all — likely an under-construction unit or a
+   * data gap. The portfolio page uses this to distinguish "unleased"
+   * from "no history yet" so an empty brand-new building doesn't get
+   * reported as 100 % occupied just because nothing is vacant.
+   */
+  coveredUnitIds: string[];
+  target: string;
+  source: "appfolio";
+}> {
   const target = new Date(targetDate);
   if (isNaN(target.getTime())) {
     throw new Error(`Invalid targetDate: ${targetDate}`);
@@ -795,7 +808,12 @@ export async function fetchVacanciesOnDate(
     return pc !== 0 ? pc : a.unitName.localeCompare(b.unitName, undefined, { numeric: true });
   });
 
-  return { data: vacancies, target: targetDate, source: "appfolio" };
+  return {
+    data: vacancies,
+    coveredUnitIds: Array.from(leasesByUnit.keys()),
+    target: targetDate,
+    source: "appfolio",
+  };
 }
 
 // --- Work Orders / Maintenance ---
