@@ -121,20 +121,50 @@ function formatDate(d: Date): string {
   return d.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
+// --- GET fetcher for reports that don't accept POST body params ---
+// AppFolio's `unit_vacancy_detail` report does NOT honor filters posted
+// via JSON body (confirmed: passing `as_of_date` in the body returns an
+// empty set). The `/api/appfolio/debug` route successfully calls the
+// same report with GET + query params; we mirror that here.
+async function appfolioGet(endpoint: string, params?: Record<string, string>) {
+  const url = new URL(`${getBaseUrl()}${endpoint}`);
+  url.searchParams.set("paginate_results", "true");
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  const headers = getAuthHeaders();
+  const res = await fetch(url.toString(), { headers, next: { revalidate: 300 } });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`AppFolio API error ${res.status}: ${text.slice(0, 300)}`);
+  }
+  let data = await res.json();
+  let rows: any[] = data.results || [];
+  while (data.next_page_url) {
+    const np = await fetch(data.next_page_url, { headers });
+    if (!np.ok) break;
+    data = await np.json();
+    rows = rows.concat(data.results || []);
+  }
+  return rows;
+}
+
 // --- Unit Vacancy ---
 // unit_vacancy_detail is authoritative for "is this unit leased on DATE":
 // it accounts for FUTURE signed leases, unlike rent_roll which is a
 // point-in-time snapshot of the current tenant. The v2 report takes
-// `as_of_date` in MM/DD/YYYY format (confirmed via the /api/appfolio/debug
-// diagnostic route); we accept either ISO (YYYY-MM-DD) or the native format
-// and normalize.
+// `as_of_date` in MM/DD/YYYY format, and filters must be supplied as
+// query-string params rather than JSON body (POST body filters are
+// silently ignored on this report).
 export async function getVacancyReport(asOfDate?: string) {
-  const body: Record<string, string> = {};
+  const params: Record<string, string> = {};
   if (asOfDate) {
     const iso = asOfDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    body.as_of_date = iso ? `${iso[2]}/${iso[3]}/${iso[1]}` : asOfDate;
+    params.as_of_date = iso ? `${iso[2]}/${iso[3]}/${iso[1]}` : asOfDate;
   }
-  return appfolioFetchAll("/reports/unit_vacancy_detail.json", body);
+  return appfolioGet("/reports/unit_vacancy_detail.json", params);
 }
 
 // --- Rent Roll ---

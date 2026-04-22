@@ -562,6 +562,56 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
  * Used by the Monday meeting agenda to answer "which units will be vacant
  * on 2026-08-15".
  */
+/**
+ * Diagnostic: show what AppFolio's unit_vacancy_detail actually returns
+ * and how many rows survive the Moxie unit_id cross-reference. Use when
+ * the vacancy count is zero unexpectedly.
+ */
+export async function diagnoseVacancyFetch(targetDate: string) {
+  const [rawVacancy, rawRentRoll] = await Promise.all([
+    afGetVacancyReport(targetDate).catch((err) => ({ _error: err.message })),
+    afGetRentRoll().catch((err) => ({ _error: err.message })),
+  ]);
+
+  const vacancyList: any[] = Array.isArray(rawVacancy) ? rawVacancy : [];
+  const rentRollList: any[] = Array.isArray(rawRentRoll) ? rawRentRoll : [];
+
+  const moxieRentRoll = rentRollList.length > 0 ? await filterToMoxie(rentRollList) : [];
+  const moxieUnitIds = new Set(
+    moxieRentRoll.map((r: any) => String(r.unit_id || r.UnitId || "")).filter(Boolean)
+  );
+
+  const vacancyUnitIds = new Set(
+    vacancyList.map((v: any) => String(v.unit_id || v.UnitId || "")).filter(Boolean)
+  );
+  const matchedUnitIds = [...vacancyUnitIds].filter((id) => moxieUnitIds.has(id));
+
+  return {
+    target: targetDate,
+    vacancyReport: {
+      ok: Array.isArray(rawVacancy),
+      error: (rawVacancy as any)?._error ?? null,
+      rows: vacancyList.length,
+      sampleKeys: vacancyList.length > 0 ? Object.keys(vacancyList[0]).slice(0, 20) : [],
+      sampleRow: vacancyList.slice(0, 1),
+      uniqueUnitIds: vacancyUnitIds.size,
+    },
+    rentRoll: {
+      ok: Array.isArray(rawRentRoll),
+      error: (rawRentRoll as any)?._error ?? null,
+      rows: rentRollList.length,
+      moxieFilteredRows: moxieRentRoll.length,
+      moxieUnitIds: moxieUnitIds.size,
+    },
+    crossReference: {
+      matchedUnitIds: matchedUnitIds.length,
+      firstFiveMatched: matchedUnitIds.slice(0, 5),
+      firstFiveVacancyIds: [...vacancyUnitIds].slice(0, 5),
+      firstFiveMoxieIds: [...moxieUnitIds].slice(0, 5),
+    },
+  };
+}
+
 export async function fetchVacanciesOnDate(
   targetDate: string
 ): Promise<{ data: VacantUnit[]; target: string; source: "appfolio" }> {
