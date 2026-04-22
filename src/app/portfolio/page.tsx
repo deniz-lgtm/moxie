@@ -37,17 +37,12 @@ type PropertySummary = {
   vacant: number;
   notice: number;
   /**
-   * Units in AppFolio that have NO rent-roll row at all. Treated as
-   * "not yet leaseable" (under construction / data gap) and kept out
-   * of the occupancy denominator so a brand-new empty building
-   * doesn't score 100 % occupied.
-   */
-  underConstruction: number;
-  /** occupied + vacant; the denominator used for occupancyRate. */
-  leaseable: number;
-  /**
-   * Percent occupied of the *leaseable* stock. `null` when leaseable
-   * is 0 (every unit is still under construction / has no history).
+   * Occupancy on the as-of date: `occupied / total units`. A unit is
+   * occupied iff it has a rent-roll row with a covering lease on the
+   * target date. Everything else — vacant in the rent roll, or not in
+   * the rent roll at all (brand-new / under construction) — counts as
+   * unleased. `null` is rendered when a property has zero units, to
+   * avoid a divide-by-zero reading as either 0 % or 100 %.
    */
   occupancyRate: number | null;
   totalMonthlyRent: number;
@@ -196,22 +191,22 @@ export default function PortfolioPage() {
     const asOfMs = new Date(asOfDate).getTime();
     const yearStart = new Date(new Date(asOfDate).getFullYear(), 0, 1).getTime();
     const openWoStatuses = new Set(["submitted", "assigned", "in_progress", "awaiting_parts"]);
-    // If coveredUnitIds hasn't populated yet (initial load, vacancy fetch
-    // still in flight, or it failed and returned []), don't pretend every
-    // unit is under construction — fall back to treating all units as
-    // covered. Real "under construction" is only meaningful once we have
-    // an actual rent-roll-derived covered set to compare against.
-    const haveCoverage = coveredUnitIds.size > 0;
+    // A unit is OCCUPIED iff the vacancy endpoint says the rent roll has
+    // it AND it's not in the vacancy set (i.e. a lease currently covers
+    // the target date). Everything else — in the rent roll but unleased,
+    // or not in the rent roll at all (brand-new / under construction) —
+    // counts as unleased. Before the vacancy fetch resolves we don't yet
+    // know, so occupancy falls back to null (rendered as "—").
+    const haveCoverage = coveredUnitIds.size > 0 || vacantUnitIds.size > 0;
     return properties.map((p) => {
       const propUnits = units.filter((u) => u.propertyId === p.id);
-      const leaseableUnits = haveCoverage
-        ? propUnits.filter((u) => coveredUnitIds.has(u.id))
-        : propUnits;
-      const underConstruction = propUnits.length - leaseableUnits.length;
-      const occupiedUnits = leaseableUnits.filter((u) => !vacantUnitIds.has(u.id));
+      const occupiedUnits = haveCoverage
+        ? propUnits.filter(
+            (u) => coveredUnitIds.has(u.id) && !vacantUnitIds.has(u.id)
+          )
+        : [];
       const occupied = occupiedUnits.length;
-      const vacant = leaseableUnits.length - occupied;
-      const leaseable = leaseableUnits.length;
+      const vacant = propUnits.length - occupied;
       const notice = propUnits.filter((u) => u.status === "notice").length;
       const totalRent = occupiedUnits.reduce((s, u) => s + (Number(u.rent) || 0), 0);
       const totalSqft = occupiedUnits.reduce((s, u) => s + (u.sqft || 0), 0);
@@ -262,9 +257,10 @@ export default function PortfolioPage() {
         occupied,
         vacant,
         notice,
-        underConstruction,
-        leaseable,
-        occupancyRate: leaseable > 0 ? Math.round((occupied / leaseable) * 100) : null,
+        occupancyRate:
+          propUnits.length > 0 && haveCoverage
+            ? Math.round((occupied / propUnits.length) * 100)
+            : null,
         totalMonthlyRent: totalRent,
         avgRent,
         totalSqft,
@@ -344,21 +340,21 @@ export default function PortfolioPage() {
     const totalUnits = summaries.reduce((s, p) => s + p.units.length, 0);
     const totalOccupied = summaries.reduce((s, p) => s + p.occupied, 0);
     const totalVacant = summaries.reduce((s, p) => s + p.vacant, 0);
-    const totalUnderConstruction = summaries.reduce((s, p) => s + p.underConstruction, 0);
-    const totalLeaseable = summaries.reduce((s, p) => s + p.leaseable, 0);
     const totalRent = summaries.reduce((s, p) => s + p.totalMonthlyRent, 0);
+    // Occupancy across the portfolio: occupied / total units. A property
+    // whose units aren't on the rent roll yet counts zero toward both
+    // numerator and denominator via vacant = units - occupied, so it
+    // drags the % down (which is what you want — they aren't earning).
+    const haveData = summaries.some((s) => s.occupancyRate != null);
     return {
       totalUnits,
       totalOccupied,
       totalVacant,
-      totalUnderConstruction,
-      totalLeaseable,
       totalRent,
-      // Occupancy is measured against leaseable units only; a fleet of
-      // under-construction units doesn't depress it. Null when nothing
-      // on the rent roll yet (all properties pre-leaseable).
       occupancy:
-        totalLeaseable > 0 ? Math.round((totalOccupied / totalLeaseable) * 100) : null,
+        haveData && totalUnits > 0
+          ? Math.round((totalOccupied / totalUnits) * 100)
+          : null,
     };
   }, [summaries]);
 
@@ -540,19 +536,11 @@ export default function PortfolioPage() {
       {/* Portfolio totals */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <KpiCard label="Properties" value={summaries.length} />
-        <KpiCard
-          label="Total Units"
-          value={totals.totalUnits}
-          hint={
-            totals.totalUnderConstruction > 0
-              ? `${totals.totalLeaseable} leaseable · ${totals.totalUnderConstruction} under construction`
-              : undefined
-          }
-        />
+        <KpiCard label="Total Units" value={totals.totalUnits} />
         <KpiCard
           label="Occupancy"
           value={totals.occupancy == null ? "—" : `${totals.occupancy}%`}
-          hint={`${totals.totalOccupied} of ${totals.totalLeaseable} leaseable`}
+          hint={`${totals.totalOccupied} of ${totals.totalUnits} units`}
         />
         <KpiCard label="Unleased" value={totals.totalVacant} accent="red" />
         <KpiCard
@@ -1252,21 +1240,9 @@ function PropertyTable({
                     <div className="font-medium">{s.property.name}</div>
                     <div className="text-xs text-muted-foreground truncate max-w-sm">
                       {s.property.address}
-                      {s.underConstruction > 0 && (
-                        <span className="ml-2 text-[11px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
-                          {s.underConstruction} under construction
-                        </span>
-                      )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {s.units.length}
-                    {s.underConstruction > 0 && (
-                      <span className="text-[11px] text-amber-700 ml-1">
-                        ({s.leaseable} leaseable)
-                      </span>
-                    )}
-                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">{s.units.length}</td>
                   <td className={`px-4 py-3 text-right font-medium tabular-nums ${occColor}`}>
                     {s.occupancyRate == null ? "—" : `${s.occupancyRate}%`}
                   </td>
@@ -1368,11 +1344,6 @@ function PropertyCards({
             </div>
           </div>
 
-          {s.underConstruction > 0 && (
-            <p className="mt-2 text-[11px] text-amber-700">
-              {s.underConstruction} unit{s.underConstruction === 1 ? "" : "s"} under construction
-            </p>
-          )}
 
           <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
             <div
@@ -1427,11 +1398,7 @@ function PropertyDetailView({
         <KpiCard
           label="Occupancy"
           value={selected.occupancyRate == null ? "—" : `${selected.occupancyRate}%`}
-          hint={
-            selected.underConstruction > 0
-              ? `${selected.underConstruction} under construction · ${selected.leaseable} leaseable`
-              : undefined
-          }
+          hint={`${selected.occupied} of ${selected.units.length}`}
         />
         <KpiCard
           label="Monthly Rent"
