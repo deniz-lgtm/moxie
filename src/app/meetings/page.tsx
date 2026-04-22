@@ -334,8 +334,8 @@ export default function MeetingsPage() {
             <Mic className="w-8 h-8 mx-auto text-muted-foreground" />
             <p className="mt-3 text-sm font-medium">No meetings yet</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Generate today&rsquo;s meeting to pull in open work orders, vacancies, applications,
-              inspections, and carry-over action items.
+              Generate today&rsquo;s meeting to pull in open work orders, unleased units,
+              applications, inspections, and carry-over action items.
             </p>
           </div>
         ) : (

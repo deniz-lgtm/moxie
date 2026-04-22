@@ -425,7 +425,7 @@ export default function MeetingDetailView({
           empty="Nothing on the leasing side this week."
         >
           {leasingVacancies.length > 0 && (
-            <AgendaSubsection label={`Vacancies (${leasingVacancies.length})`}>
+            <AgendaSubsection label={`Unleased (${leasingVacancies.length})`}>
               {leasingVacancies.map((v) => (
                 <AgendaRow
                   key={v.unitId}
