@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Property, Unit, DashboardStats } from "@/lib/types";
+import type { DashboardStats, Property, Unit, VacantUnit } from "@/lib/types";
 
 type PropertySummary = {
   property: Property;
@@ -15,6 +15,14 @@ type PropertySummary = {
   avgRent: number;
 };
 
+function todayIso(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function PortfolioPage() {
   const [summaries, setSummaries] = useState<PropertySummary[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -22,22 +30,37 @@ export default function PortfolioPage() {
   const [selected, setSelected] = useState<PropertySummary | null>(null);
 
   useEffect(() => {
+    const today = todayIso();
     Promise.all([
       fetch("/api/appfolio/properties").then((r) => r.json()),
       fetch("/api/appfolio/units").then((r) => r.json()),
       fetch("/api/appfolio/dashboard").then((r) => r.json()),
+      // Authoritative "which units are vacant TODAY" — the rent roll's
+      // `status` field doesn't reliably reflect current occupancy because
+      // future leases aren't on it. unit_vacancy_detail via this endpoint
+      // does account for them.
+      fetch(`/api/appfolio/units?vacancies_on=${today}`).then((r) => r.json()),
     ])
-      .then(([propData, unitData, dashData]) => {
+      .then(([propData, unitData, dashData, vacancyData]) => {
         const properties: Property[] = propData.properties || [];
         const units: Unit[] = unitData.units || [];
         if (dashData.stats) setStats(dashData.stats);
 
+        const vacantToday = new Set<string>(
+          (vacancyData.vacancies as VacantUnit[] | undefined)?.map((v) => v.unitId) ?? []
+        );
+
+        // Unit status, re-derived for today: if AppFolio's vacancy report
+        // includes this unit, it's vacant; otherwise treat it as occupied.
+        // This overrides the rent-roll `status` which can be stale.
+        const isOccupiedToday = (u: Unit) => !vacantToday.has(u.id);
+
         const sums: PropertySummary[] = properties.map((p) => {
           const propUnits = units.filter((u) => u.propertyId === p.id);
-          const occupied = propUnits.filter((u) => u.status === "current").length;
-          const vacant = propUnits.filter((u) => u.status === "vacant").length;
+          const occupiedUnits = propUnits.filter(isOccupiedToday);
+          const occupied = occupiedUnits.length;
+          const vacant = propUnits.length - occupied;
           const notice = propUnits.filter((u) => u.status === "notice").length;
-          const occupiedUnits = propUnits.filter((u) => u.status === "current");
           const totalRent = occupiedUnits.reduce((s, u) => s + (Number(u.rent) || 0), 0);
 
           return {
