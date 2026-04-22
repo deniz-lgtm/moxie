@@ -257,6 +257,53 @@ export type DbContact = {
   updated_at: string;
 };
 
+// ─── Property Attributes (Moxie overlay per property) ───────────
+// Mirrors supabase/migrations/20260423_property_attributes.sql.
+
+export type DbPropertyAttribute = {
+  property_id: string;
+  insurance_carrier: string | null;
+  insurance_policy_number: string | null;
+  insurance_expires: string | null;
+  insurance_premium_annual: number | null;
+  tax_apn: string | null;
+  tax_annual_amount: number | null;
+  tax_next_installment_due: string | null;
+  tax_ytd_paid: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// ─── Capital Projects ───────────────────────────────────────────
+// Mirrors supabase/migrations/20260423_capital_projects.sql.
+
+export type DbCapitalProjectMilestone = {
+  id: string;
+  name: string;
+  completed: boolean;
+  date: string;
+};
+
+export type DbCapitalProject = {
+  id: string;
+  property_id: string;
+  property_name: string | null;
+  name: string;
+  category: string | null;
+  status: "planning" | "in_progress" | "completed" | "on_hold";
+  start_date: string | null;
+  target_date: string | null;
+  completed_date: string | null;
+  budget: number | null;
+  spent: number;
+  contractor: string | null;
+  description: string | null;
+  milestones: DbCapitalProjectMilestone[];
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Property Meetings (Monday morning meetings) ────────────────
 // Mirrors supabase/migrations/20260421_property_meetings.sql.
 

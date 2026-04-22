@@ -1,16 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   ArrowDownAZ,
   ArrowUpAZ,
   Download,
+  ExternalLink,
   LayoutGrid,
   Search,
+  Shield,
   Table as TableIcon,
+  Wrench,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { DashboardStats, Property, Unit, VacantUnit } from "@/lib/types";
+import type {
+  CapitalProject,
+  DashboardStats,
+  MaintenanceRequest,
+  Property,
+  PropertyAttribute,
+  Unit,
+  VacantUnit,
+} from "@/lib/types";
 
 type PropertySummary = {
   property: Property;
@@ -25,6 +37,17 @@ type PropertySummary = {
   avgRentPerSqft: number;
   nextExpiration: string | null;
   expiringNext90: number;
+  // Property-side / asset-management
+  openWorkOrders: number;
+  workOrderSpendYtd: number;
+  activeCapexCount: number;
+  activeCapexSpend: number;
+  activeCapexBudget: number;
+  insuranceExpires: string | null;
+  insuranceDaysToExpiry: number | null;
+  taxNextDue: string | null;
+  taxDaysToDue: number | null;
+  attribute: PropertyAttribute | null;
 };
 
 type ViewMode = "cards" | "table";
@@ -36,7 +59,12 @@ type SortKey =
   | "rent"
   | "avgRent"
   | "avgRentPerSqft"
-  | "expiringNext90";
+  | "expiringNext90"
+  | "openWorkOrders"
+  | "workOrderSpendYtd"
+  | "activeCapexSpend"
+  | "insuranceDaysToExpiry"
+  | "taxDaysToDue";
 
 function todayIso(): string {
   const d = new Date();
@@ -57,6 +85,9 @@ export default function PortfolioPage() {
   const [units, setUnits] = useState<Unit[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [vacantUnitIds, setVacantUnitIds] = useState<Set<string>>(new Set());
+  const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
+  const [capitalProjects, setCapitalProjects] = useState<CapitalProject[]>([]);
+  const [attributes, setAttributes] = useState<Record<string, PropertyAttribute>>({});
   const [loading, setLoading] = useState(true);
   const [vacancyLoading, setVacancyLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -68,18 +99,41 @@ export default function PortfolioPage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  // Initial load: properties, units, dashboard stats
+  const refreshAttributes = useCallback(async () => {
+    try {
+      const j = await fetch("/api/properties/attributes").then((r) => r.json());
+      const attrs = (j.attributes as PropertyAttribute[]) ?? [];
+      const map: Record<string, PropertyAttribute> = {};
+      for (const a of attrs) map[a.propertyId] = a;
+      setAttributes(map);
+    } catch {
+      setAttributes({});
+    }
+  }, []);
+
+  // Initial load: properties, units, dashboard stats, + operational data
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      fetch("/api/appfolio/properties").then((r) => r.json()),
-      fetch("/api/appfolio/units").then((r) => r.json()),
-      fetch("/api/appfolio/dashboard").then((r) => r.json()),
+      fetch("/api/appfolio/properties").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/appfolio/dashboard").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/maintenance/requests").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/capital-projects").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/properties/attributes").then((r) => r.json()).catch(() => ({})),
     ])
-      .then(([propData, unitData, dashData]) => {
+      .then(([propData, unitData, dashData, woData, capexData, attrData]) => {
         setProperties(propData.properties || []);
         setUnits(unitData.units || []);
         if (dashData.stats) setStats(dashData.stats);
+        setWorkOrders(Array.isArray(woData.workOrders) ? woData.workOrders : []);
+        setCapitalProjects(Array.isArray(capexData.projects) ? capexData.projects : []);
+        const attrs: PropertyAttribute[] = Array.isArray(attrData.attributes)
+          ? attrData.attributes
+          : [];
+        const map: Record<string, PropertyAttribute> = {};
+        for (const a of attrs) map[a.propertyId] = a;
+        setAttributes(map);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -112,6 +166,8 @@ export default function PortfolioPage() {
 
   const summaries: PropertySummary[] = useMemo(() => {
     const asOfMs = new Date(asOfDate).getTime();
+    const yearStart = new Date(new Date(asOfDate).getFullYear(), 0, 1).getTime();
+    const openWoStatuses = new Set(["submitted", "assigned", "in_progress", "awaiting_parts"]);
     return properties.map((p) => {
       const propUnits = units.filter((u) => u.propertyId === p.id);
       const occupiedUnits = propUnits.filter((u) => !vacantUnitIds.has(u.id));
@@ -135,6 +191,32 @@ export default function PortfolioPage() {
         return dd >= asOfMs && daysBetween(asOfDate, d) <= 90;
       }).length;
 
+      // Work orders scoped to this property.
+      const propWo = workOrders.filter((w) => w.propertyId === p.id);
+      const openWorkOrders = propWo.filter((w) => openWoStatuses.has(w.status)).length;
+      const workOrderSpendYtd = propWo
+        .filter((w) => {
+          if (!w.completedDate) return false;
+          const t = new Date(w.completedDate).getTime();
+          return !isNaN(t) && t >= yearStart && t <= asOfMs;
+        })
+        .reduce((s, w) => s + (Number(w.actualCost) || 0), 0);
+
+      // Capital projects scoped to this property; "active" = not completed.
+      const propCapex = capitalProjects.filter((c) => c.propertyId === p.id);
+      const activeCapex = propCapex.filter((c) => c.status !== "completed");
+      const activeCapexCount = activeCapex.length;
+      const activeCapexSpend = activeCapex.reduce((s, c) => s + (Number(c.spent) || 0), 0);
+      const activeCapexBudget = activeCapex.reduce((s, c) => s + (Number(c.budget) || 0), 0);
+
+      const attr = attributes[p.id] ?? null;
+      const insuranceExpires = attr?.insuranceExpires ?? null;
+      const insuranceDaysToExpiry = insuranceExpires
+        ? daysBetween(asOfDate, insuranceExpires)
+        : null;
+      const taxNextDue = attr?.taxNextInstallmentDue ?? null;
+      const taxDaysToDue = taxNextDue ? daysBetween(asOfDate, taxNextDue) : null;
+
       return {
         property: p,
         units: propUnits,
@@ -149,9 +231,19 @@ export default function PortfolioPage() {
         avgRentPerSqft,
         nextExpiration,
         expiringNext90,
+        openWorkOrders,
+        workOrderSpendYtd,
+        activeCapexCount,
+        activeCapexSpend,
+        activeCapexBudget,
+        insuranceExpires,
+        insuranceDaysToExpiry,
+        taxNextDue,
+        taxDaysToDue,
+        attribute: attr,
       };
     });
-  }, [properties, units, vacantUnitIds, asOfDate]);
+  }, [properties, units, vacantUnitIds, asOfDate, workOrders, capitalProjects, attributes]);
 
   const filteredSorted = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -180,6 +272,17 @@ export default function PortfolioPage() {
           return s.avgRentPerSqft;
         case "expiringNext90":
           return s.expiringNext90;
+        case "openWorkOrders":
+          return s.openWorkOrders;
+        case "workOrderSpendYtd":
+          return s.workOrderSpendYtd;
+        case "activeCapexSpend":
+          return s.activeCapexSpend;
+        case "insuranceDaysToExpiry":
+          // null = push to end
+          return s.insuranceDaysToExpiry ?? Number.POSITIVE_INFINITY;
+        case "taxDaysToDue":
+          return s.taxDaysToDue ?? Number.POSITIVE_INFINITY;
       }
     };
     const sorted = [...filtered].sort((a, b) => {
@@ -231,7 +334,7 @@ export default function PortfolioPage() {
         "Address",
         "Units",
         "Occupied",
-        "Vacant",
+        "Unleased",
         "Notice",
         "Occupancy %",
         "Monthly Rent",
@@ -240,6 +343,18 @@ export default function PortfolioPage() {
         "Avg Rent/Sqft",
         "Next Lease Expiration",
         "Expirations in next 90d",
+        "Open Work Orders",
+        "Work Order Spend YTD",
+        "Active Capex Count",
+        "Active Capex Spend",
+        "Active Capex Budget",
+        "Insurance Carrier",
+        "Insurance Expires",
+        "Insurance Premium Annual",
+        "Tax APN",
+        "Tax Annual",
+        "Tax Next Due",
+        "Tax YTD Paid",
       ],
       ...filteredSorted.map((s) => [
         s.property.name,
@@ -255,6 +370,18 @@ export default function PortfolioPage() {
         s.avgRentPerSqft.toFixed(2),
         s.nextExpiration ?? "",
         s.expiringNext90,
+        s.openWorkOrders,
+        s.workOrderSpendYtd,
+        s.activeCapexCount,
+        s.activeCapexSpend,
+        s.activeCapexBudget,
+        s.attribute?.insuranceCarrier ?? "",
+        s.insuranceExpires ?? "",
+        s.attribute?.insurancePremiumAnnual ?? "",
+        s.attribute?.taxApn ?? "",
+        s.attribute?.taxAnnualAmount ?? "",
+        s.taxNextDue ?? "",
+        s.attribute?.taxYtdPaid ?? "",
       ]),
     ];
     const csv = rows
@@ -289,7 +416,13 @@ export default function PortfolioPage() {
   }
 
   if (selected) {
-    return <PropertyDetailView selected={selected} onBack={() => setSelectedId(null)} />;
+    return (
+      <PropertyDetailView
+        selected={selected}
+        onBack={() => setSelectedId(null)}
+        onAttributeSaved={refreshAttributes}
+      />
+    );
   }
 
   const isFuture = asOfDate > todayIso();
@@ -409,6 +542,210 @@ export default function PortfolioPage() {
   );
 }
 
+function PropertyInfoCard({
+  propertyId,
+  attribute,
+  onSaved,
+}: {
+  propertyId: string;
+  attribute: PropertyAttribute | null;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState<PropertyAttribute>(
+    attribute ?? { propertyId }
+  );
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(attribute ?? { propertyId });
+    setSavedAt(null);
+  }, [attribute, propertyId]);
+
+  const update = <K extends keyof PropertyAttribute>(k: K, v: PropertyAttribute[K]) =>
+    setDraft((prev) => ({ ...prev, [k]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/properties/attributes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const j = await r.json();
+      if (j.error) {
+        alert(j.error);
+      } else {
+        setSavedAt(new Date().toLocaleTimeString());
+        onSaved();
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border flex items-center justify-between flex-wrap gap-2">
+        <h2 className="font-semibold inline-flex items-center gap-2">
+          <Shield className="w-4 h-4" /> Property Info — Insurance & Taxes
+        </h2>
+        <div className="flex items-center gap-3">
+          {savedAt && (
+            <span className="text-xs text-green-700">Saved at {savedAt}</span>
+          )}
+          <button
+            onClick={save}
+            disabled={saving}
+            className="px-3 py-1.5 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent/90 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="p-5 grid md:grid-cols-2 gap-5">
+        <div>
+          <h3 className="text-sm font-semibold mb-3">Insurance</h3>
+          <div className="space-y-3">
+            <Field label="Carrier">
+              <input
+                value={draft.insuranceCarrier ?? ""}
+                onChange={(e) => update("insuranceCarrier", e.target.value)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </Field>
+            <Field label="Policy #">
+              <input
+                value={draft.insurancePolicyNumber ?? ""}
+                onChange={(e) => update("insurancePolicyNumber", e.target.value)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Expires">
+                <input
+                  type="date"
+                  value={draft.insuranceExpires ?? ""}
+                  onChange={(e) => update("insuranceExpires", e.target.value)}
+                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                />
+              </Field>
+              <Field label="Annual premium">
+                <input
+                  type="number"
+                  value={draft.insurancePremiumAnnual ?? ""}
+                  onChange={(e) =>
+                    update(
+                      "insurancePremiumAnnual",
+                      e.target.value === "" ? undefined : Number(e.target.value)
+                    )
+                  }
+                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                />
+              </Field>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold mb-3">Property Tax</h3>
+          <div className="space-y-3">
+            <Field label="APN">
+              <input
+                value={draft.taxApn ?? ""}
+                onChange={(e) => update("taxApn", e.target.value)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Annual amount">
+                <input
+                  type="number"
+                  value={draft.taxAnnualAmount ?? ""}
+                  onChange={(e) =>
+                    update(
+                      "taxAnnualAmount",
+                      e.target.value === "" ? undefined : Number(e.target.value)
+                    )
+                  }
+                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                />
+              </Field>
+              <Field label="YTD paid">
+                <input
+                  type="number"
+                  value={draft.taxYtdPaid ?? ""}
+                  onChange={(e) =>
+                    update(
+                      "taxYtdPaid",
+                      e.target.value === "" ? undefined : Number(e.target.value)
+                    )
+                  }
+                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+                />
+              </Field>
+            </div>
+            <Field label="Next installment due">
+              <input
+                type="date"
+                value={draft.taxNextInstallmentDue ?? ""}
+                onChange={(e) => update("taxNextInstallmentDue", e.target.value)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+            </Field>
+          </div>
+        </div>
+      </div>
+      {draft.notes !== undefined || true ? (
+        <div className="px-5 pb-5">
+          <Field label="Notes">
+            <textarea
+              value={draft.notes ?? ""}
+              onChange={(e) => update("notes", e.target.value)}
+              rows={2}
+              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              placeholder="Audit flags, compliance items, reminders…"
+            />
+          </Field>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function ComplianceCell({
+  daysToEvent,
+  date,
+}: {
+  daysToEvent: number | null;
+  date: string | null;
+}) {
+  if (daysToEvent == null || !date) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  let color = "text-muted-foreground";
+  if (daysToEvent < 0) color = "text-red-600 font-semibold";
+  else if (daysToEvent <= 30) color = "text-red-600";
+  else if (daysToEvent <= 60) color = "text-yellow-600";
+  else color = "text-muted-foreground";
+  const label =
+    daysToEvent < 0 ? `${Math.abs(daysToEvent)}d overdue` : `${daysToEvent}d`;
+  return (
+    <span className={color} title={date}>
+      {label}
+    </span>
+  );
+}
+
 function KpiCard({
   label,
   value,
@@ -449,7 +786,7 @@ function PropertyTable({
   onSelect: (id: string) => void;
   stats: DashboardStats | null;
 }) {
-  const headers: { key: SortKey; label: string; align?: "right" | "left" }[] = [
+  const headers: { key: SortKey; label: string; align?: "right" | "left"; title?: string }[] = [
     { key: "name", label: "Property", align: "left" },
     { key: "units", label: "Units", align: "right" },
     { key: "occupancy", label: "Occupancy", align: "right" },
@@ -457,7 +794,12 @@ function PropertyTable({
     { key: "rent", label: "Monthly Rent", align: "right" },
     { key: "avgRent", label: "Avg Rent", align: "right" },
     { key: "avgRentPerSqft", label: "$/Sqft", align: "right" },
-    { key: "expiringNext90", label: "Exp. 90d", align: "right" },
+    { key: "expiringNext90", label: "Exp 90d", align: "right", title: "Leases expiring in next 90 days" },
+    { key: "openWorkOrders", label: "Open WOs", align: "right", title: "Open work orders" },
+    { key: "workOrderSpendYtd", label: "WO YTD", align: "right", title: "Work-order spend year-to-date" },
+    { key: "activeCapexSpend", label: "Capex", align: "right", title: "Active capital projects — spend" },
+    { key: "insuranceDaysToExpiry", label: "Insurance", align: "right", title: "Days until insurance expires" },
+    { key: "taxDaysToDue", label: "Tax Due", align: "right", title: "Days until next property-tax installment" },
   ];
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
@@ -468,6 +810,7 @@ function PropertyTable({
               {headers.map((h) => (
                 <th
                   key={h.key}
+                  title={h.title}
                   className={`${
                     h.align === "right" ? "text-right" : "text-left"
                   } px-4 py-3 font-medium cursor-pointer select-none whitespace-nowrap`}
@@ -527,6 +870,32 @@ function PropertyTable({
                     {s.avgRentPerSqft > 0 ? `$${s.avgRentPerSqft.toFixed(2)}` : "—"}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">{s.expiringNext90}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {s.openWorkOrders > 0 ? (
+                      <span className="text-foreground">{s.openWorkOrders}</span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                    {s.workOrderSpendYtd > 0
+                      ? `$${Math.round(s.workOrderSpendYtd).toLocaleString()}`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                    {s.activeCapexCount > 0
+                      ? `$${Math.round(s.activeCapexSpend).toLocaleString()} / ${s.activeCapexCount}`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <ComplianceCell
+                      daysToEvent={s.insuranceDaysToExpiry}
+                      date={s.insuranceExpires}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <ComplianceCell daysToEvent={s.taxDaysToDue} date={s.taxNextDue} />
+                  </td>
                 </tr>
               );
             })}
@@ -609,9 +978,11 @@ function PropertyCards({
 function PropertyDetailView({
   selected,
   onBack,
+  onAttributeSaved,
 }: {
   selected: PropertySummary;
   onBack: () => void;
+  onAttributeSaved: () => void;
 }) {
   return (
     <div className="space-y-6">
@@ -633,6 +1004,64 @@ function PropertyDetailView({
         />
         <KpiCard label="Avg Rent" value={`$${selected.avgRent.toLocaleString()}`} />
       </div>
+
+      {/* Operational snapshot */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiCard
+          label="Open Work Orders"
+          value={selected.openWorkOrders}
+          hint={
+            selected.openWorkOrders > 0 ? undefined : "No open WOs"
+          }
+          accent={selected.openWorkOrders > 0 ? "red" : undefined}
+        />
+        <KpiCard
+          label="WO Spend YTD"
+          value={`$${Math.round(selected.workOrderSpendYtd).toLocaleString()}`}
+          hint={`Completed ${new Date().getFullYear()}`}
+        />
+        <KpiCard
+          label="Active Capex"
+          value={
+            selected.activeCapexCount > 0
+              ? `$${Math.round(selected.activeCapexSpend).toLocaleString()}`
+              : "—"
+          }
+          hint={
+            selected.activeCapexCount > 0
+              ? `${selected.activeCapexCount} active · $${Math.round(
+                  selected.activeCapexBudget
+                ).toLocaleString()} budget`
+              : undefined
+          }
+        />
+        <div className="bg-card rounded-xl border border-border p-4 flex flex-col justify-between">
+          <div className="text-sm text-muted-foreground">Quick links</div>
+          <div className="flex gap-3 mt-2">
+            <Link
+              href={`/maintenance?property_id=${encodeURIComponent(selected.property.id)}`}
+              className="text-xs text-accent hover:underline inline-flex items-center gap-1"
+            >
+              <Wrench className="w-3 h-3" />
+              Maintenance
+              <ExternalLink className="w-3 h-3" />
+            </Link>
+            <Link
+              href={`/capital-projects`}
+              className="text-xs text-accent hover:underline inline-flex items-center gap-1"
+            >
+              Capex
+              <ExternalLink className="w-3 h-3" />
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <PropertyInfoCard
+        propertyId={selected.property.id}
+        attribute={selected.attribute}
+        onSaved={onAttributeSaved}
+      />
 
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <div className="p-5 border-b border-border">
