@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   debugMoxieFilter,
+  diagnoseVacancyFetch,
   fetchTenantsForUnit,
   fetchUnits,
   fetchUnitStats,
@@ -12,6 +13,14 @@ import { academicYearDates, type AcademicYear } from "@/lib/types";
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
+    // ?vacancy_debug=1 (optional &on=YYYY-MM-DD): show the raw shape of
+    // AppFolio's unit_vacancy_detail response so we can see why rows are
+    // being dropped (e.g. missing portfolio_id / property_id / unit_id).
+    if (url.searchParams.get("vacancy_debug")) {
+      const on = url.searchParams.get("on") || "2026-08-15";
+      const diag = await diagnoseVacancyFetch(on);
+      return NextResponse.json(diag);
+    }
     // ?vacancies_on=YYYY-MM-DD (or ?vacancies_ay=2026-2027 to use the
     // academic-year start). Returns units that have NO lease covering that
     // date — the question the Monday meeting actually cares about.
