@@ -198,7 +198,7 @@ export default function Dashboard() {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Link
-          href="/portfolio"
+          href="/unleased"
           className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
           style={{ boxShadow: "var(--shadow-sm)" }}
         >
