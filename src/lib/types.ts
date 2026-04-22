@@ -258,6 +258,8 @@ export interface Contact {
   department?: string;
   notes?: string;
   isActive: boolean;
+  /** Supabase auth user id if this contact was created from a real login. */
+  userId?: string;
   createdAt: string;
   updatedAt: string;
 }

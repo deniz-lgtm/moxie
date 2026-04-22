@@ -252,6 +252,7 @@ export type DbContact = {
   department: string | null;
   notes: string | null;
   is_active: boolean;
+  user_id: string | null;
   created_at: string;
   updated_at: string;
 };
