@@ -76,7 +76,7 @@ const navItems: NavItem[] = [
   { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management", disabled: true },
   
   // Admin
-  { label: "Team", href: "/team", icon: Users, category: "Admin", disabled: true },
+  { label: "Users", href: "/users", icon: Users, category: "Admin" },
   { label: "Settings", href: "/settings", icon: Settings, category: "Admin", disabled: true },
   { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin", disabled: true },
   

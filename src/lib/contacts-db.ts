@@ -15,6 +15,7 @@ function dbToContact(row: DbContact): Contact {
     department: row.department ?? undefined,
     notes: row.notes ?? undefined,
     isActive: row.is_active,
+    userId: row.user_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -30,6 +31,7 @@ function contactToDb(c: Contact): Omit<DbContact, "created_at" | "updated_at"> {
     department: c.department ?? null,
     notes: c.notes ?? null,
     is_active: c.isActive,
+    user_id: c.userId ?? null,
   };
 }
 
