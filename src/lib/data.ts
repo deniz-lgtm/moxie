@@ -12,7 +12,6 @@ import {
   getProperties as afGetProperties,
   getWorkOrders as afGetWorkOrders,
   getRentRoll as afGetRentRoll,
-  getVacancyReport as afGetVacancyReport,
   getTenants as afGetTenants,
 } from "./appfolio";
 import type {
@@ -475,40 +474,21 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   source: "appfolio";
 }> {
   const ayStart = academicYear
-    ? academicYearDates(academicYear).leaseStart
+    ? new Date(academicYearDates(academicYear).leaseStart)
     : null;
 
-  // Parallel: rent roll (for total + occupied counts) and unit_vacancy_detail
-  // (the authoritative "which units are NOT leased on the AY start date",
-  // which correctly accounts for future signed leases — the rent roll is
-  // a point-in-time snapshot that doesn't surface future leases).
-  const [rentRollRaw, vacancyRaw] = await Promise.all([
-    afGetRentRoll(),
-    ayStart
-      ? afGetVacancyReport(ayStart).catch((err) => {
-          console.error("[Moxie] vacancy report failed:", err);
-          return [] as any[];
-        })
-      : Promise.resolve([] as any[]),
-  ]);
+  const { leasesByUnit } = await fetchLeaseUniverse();
 
-  if (!Array.isArray(rentRollRaw) || rentRollRaw.length === 0) {
+  const total = leasesByUnit.size;
+  if (total === 0) {
     return { total: 0, occupied: 0, preLeased: 0, unleased: [], source: "appfolio" };
   }
 
-  const filtered = await filterToMoxie(rentRollRaw);
-  // Group rent roll by unit_id for total + occupied counts.
-  const unitRows = new Map<string, any[]>();
-  for (const r of filtered) {
-    const key = String(r.unit_id || r.UnitId || "");
-    if (!key) continue;
-    if (!unitRows.has(key)) unitRows.set(key, []);
-    unitRows.get(key)!.push(r);
-  }
-
-  const total = unitRows.size;
+  // Occupied = any rent-roll row flagged current/notice. (Rent roll flags
+  // status on the row; tenant_directory future rows are obviously not
+  // "occupied now", so we only check rent-roll statuses.)
   let occupied = 0;
-  for (const rows of unitRows.values()) {
+  for (const rows of leasesByUnit.values()) {
     const isOccupied = rows.some((r: any) => {
       const s = String(r.status || r.Status || "").toLowerCase();
       return s === "current" || s === "notice";
@@ -516,36 +496,25 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
     if (isOccupied) occupied++;
   }
 
-  // Unique set of unit_ids that AppFolio says are vacant on the target date.
-  // Cross-reference against the rent roll's Moxie unit_ids instead of
-  // filterToMoxie, since unit_vacancy_detail may not carry portfolio_id.
-  const moxieUnitIds = new Set(unitRows.keys());
-  const vacancyList = Array.isArray(vacancyRaw) ? vacancyRaw : [];
-  const vacantUnitIds = new Set<string>();
-  for (const v of vacancyList) {
-    const id = String(v.unit_id || v.UnitId || "");
-    if (id && moxieUnitIds.has(id)) vacantUnitIds.add(id);
-  }
-  if (ayStart && vacancyList.length > 0 && vacantUnitIds.size === 0) {
-    console.warn(
-      `[Moxie] fetchUnitStats: 0/${vacancyList.length} vacancy rows matched Moxie unit_ids`
-    );
-  }
-
-  const preLeased = ayStart ? Math.max(0, total - vacantUnitIds.size) : 0;
-
-  // Build an "unleased" diagnostic list from the same authoritative source.
+  // Pre-leased: a unit has some lease (current or future) covering ayStart.
+  let preLeased = 0;
   const unleased: { unit: string; status: string; tenant: string; leaseFrom: string; leaseTo: string }[] = [];
-  for (const id of vacantUnitIds) {
-    const rows = unitRows.get(id) ?? [];
-    const r = rows[0] ?? {};
-    unleased.push({
-      unit: String(r.unit || r.Unit || ""),
-      status: String(r.status || r.Status || ""),
-      tenant: String(r.tenant || r.Tenant || ""),
-      leaseFrom: String(r.lease_from || r.LeaseFrom || ""),
-      leaseTo: String(r.lease_to || r.LeaseTo || ""),
-    });
+  if (ayStart) {
+    for (const [, rows] of leasesByUnit) {
+      const covered = rows.some((r) => leaseCovers(r, ayStart));
+      if (covered) {
+        preLeased++;
+      } else {
+        const r = rows[0] ?? {};
+        unleased.push({
+          unit: String(r.unit || r.Unit || ""),
+          status: String(r.status || r.Status || ""),
+          tenant: String(r.tenant || r.Tenant || r.tenant_name || r.TenantName || ""),
+          leaseFrom: String(r.lease_from || r.LeaseFrom || ""),
+          leaseTo: String(r.lease_to || r.LeaseTo || ""),
+        });
+      }
+    }
   }
 
   return { total, occupied, preLeased, unleased, source: "appfolio" };
@@ -563,51 +532,167 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
  * on 2026-08-15".
  */
 /**
- * Diagnostic: show what AppFolio's unit_vacancy_detail actually returns
- * and how many rows survive the Moxie unit_id cross-reference. Use when
- * the vacancy count is zero unexpectedly.
+ * Diagnostic: show the shape of the two lease sources (rent_roll and
+ * tenant_directory status=Future), plus a breakdown of how the covers()
+ * predicate resolves at `targetDate`. Use when the vacancy count is
+ * unexpected.
  */
 export async function diagnoseVacancyFetch(targetDate: string) {
-  const [rawVacancy, rawRentRoll] = await Promise.all([
-    afGetVacancyReport(targetDate).catch((err) => ({ _error: err.message })),
-    afGetRentRoll().catch((err) => ({ _error: err.message })),
+  const target = new Date(targetDate);
+  const [rawRentRoll, rawFutureDefault, rawFutureAlt, rawAllTenants] = await Promise.all([
+    afGetRentRoll().catch((err) => ({ _error: String(err?.message || err) })),
+    afGetTenants({ status: "Future" }).catch((err) => ({ _error: String(err?.message || err) })),
+    afGetTenants({ status: "future" }).catch((err) => ({ _error: String(err?.message || err) })),
+    afGetTenants().catch((err) => ({ _error: String(err?.message || err) })),
   ]);
 
-  const vacancyList: any[] = Array.isArray(rawVacancy) ? rawVacancy : [];
-  const rentRollList: any[] = Array.isArray(rawRentRoll) ? rawRentRoll : [];
+  const rrList: any[] = Array.isArray(rawRentRoll) ? rawRentRoll : [];
+  const futDefault: any[] = Array.isArray(rawFutureDefault) ? rawFutureDefault : [];
+  const futAlt: any[] = Array.isArray(rawFutureAlt) ? rawFutureAlt : [];
+  const allTenants: any[] = Array.isArray(rawAllTenants) ? rawAllTenants : [];
 
-  const moxieRentRoll = rentRollList.length > 0 ? await filterToMoxie(rentRollList) : [];
-  const moxieUnitIds = new Set(
-    moxieRentRoll.map((r: any) => String(r.unit_id || r.UnitId || "")).filter(Boolean)
-  );
+  const moxieRR = rrList.length > 0 ? await filterToMoxie(rrList) : [];
+  const moxieFutDefault = futDefault.length > 0 ? await filterToMoxie(futDefault) : [];
+  const moxieFutAlt = futAlt.length > 0 ? await filterToMoxie(futAlt) : [];
+  const moxieAll = allTenants.length > 0 ? await filterToMoxie(allTenants) : [];
 
-  const vacancyUnitIds = new Set(
-    vacancyList.map((v: any) => String(v.unit_id || v.UnitId || "")).filter(Boolean)
-  );
-  const matchedUnitIds = [...vacancyUnitIds].filter((id) => moxieUnitIds.has(id));
+  // Classify every tenant_directory row (all-tenants flavor) by its lease
+  // dates relative to target.
+  let tdTenantsWithLeaseDates = 0;
+  let tdCurrent = 0;
+  let tdFutureRelativeToTarget = 0;
+  let tdPastRelativeToTarget = 0;
+  for (const t of moxieAll) {
+    const from = t.lease_from || t.LeaseFrom || t.lease_start_date || t.LeaseStartDate;
+    const to = t.lease_to || t.LeaseTo || t.lease_end_date || t.LeaseEndDate;
+    if (from) tdTenantsWithLeaseDates++;
+    if (leaseCovers(t, target)) tdCurrent++;
+    else if (from && new Date(from) > target) tdFutureRelativeToTarget++;
+    else if (to && new Date(to) < target) tdPastRelativeToTarget++;
+  }
+
+  const pickSample = (arr: any[]) =>
+    arr.length > 0
+      ? { keys: Object.keys(arr[0]).slice(0, 25), sample: arr[0] }
+      : { keys: [], sample: null };
 
   return {
     target: targetDate,
-    vacancyReport: {
-      ok: Array.isArray(rawVacancy),
-      error: (rawVacancy as any)?._error ?? null,
-      rows: vacancyList.length,
-      sampleKeys: vacancyList.length > 0 ? Object.keys(vacancyList[0]).slice(0, 20) : [],
-      sampleRow: vacancyList.slice(0, 1),
-      uniqueUnitIds: vacancyUnitIds.size,
-    },
     rentRoll: {
       ok: Array.isArray(rawRentRoll),
       error: (rawRentRoll as any)?._error ?? null,
-      rows: rentRollList.length,
-      moxieFilteredRows: moxieRentRoll.length,
-      moxieUnitIds: moxieUnitIds.size,
+      totalRows: rrList.length,
+      moxieRows: moxieRR.length,
+      ...pickSample(moxieRR),
     },
-    crossReference: {
-      matchedUnitIds: matchedUnitIds.length,
-      firstFiveMatched: matchedUnitIds.slice(0, 5),
-      firstFiveVacancyIds: [...vacancyUnitIds].slice(0, 5),
-      firstFiveMoxieIds: [...moxieUnitIds].slice(0, 5),
+    tenantDirectoryFutureTitleCase: {
+      ok: Array.isArray(rawFutureDefault),
+      error: (rawFutureDefault as any)?._error ?? null,
+      totalRows: futDefault.length,
+      moxieRows: moxieFutDefault.length,
+      ...pickSample(moxieFutDefault),
+    },
+    tenantDirectoryFutureLowercase: {
+      ok: Array.isArray(rawFutureAlt),
+      error: (rawFutureAlt as any)?._error ?? null,
+      totalRows: futAlt.length,
+      moxieRows: moxieFutAlt.length,
+      ...pickSample(moxieFutAlt),
+    },
+    tenantDirectoryAll: {
+      ok: Array.isArray(rawAllTenants),
+      error: (rawAllTenants as any)?._error ?? null,
+      totalRows: allTenants.length,
+      moxieRows: moxieAll.length,
+      withLeaseDates: tdTenantsWithLeaseDates,
+      coveringTarget: tdCurrent,
+      startsAfterTarget: tdFutureRelativeToTarget,
+      endsBeforeTarget: tdPastRelativeToTarget,
+      ...pickSample(moxieAll),
+    },
+  };
+}
+
+/**
+ * A lease row (from rent_roll OR tenant_directory) covers the target date
+ * iff it has a tenant and lease_from <= target <= lease_to (with null
+ * lease_to treated as month-to-month, i.e. still covered).
+ */
+function leaseCovers(row: any, target: Date): boolean {
+  const tenant = String(
+    row.tenant || row.Tenant || row.tenant_name || row.TenantName || ""
+  ).trim();
+  if (!tenant) return false;
+  const fromStr =
+    row.lease_from || row.LeaseFrom || row.lease_start_date || row.LeaseStartDate;
+  const toStr =
+    row.lease_to || row.LeaseTo || row.lease_end_date || row.LeaseEndDate;
+  if (!fromStr) return false;
+  const from = new Date(fromStr);
+  if (isNaN(from.getTime()) || from > target) return false;
+  if (!toStr) return true; // MTM — occupied indefinitely.
+  const to = new Date(toStr);
+  if (isNaN(to.getTime())) return false;
+  return to >= target;
+}
+
+/**
+ * Union of current-lease (rent_roll) + future-lease (tenant_directory,
+ * status=Future) rows indexed by Moxie unit_id. This is the set we apply
+ * leaseCovers() over to answer "is unit X leased on date D". Rent roll
+ * alone misses future-signed leases.
+ */
+async function fetchLeaseUniverse(): Promise<{
+  leasesByUnit: Map<string, any[]>;
+  diagnostics: {
+    rentRollTotal: number;
+    rentRollMoxie: number;
+    futureTenantTotal: number;
+    futureTenantMoxie: number;
+    unitIds: number;
+  };
+}> {
+  const [rawRentRoll, rawFuture] = await Promise.all([
+    afGetRentRoll().catch((err) => {
+      console.error("[Moxie] rent roll fetch failed:", err);
+      return [] as any[];
+    }),
+    // AppFolio accepts tenant_status=Future. If this specific value is
+    // rejected we'd see zero rows; the diagnostic (below) surfaces that.
+    afGetTenants({ status: "Future" }).catch((err) => {
+      console.error("[Moxie] tenant_directory (Future) failed:", err);
+      return [] as any[];
+    }),
+  ]);
+
+  const rentRollList = Array.isArray(rawRentRoll) ? rawRentRoll : [];
+  const futureList = Array.isArray(rawFuture) ? rawFuture : [];
+  const moxieRentRoll =
+    rentRollList.length > 0 ? await filterToMoxie(rentRollList) : [];
+  const moxieFuture = futureList.length > 0 ? await filterToMoxie(futureList) : [];
+
+  const leasesByUnit = new Map<string, any[]>();
+  for (const r of moxieRentRoll) {
+    const id = String(r.unit_id || r.UnitId || "");
+    if (!id) continue;
+    if (!leasesByUnit.has(id)) leasesByUnit.set(id, []);
+    leasesByUnit.get(id)!.push(r);
+  }
+  for (const t of moxieFuture) {
+    const id = String(t.unit_id || t.UnitId || "");
+    if (!id) continue;
+    if (!leasesByUnit.has(id)) leasesByUnit.set(id, []);
+    leasesByUnit.get(id)!.push(t);
+  }
+
+  return {
+    leasesByUnit,
+    diagnostics: {
+      rentRollTotal: rentRollList.length,
+      rentRollMoxie: moxieRentRoll.length,
+      futureTenantTotal: futureList.length,
+      futureTenantMoxie: moxieFuture.length,
+      unitIds: leasesByUnit.size,
     },
   };
 }
@@ -620,97 +705,46 @@ export async function fetchVacanciesOnDate(
     throw new Error(`Invalid targetDate: ${targetDate}`);
   }
 
-  const [rawVacancy, rawRentRoll] = await Promise.all([
-    afGetVacancyReport(targetDate).catch((err) => {
-      console.error("[Moxie] vacancy report failed:", err);
-      return [] as any[];
-    }),
-    afGetRentRoll().catch((err) => {
-      console.error("[Moxie] rent roll (for enrichment) failed:", err);
-      return [] as any[];
-    }),
-  ]);
-
-  const rentRollRows = Array.isArray(rawRentRoll) && rawRentRoll.length > 0
-    ? await filterToMoxie(rawRentRoll)
-    : [];
-
-  // unit_vacancy_detail may not carry portfolio_id or even the Moxie-set
-  // property_id in a form filterToMoxie can use, so filtering by those
-  // fields silently drops everything. Use the rent roll (which we already
-  // filter correctly) as the ground truth for "is this a Moxie unit_id",
-  // and only trust vacancy rows whose unit_id is in that set.
-  const moxieUnitIds = new Set<string>();
-  for (const r of rentRollRows) {
-    const id = String(r.unit_id || r.UnitId || "");
-    if (id) moxieUnitIds.add(id);
-  }
-
-  const rawVacancyList = Array.isArray(rawVacancy) ? rawVacancy : [];
-  const vacancyRows = rawVacancyList.filter((v) => {
-    const id = String(v.unit_id || v.UnitId || "");
-    return id && moxieUnitIds.has(id);
-  });
-  if (rawVacancyList.length > 0 && vacancyRows.length === 0) {
-    console.warn(
-      `[Moxie] unit_vacancy_detail: 0/${rawVacancyList.length} rows matched Moxie unit_ids ` +
-        `(moxie set size: ${moxieUnitIds.size}). Sample row keys: ` +
-        `${Object.keys(rawVacancyList[0] || {}).slice(0, 12).join(", ")}`
-    );
-  }
-
-  // Index rent roll by unit_id — keep the row with the latest lease_to so
-  // "last tenant / last lease-end" refers to the most recent lease on file.
-  const rentRollByUnit = new Map<string, any>();
-  for (const r of rentRollRows) {
-    const key = String(r.unit_id || r.UnitId || "");
-    if (!key) continue;
-    const existing = rentRollByUnit.get(key);
-    if (!existing) {
-      rentRollByUnit.set(key, r);
-      continue;
-    }
-    const existingTo = String(existing.lease_to || existing.LeaseTo || "");
-    const candidateTo = String(r.lease_to || r.LeaseTo || "");
-    if (candidateTo > existingTo) rentRollByUnit.set(key, r);
-  }
-
+  const { leasesByUnit } = await fetchLeaseUniverse();
   const vacancies: VacantUnit[] = [];
-  const seenUnitIds = new Set<string>();
 
-  for (const v of vacancyRows) {
-    const unitId = String(v.unit_id || v.UnitId || "");
-    if (!unitId) continue;
-    // The vacancy report can have more than one row per unit if AppFolio
-    // is showing a gap + a future lease. Dedupe.
-    if (seenUnitIds.has(unitId)) continue;
-    seenUnitIds.add(unitId);
+  for (const [unitId, rows] of leasesByUnit) {
+    if (rows.some((r) => leaseCovers(r, target))) continue;
 
-    const rr = rentRollByUnit.get(unitId);
+    // Representative row for unit metadata + latest-lease-to row for
+    // "last tenant / days vacant on target".
+    const meta = rows[0] ?? {};
+    const latest = [...rows].sort((a, b) => {
+      const at = String(a.lease_to || a.LeaseTo || "");
+      const bt = String(b.lease_to || b.LeaseTo || "");
+      return bt.localeCompare(at);
+    })[0] ?? meta;
+
     const unitName = String(
-      v.unit ||
-        v.Unit ||
-        v.unit_street_address_1 ||
-        v.UnitStreetAddress1 ||
-        rr?.unit ||
-        rr?.Unit ||
-        rr?.unit_street_address_1 ||
-        rr?.UnitStreetAddress1 ||
+      meta.unit ||
+        meta.Unit ||
+        meta.unit_street_address_1 ||
+        meta.UnitStreetAddress1 ||
+        meta.unit_street ||
         ""
     );
-    const { bed, bath } = parseBdBa(v.bd_ba || v.BdBa || rr?.bd_ba || rr?.BdBa);
-    const rent =
-      v.market_rent ||
-      v.MarketRent ||
-      v.rent ||
-      v.Rent ||
-      rr?.rent ||
-      rr?.Rent ||
-      null;
-    const lastTenant = rr ? String(rr.tenant || rr.Tenant || "") || null : null;
-    const lastLeaseTo = rr
-      ? String(rr.lease_to || rr.LeaseTo || "") || null
-      : null;
+    const { bed, bath } = parseBdBa(meta.bd_ba || meta.BdBa);
+    const lastTenant =
+      String(
+        latest.tenant ||
+          latest.Tenant ||
+          latest.tenant_name ||
+          latest.TenantName ||
+          ""
+      ) || null;
+    const lastLeaseTo =
+      String(
+        latest.lease_to ||
+          latest.LeaseTo ||
+          latest.lease_end_date ||
+          latest.LeaseEndDate ||
+          ""
+      ) || null;
 
     let daysVacantOnTarget: number | null = null;
     if (lastLeaseTo) {
@@ -726,25 +760,14 @@ export async function fetchVacanciesOnDate(
     vacancies.push({
       unitId,
       unitName,
-      propertyId:
-        String(
-          v.property_id || v.PropertyId || rr?.property_id || rr?.PropertyId || ""
-        ) || null,
-      propertyName: String(
-        v.property_name ||
-          v.PropertyName ||
-          rr?.property_name ||
-          rr?.PropertyName ||
-          ""
-      ),
+      propertyId: String(meta.property_id || meta.PropertyId || "") || null,
+      propertyName: String(meta.property_name || meta.PropertyName || ""),
       bedrooms: bed,
       bathrooms: bath,
-      sqft: parseSqft(v.square_ft || v.SquareFt || rr?.sqft || rr?.SquareFt),
-      rent,
+      sqft: parseSqft(meta.sqft || meta.SquareFt),
+      rent: meta.rent || meta.Rent || null,
       lastTenant,
       lastLeaseTo,
-      // unit_vacancy_detail means no future lease covers target; leave null
-      // unless AppFolio exposes a "next available" field we can surface.
       nextLeaseFrom: null,
       daysVacantOnTarget,
     });
