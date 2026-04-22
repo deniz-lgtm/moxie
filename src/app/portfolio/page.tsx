@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownAZ,
   ArrowUpAZ,
+  Check,
+  Columns3,
   Download,
   ExternalLink,
   LayoutGrid,
@@ -80,6 +82,226 @@ type SortKey =
   | "insuranceDaysToExpiry"
   | "taxDaysToDue";
 
+// ─── Column metadata ─────────────────────────────────────────────
+// Single source of truth for the portfolio table. Each entry knows how
+// to render a cell and how to emit itself in CSV, so the column picker
+// can flip visibility without anything else needing to stay in sync.
+
+type ColumnDef = {
+  key: SortKey;
+  label: string;
+  align: "left" | "right";
+  title?: string;
+  /** Include in the default column set on narrow screens (<768px). */
+  mobileDefault: boolean;
+  /** Include in the default column set on desktop (≥768px). */
+  desktopDefault: boolean;
+  /** Column is always shown — user can't turn it off (identity/anchor col). */
+  required?: boolean;
+  render: (s: PropertySummary) => React.ReactNode;
+  csv: (s: PropertySummary) => string | number;
+};
+
+const PORTFOLIO_COLUMNS: ColumnDef[] = [
+  {
+    key: "name",
+    label: "Property",
+    align: "left",
+    mobileDefault: true,
+    desktopDefault: true,
+    required: true,
+    render: (s) => (
+      <>
+        <div className="font-medium">{s.property.name}</div>
+        <div className="text-xs text-muted-foreground truncate max-w-sm">
+          {s.property.address}
+        </div>
+      </>
+    ),
+    csv: (s) => s.property.name,
+  },
+  {
+    key: "units",
+    label: "Units",
+    align: "right",
+    mobileDefault: true,
+    desktopDefault: true,
+    render: (s) => <span className="tabular-nums">{s.units.length}</span>,
+    csv: (s) => s.units.length,
+  },
+  {
+    key: "occupancy",
+    label: "Occupancy",
+    align: "right",
+    mobileDefault: true,
+    desktopDefault: true,
+    render: (s) => {
+      const color =
+        s.occupancyRate == null
+          ? "text-muted-foreground"
+          : s.occupancyRate >= 90
+            ? "text-green-600"
+            : s.occupancyRate >= 70
+              ? "text-yellow-600"
+              : "text-red-600";
+      return (
+        <span className={`font-medium tabular-nums ${color}`}>
+          {s.occupancyRate == null ? "—" : `${s.occupancyRate}%`}
+        </span>
+      );
+    },
+    csv: (s) => (s.occupancyRate == null ? "" : s.occupancyRate),
+  },
+  {
+    key: "vacant",
+    label: "Unleased",
+    align: "right",
+    mobileDefault: true,
+    desktopDefault: true,
+    render: (s) =>
+      s.vacant > 0 ? (
+        <span className="text-red-600 font-medium tabular-nums">{s.vacant}</span>
+      ) : (
+        <span className="text-muted-foreground tabular-nums">0</span>
+      ),
+    csv: (s) => s.vacant,
+  },
+  {
+    key: "rent",
+    label: "Monthly Rent",
+    align: "right",
+    mobileDefault: true,
+    desktopDefault: true,
+    render: (s) => (
+      <span className="tabular-nums">${s.totalMonthlyRent.toLocaleString()}</span>
+    ),
+    csv: (s) => s.totalMonthlyRent,
+  },
+  {
+    key: "avgRent",
+    label: "Avg Rent",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => (
+      <span className="tabular-nums text-muted-foreground">
+        {s.avgRent > 0 ? `$${s.avgRent.toLocaleString()}` : "—"}
+      </span>
+    ),
+    csv: (s) => s.avgRent,
+  },
+  {
+    key: "avgRentPerSqft",
+    label: "$/Sqft",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => (
+      <span className="tabular-nums text-muted-foreground">
+        {s.avgRentPerSqft > 0 ? `$${s.avgRentPerSqft.toFixed(2)}` : "—"}
+      </span>
+    ),
+    csv: (s) => Number(s.avgRentPerSqft.toFixed(2)),
+  },
+  {
+    key: "expiringNext90",
+    label: "Exp 90d",
+    title: "Leases expiring in next 90 days",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => <span className="tabular-nums">{s.expiringNext90}</span>,
+    csv: (s) => s.expiringNext90,
+  },
+  {
+    key: "openWorkOrders",
+    label: "Open WOs",
+    title: "Open work orders",
+    align: "right",
+    mobileDefault: true,
+    desktopDefault: true,
+    render: (s) =>
+      s.openWorkOrders > 0 ? (
+        <span className="tabular-nums">{s.openWorkOrders}</span>
+      ) : (
+        <span className="text-muted-foreground tabular-nums">0</span>
+      ),
+    csv: (s) => s.openWorkOrders,
+  },
+  {
+    key: "workOrderSpendYtd",
+    label: "WO YTD",
+    title: "Work-order spend year-to-date",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => (
+      <span className="tabular-nums text-muted-foreground">
+        {s.workOrderSpendYtd > 0
+          ? `$${Math.round(s.workOrderSpendYtd).toLocaleString()}`
+          : "—"}
+      </span>
+    ),
+    csv: (s) => Math.round(s.workOrderSpendYtd),
+  },
+  {
+    key: "activeCapexSpend",
+    label: "Capex",
+    title: "Active capital projects — spend / count",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => (
+      <span className="tabular-nums text-muted-foreground">
+        {s.activeCapexCount > 0
+          ? `$${Math.round(s.activeCapexSpend).toLocaleString()} / ${s.activeCapexCount}`
+          : "—"}
+      </span>
+    ),
+    csv: (s) =>
+      s.activeCapexCount > 0
+        ? `${Math.round(s.activeCapexSpend)} / ${s.activeCapexCount}`
+        : "",
+  },
+  {
+    key: "insuranceDaysToExpiry",
+    label: "Insurance",
+    title: "Days until insurance expires",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => (
+      <ComplianceCell
+        daysToEvent={s.insuranceDaysToExpiry}
+        date={s.insuranceExpires}
+      />
+    ),
+    csv: (s) => s.insuranceExpires ?? "",
+  },
+  {
+    key: "taxDaysToDue",
+    label: "Tax Due",
+    title: "Days until next property-tax installment",
+    align: "right",
+    mobileDefault: false,
+    desktopDefault: true,
+    render: (s) => (
+      <ComplianceCell daysToEvent={s.taxDaysToDue} date={s.taxNextDue} />
+    ),
+    csv: (s) => s.taxNextDue ?? "",
+  },
+];
+
+const COLUMNS_STORAGE_KEY = "moxie.portfolio.visibleColumns";
+
+function defaultVisibleColumns(isMobile: boolean): Set<SortKey> {
+  return new Set(
+    PORTFOLIO_COLUMNS.filter((c) =>
+      isMobile ? c.mobileDefault : c.desktopDefault
+    ).map((c) => c.key)
+  );
+}
+
 function todayIso(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -117,6 +339,61 @@ export default function PortfolioPage() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Visible columns — initialize to screen-size-appropriate defaults, then
+  // hydrate from localStorage if the user has saved a custom set. SSR-safe:
+  // defaults assume desktop until the client effect below flips things.
+  const [visibleColumns, setVisibleColumns] = useState<Set<SortKey>>(() =>
+    defaultVisibleColumns(false)
+  );
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setVisibleColumns(new Set(parsed as SortKey[]));
+          return;
+        }
+      }
+    } catch {
+      // fall through to defaults
+    }
+    const isMobile =
+      typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+    setVisibleColumns(defaultVisibleColumns(isMobile));
+  }, []);
+
+  const toggleColumn = useCallback((key: SortKey) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      const required = new Set(
+        PORTFOLIO_COLUMNS.filter((c) => c.required).map((c) => c.key)
+      );
+      for (const r of required) next.add(r);
+      try {
+        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const resetColumns = useCallback(() => {
+    const isMobile =
+      typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+    const next = defaultVisibleColumns(isMobile);
+    setVisibleColumns(next);
+    try {
+      localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const refreshAttributes = useCallback(async () => {
     try {
@@ -373,68 +650,26 @@ export default function PortfolioPage() {
   );
 
   const exportCsv = useCallback(() => {
-    const rows = [
+    // CSV mirrors the columns currently visible in the table, in the same
+    // order, so the file matches what the user is looking at on screen.
+    // Address is always included regardless of picker state (it's context
+    // paired with the property name).
+    const cols = PORTFOLIO_COLUMNS.filter((c) => visibleColumns.has(c.key));
+    const rows: (string | number)[][] = [
       [
-        "Property",
-        "Address",
-        "Units",
-        "Occupied",
-        "Unleased",
-        "Notice",
-        "Occupancy %",
-        "Monthly Rent",
-        "Avg Rent",
-        "Total Sqft",
-        "Avg Rent/Sqft",
-        "Next Lease Expiration",
-        "Expirations in next 90d",
-        "Open Work Orders",
-        "Work Order Spend YTD",
-        "Active Capex Count",
-        "Active Capex Spend",
-        "Active Capex Budget",
-        "Insurance Carrier",
-        "Insurance Expires",
-        "Insurance Premium Annual",
-        "Tax APN",
-        "Tax Annual",
-        "Tax Next Due",
-        "Tax YTD Paid",
+        ...cols.flatMap((c) => (c.key === "name" ? ["Property", "Address"] : [c.label])),
       ],
-      ...filteredSorted.map((s) => [
-        s.property.name,
-        s.property.address ?? "",
-        s.units.length,
-        s.occupied,
-        s.vacant,
-        s.notice,
-        s.occupancyRate,
-        s.totalMonthlyRent,
-        s.avgRent,
-        s.totalSqft,
-        s.avgRentPerSqft.toFixed(2),
-        s.nextExpiration ?? "",
-        s.expiringNext90,
-        s.openWorkOrders,
-        s.workOrderSpendYtd,
-        s.activeCapexCount,
-        s.activeCapexSpend,
-        s.activeCapexBudget,
-        s.attribute?.insuranceCarrier ?? "",
-        s.insuranceExpires ?? "",
-        s.attribute?.insurancePremiumAnnual ?? "",
-        s.attribute?.taxApn ?? "",
-        s.attribute?.taxAnnualAmount ?? "",
-        s.taxNextDue ?? "",
-        s.attribute?.taxYtdPaid ?? "",
-      ]),
+      ...filteredSorted.map((s) =>
+        cols.flatMap((c) =>
+          c.key === "name" ? [s.property.name, s.property.address ?? ""] : [c.csv(s)]
+        )
+      ),
     ];
     const csv = rows
       .map((r) =>
         r
           .map((cell) => {
             const v = String(cell ?? "");
-            // Quote if contains comma, quote, or newline; escape quotes.
             return /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
           })
           .join(",")
@@ -447,7 +682,7 @@ export default function PortfolioPage() {
     a.download = `portfolio-${asOfDate}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [filteredSorted, asOfDate]);
+  }, [filteredSorted, asOfDate, visibleColumns]);
 
   if (loading) {
     return (
@@ -523,6 +758,11 @@ export default function PortfolioPage() {
               <LayoutGrid className="w-4 h-4" /> Cards
             </button>
           </div>
+          <ColumnsPicker
+            visible={visibleColumns}
+            onToggle={toggleColumn}
+            onReset={resetColumns}
+          />
           <button
             onClick={exportCsv}
             className="px-3 py-1.5 text-sm inline-flex items-center gap-1 border border-border rounded-lg bg-card hover:bg-muted"
@@ -578,7 +818,7 @@ export default function PortfolioPage() {
           sortDir={sortDir}
           onSort={toggleSort}
           onSelect={(id) => setSelectedId(id)}
-          stats={stats}
+          visibleColumns={visibleColumns}
         />
       ) : (
         <PropertyCards summaries={filteredSorted} onSelect={(id) => setSelectedId(id)} />
@@ -1169,47 +1409,34 @@ function PropertyTable({
   sortDir,
   onSort,
   onSelect,
+  visibleColumns,
 }: {
   summaries: PropertySummary[];
   sortKey: SortKey;
   sortDir: "asc" | "desc";
   onSort: (k: SortKey) => void;
   onSelect: (id: string) => void;
-  stats: DashboardStats | null;
+  visibleColumns: Set<SortKey>;
 }) {
-  const headers: { key: SortKey; label: string; align?: "right" | "left"; title?: string }[] = [
-    { key: "name", label: "Property", align: "left" },
-    { key: "units", label: "Units", align: "right" },
-    { key: "occupancy", label: "Occupancy", align: "right" },
-    { key: "vacant", label: "Unleased", align: "right" },
-    { key: "rent", label: "Monthly Rent", align: "right" },
-    { key: "avgRent", label: "Avg Rent", align: "right" },
-    { key: "avgRentPerSqft", label: "$/Sqft", align: "right" },
-    { key: "expiringNext90", label: "Exp 90d", align: "right", title: "Leases expiring in next 90 days" },
-    { key: "openWorkOrders", label: "Open WOs", align: "right", title: "Open work orders" },
-    { key: "workOrderSpendYtd", label: "WO YTD", align: "right", title: "Work-order spend year-to-date" },
-    { key: "activeCapexSpend", label: "Capex", align: "right", title: "Active capital projects — spend" },
-    { key: "insuranceDaysToExpiry", label: "Insurance", align: "right", title: "Days until insurance expires" },
-    { key: "taxDaysToDue", label: "Tax Due", align: "right", title: "Days until next property-tax installment" },
-  ];
+  const cols = PORTFOLIO_COLUMNS.filter((c) => visibleColumns.has(c.key));
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted">
-              {headers.map((h) => (
+              {cols.map((c) => (
                 <th
-                  key={h.key}
-                  title={h.title}
+                  key={c.key}
+                  title={c.title}
                   className={`${
-                    h.align === "right" ? "text-right" : "text-left"
+                    c.align === "right" ? "text-right" : "text-left"
                   } px-4 py-3 font-medium cursor-pointer select-none whitespace-nowrap`}
-                  onClick={() => onSort(h.key)}
+                  onClick={() => onSort(c.key)}
                 >
                   <span className="inline-flex items-center gap-1">
-                    {h.label}
-                    {sortKey === h.key &&
+                    {c.label}
+                    {sortKey === c.key &&
                       (sortDir === "asc" ? (
                         <ArrowUpAZ className="w-3 h-3" />
                       ) : (
@@ -1221,80 +1448,117 @@ function PropertyTable({
             </tr>
           </thead>
           <tbody>
-            {summaries.map((s) => {
-              const occColor =
-                s.occupancyRate == null
-                  ? "text-muted-foreground"
-                  : s.occupancyRate >= 90
-                    ? "text-green-600"
-                    : s.occupancyRate >= 70
-                      ? "text-yellow-600"
-                      : "text-red-600";
-              return (
-                <tr
-                  key={s.property.id}
-                  onClick={() => onSelect(s.property.id)}
-                  className="border-b border-border last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{s.property.name}</div>
-                    <div className="text-xs text-muted-foreground truncate max-w-sm">
-                      {s.property.address}
-                    </div>
+            {summaries.map((s) => (
+              <tr
+                key={s.property.id}
+                onClick={() => onSelect(s.property.id)}
+                className="border-b border-border last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+              >
+                {cols.map((c) => (
+                  <td
+                    key={c.key}
+                    className={`px-4 py-3 ${c.align === "right" ? "text-right" : ""}`}
+                  >
+                    {c.render(s)}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{s.units.length}</td>
-                  <td className={`px-4 py-3 text-right font-medium tabular-nums ${occColor}`}>
-                    {s.occupancyRate == null ? "—" : `${s.occupancyRate}%`}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {s.vacant > 0 ? (
-                      <span className="text-red-600 font-medium">{s.vacant}</span>
-                    ) : (
-                      <span className="text-muted-foreground">0</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    ${s.totalMonthlyRent.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                    {s.avgRent > 0 ? `$${s.avgRent.toLocaleString()}` : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                    {s.avgRentPerSqft > 0 ? `$${s.avgRentPerSqft.toFixed(2)}` : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">{s.expiringNext90}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {s.openWorkOrders > 0 ? (
-                      <span className="text-foreground">{s.openWorkOrders}</span>
-                    ) : (
-                      <span className="text-muted-foreground">0</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                    {s.workOrderSpendYtd > 0
-                      ? `$${Math.round(s.workOrderSpendYtd).toLocaleString()}`
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                    {s.activeCapexCount > 0
-                      ? `$${Math.round(s.activeCapexSpend).toLocaleString()} / ${s.activeCapexCount}`
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <ComplianceCell
-                      daysToEvent={s.insuranceDaysToExpiry}
-                      date={s.insuranceExpires}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <ComplianceCell daysToEvent={s.taxDaysToDue} date={s.taxNextDue} />
-                  </td>
-                </tr>
-              );
-            })}
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function ColumnsPicker({
+  visible,
+  onToggle,
+  onReset,
+}: {
+  visible: Set<SortKey>;
+  onToggle: (k: SortKey) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="px-3 py-1.5 text-sm inline-flex items-center gap-1 border border-border rounded-lg bg-card hover:bg-muted"
+        title="Show / hide columns"
+      >
+        <Columns3 className="w-4 h-4" /> Columns
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-64 bg-card border border-border rounded-lg shadow-lg z-10 overflow-hidden">
+          <div className="p-2 max-h-80 overflow-y-auto">
+            {PORTFOLIO_COLUMNS.map((c) => {
+              const checked = visible.has(c.key);
+              const disabled = c.required;
+              return (
+                <button
+                  key={c.key}
+                  onClick={() => !disabled && onToggle(c.key)}
+                  disabled={disabled}
+                  className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center gap-2 hover:bg-muted disabled:opacity-60 disabled:hover:bg-transparent`}
+                >
+                  <span
+                    className={`inline-flex w-4 h-4 items-center justify-center rounded border ${
+                      checked
+                        ? "bg-accent border-accent text-white"
+                        : "border-border bg-card"
+                    }`}
+                  >
+                    {checked && <Check className="w-3 h-3" strokeWidth={3} />}
+                  </span>
+                  <span>{c.label}</span>
+                  {c.required && (
+                    <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Required
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="border-t border-border p-2 flex items-center justify-between">
+            <button
+              onClick={() => {
+                onReset();
+                setOpen(false);
+              }}
+              className="text-xs text-accent hover:underline"
+            >
+              Reset to default
+            </button>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
