@@ -304,6 +304,22 @@ export type DbCapitalProject = {
   updated_at: string;
 };
 
+// ─── Property P&L Line Items (monthly opex + other income) ──────
+// Mirrors supabase/migrations/20260423_property_pnl_line_items.sql.
+// One row per property × month × category. Rent comes from rent roll;
+// this table is for everything AppFolio doesn't surface cleanly.
+
+export type DbPropertyPnlLineItem = {
+  id: string;
+  property_id: string;
+  month: string;       // YYYY-MM-01 date
+  category: string;
+  amount: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Property Meetings (Monday morning meetings) ────────────────
 // Mirrors supabase/migrations/20260421_property_meetings.sql.
 

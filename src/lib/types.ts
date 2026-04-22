@@ -104,6 +104,44 @@ export interface CapitalProject {
   milestones: CapitalProjectMilestone[];
 }
 
+// --- Property P&L Line Items (monthly opex + other income) ---
+// Canonical categories used by the UI. The DB stores category as free
+// text, so the team can add new buckets without a migration. The
+// separation into expense vs income is purely UI sign convention for
+// NOI rollups — "expense" categories are subtracted, "income" added.
+export const PNL_EXPENSE_CATEGORIES = [
+  "utilities",
+  "property_mgmt",
+  "insurance",
+  "property_tax",
+  "landscaping",
+  "pest_control",
+  "cleaning",
+  "repairs_maintenance",
+  "admin",
+  "debt_service",
+  "other_opex",
+] as const;
+export const PNL_INCOME_CATEGORIES = ["other_income"] as const;
+export type PnlExpenseCategory = (typeof PNL_EXPENSE_CATEGORIES)[number];
+export type PnlIncomeCategory = (typeof PNL_INCOME_CATEGORIES)[number];
+export type PnlCategory = PnlExpenseCategory | PnlIncomeCategory | string;
+
+export function isPnlIncomeCategory(c: string): boolean {
+  return (PNL_INCOME_CATEGORIES as readonly string[]).includes(c);
+}
+
+export interface PropertyPnlLineItem {
+  id: string;
+  propertyId: string;
+  month: string;             // YYYY-MM-01
+  category: PnlCategory;
+  amount: number;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // A unit that has no lease covering a given target date. Produced by
 // `fetchVacanciesOnDate` in lib/data.ts; consumed by the meetings agenda
 // to answer "which units will be empty on 2026-08-15?"

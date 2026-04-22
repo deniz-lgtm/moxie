@@ -20,8 +20,14 @@ import type {
   MaintenanceRequest,
   Property,
   PropertyAttribute,
+  PropertyPnlLineItem,
   Unit,
   VacantUnit,
+} from "@/lib/types";
+import {
+  PNL_EXPENSE_CATEGORIES,
+  PNL_INCOME_CATEGORIES,
+  isPnlIncomeCategory,
 } from "@/lib/types";
 
 type PropertySummary = {
@@ -540,6 +546,352 @@ export default function PortfolioPage() {
       )}
     </div>
   );
+}
+
+function OperatingExpensesCard({
+  propertyId,
+  totalMonthlyRent,
+}: {
+  propertyId: string;
+  totalMonthlyRent: number;
+}) {
+  const [month, setMonth] = useState<string>(() => {
+    // Default: last full month (YYYY-MM-01)
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  });
+  const [items, setItems] = useState<PropertyPnlLineItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [savingCategory, setSavingCategory] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(
+        `/api/properties/pnl?property_id=${encodeURIComponent(propertyId)}&month=${encodeURIComponent(month)}`
+      );
+      const j = await r.json();
+      setItems(Array.isArray(j.items) ? j.items : []);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [propertyId, month]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const save = useCallback(
+    async (category: string, amount: number, notes?: string) => {
+      setSavingCategory(category);
+      try {
+        const r = await fetch("/api/properties/pnl", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            propertyId,
+            month,
+            category,
+            amount,
+            notes,
+          }),
+        });
+        const j = await r.json();
+        if (j.item) {
+          setItems((prev) => {
+            const idx = prev.findIndex((x) => x.category === category);
+            if (idx >= 0) return prev.map((x, i) => (i === idx ? j.item : x));
+            return [...prev, j.item];
+          });
+        }
+      } finally {
+        setSavingCategory(null);
+      }
+    },
+    [propertyId, month]
+  );
+
+  const remove = useCallback(async (id: string) => {
+    await fetch(`/api/properties/pnl?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  }, []);
+
+  const monthLabel = useMemo(
+    () =>
+      new Date(month + "T00:00:00").toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      }),
+    [month]
+  );
+
+  const shiftMonth = (delta: number) => {
+    const d = new Date(month + "T00:00:00");
+    d.setMonth(d.getMonth() + delta);
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+  };
+
+  const expenseItems = items.filter((i) => !isPnlIncomeCategory(i.category));
+  const incomeItems = items.filter((i) => isPnlIncomeCategory(i.category));
+  const totalExpenses = expenseItems.reduce((s, i) => s + i.amount, 0);
+  const totalOtherIncome = incomeItems.reduce((s, i) => s + i.amount, 0);
+  const noi = totalMonthlyRent + totalOtherIncome - totalExpenses;
+
+  const usedCategories = new Set(items.map((i) => i.category));
+  const suggestedExpenses = PNL_EXPENSE_CATEGORIES.filter((c) => !usedCategories.has(c));
+  const suggestedIncome = PNL_INCOME_CATEGORIES.filter((c) => !usedCategories.has(c));
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border flex items-center justify-between flex-wrap gap-3">
+        <h2 className="font-semibold">Operating Expenses — Monthly</h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => shiftMonth(-1)}
+            className="px-2 py-1 text-sm border border-border rounded hover:bg-muted"
+          >
+            ‹
+          </button>
+          <span className="text-sm font-medium w-32 text-center">{monthLabel}</span>
+          <button
+            onClick={() => shiftMonth(1)}
+            className="px-2 py-1 text-sm border border-border rounded hover:bg-muted"
+          >
+            ›
+          </button>
+          <input
+            type="month"
+            value={month.slice(0, 7)}
+            onChange={(e) => setMonth(`${e.target.value}-01`)}
+            className="text-sm border border-border rounded px-2 py-1 bg-card ml-2"
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="p-5 text-sm text-muted-foreground">Loading…</div>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted">
+                  <th className="text-left px-4 py-2 font-medium">Category</th>
+                  <th className="text-right px-4 py-2 font-medium">Amount</th>
+                  <th className="text-left px-4 py-2 font-medium">Notes</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenseItems.length === 0 && incomeItems.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-3 text-sm text-muted-foreground">
+                      No entries for this month yet. Pick a category below to add one.
+                    </td>
+                  </tr>
+                )}
+                {[...expenseItems, ...incomeItems].map((item) => (
+                  <LineItemRow
+                    key={item.id}
+                    item={item}
+                    saving={savingCategory === item.category}
+                    onSave={(amount, notes) => save(item.category, amount, notes)}
+                    onDelete={() => remove(item.id)}
+                  />
+                ))}
+              </tbody>
+              <tfoot className="border-t border-border">
+                <tr className="bg-muted/50">
+                  <td className="px-4 py-2 font-semibold">Total other income</td>
+                  <td className="px-4 py-2 text-right font-mono">
+                    ${totalOtherIncome.toLocaleString()}
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+                <tr className="bg-muted/50">
+                  <td className="px-4 py-2 font-semibold">Total operating expenses</td>
+                  <td className="px-4 py-2 text-right font-mono text-red-700">
+                    −${totalExpenses.toLocaleString()}
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+                <tr className="bg-muted">
+                  <td className="px-4 py-2 font-semibold">
+                    Net Operating Income
+                    <span className="text-xs text-muted-foreground ml-2">
+                      (rent ${totalMonthlyRent.toLocaleString()} + other income − opex)
+                    </span>
+                  </td>
+                  <td
+                    className={`px-4 py-2 text-right font-semibold font-mono ${
+                      noi < 0 ? "text-red-700" : "text-green-700"
+                    }`}
+                  >
+                    ${noi.toLocaleString()}
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="p-4 border-t border-border flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground">+ Add:</span>
+            {suggestedExpenses.map((c) => (
+              <button
+                key={c}
+                onClick={() => save(c, 0)}
+                className="text-xs px-2 py-1 rounded border border-border hover:bg-muted"
+              >
+                {formatCategoryLabel(c)}
+              </button>
+            ))}
+            {suggestedIncome.map((c) => (
+              <button
+                key={c}
+                onClick={() => save(c, 0)}
+                className="text-xs px-2 py-1 rounded border border-green-200 bg-green-50 text-green-800 hover:bg-green-100"
+              >
+                {formatCategoryLabel(c)}
+              </button>
+            ))}
+            <CustomCategoryButton
+              onAdd={(c) => {
+                if (c.trim()) save(c.trim().toLowerCase().replace(/\s+/g, "_"), 0);
+              }}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function LineItemRow({
+  item,
+  saving,
+  onSave,
+  onDelete,
+}: {
+  item: PropertyPnlLineItem;
+  saving: boolean;
+  onSave: (amount: number, notes?: string) => void;
+  onDelete: () => void;
+}) {
+  const [amount, setAmount] = useState<string>(String(item.amount));
+  const [notes, setNotes] = useState<string>(item.notes ?? "");
+  useEffect(() => {
+    setAmount(String(item.amount));
+    setNotes(item.notes ?? "");
+  }, [item]);
+  const isIncome = isPnlIncomeCategory(item.category);
+  return (
+    <tr className="border-b border-border last:border-0">
+      <td className="px-4 py-2">
+        <span className="inline-flex items-center gap-2">
+          <span
+            className={`inline-block w-1.5 h-1.5 rounded-full ${
+              isIncome ? "bg-green-500" : "bg-red-500"
+            }`}
+          />
+          {formatCategoryLabel(item.category)}
+        </span>
+      </td>
+      <td className="px-4 py-2 text-right">
+        <input
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          onBlur={() => {
+            const n = Number(amount) || 0;
+            if (n !== item.amount) onSave(n, notes || undefined);
+          }}
+          className="w-28 text-right text-sm font-mono border border-border rounded px-2 py-1 bg-card"
+        />
+      </td>
+      <td className="px-4 py-2">
+        <input
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={() => {
+            if (notes !== (item.notes ?? "")) onSave(Number(amount) || 0, notes || undefined);
+          }}
+          placeholder="Optional notes"
+          className="w-full text-sm border border-border rounded px-2 py-1 bg-card"
+        />
+      </td>
+      <td className="px-4 py-2 text-right">
+        {saving ? (
+          <span className="text-xs text-muted-foreground">Saving…</span>
+        ) : (
+          <button
+            onClick={onDelete}
+            className="text-muted-foreground hover:text-red-600 text-xs"
+            title="Delete row"
+          >
+            ✕
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function CustomCategoryButton({ onAdd }: { onAdd: (category: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="text-xs px-2 py-1 rounded border border-dashed border-border hover:bg-muted"
+      >
+        + Custom
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            onAdd(value);
+            setValue("");
+            setEditing(false);
+          } else if (e.key === "Escape") {
+            setValue("");
+            setEditing(false);
+          }
+        }}
+        placeholder="category name"
+        className="text-xs border border-border rounded px-2 py-1 bg-card w-32"
+      />
+      <button
+        onClick={() => {
+          onAdd(value);
+          setValue("");
+          setEditing(false);
+        }}
+        className="text-xs text-accent hover:underline"
+      >
+        Add
+      </button>
+    </span>
+  );
+}
+
+function formatCategoryLabel(c: string): string {
+  return c
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 function PropertyInfoCard({
@@ -1061,6 +1413,11 @@ function PropertyDetailView({
         propertyId={selected.property.id}
         attribute={selected.attribute}
         onSaved={onAttributeSaved}
+      />
+
+      <OperatingExpensesCard
+        propertyId={selected.property.id}
+        totalMonthlyRent={selected.totalMonthlyRent}
       />
 
       <div className="bg-card rounded-xl border border-border overflow-hidden">
