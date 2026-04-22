@@ -497,10 +497,6 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   }
 
   const filtered = await filterToMoxie(rentRollRaw);
-  const vacancyRows = Array.isArray(vacancyRaw) && vacancyRaw.length > 0
-    ? await filterToMoxie(vacancyRaw)
-    : [];
-
   // Group rent roll by unit_id for total + occupied counts.
   const unitRows = new Map<string, any[]>();
   for (const r of filtered) {
@@ -521,10 +517,19 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   }
 
   // Unique set of unit_ids that AppFolio says are vacant on the target date.
+  // Cross-reference against the rent roll's Moxie unit_ids instead of
+  // filterToMoxie, since unit_vacancy_detail may not carry portfolio_id.
+  const moxieUnitIds = new Set(unitRows.keys());
+  const vacancyList = Array.isArray(vacancyRaw) ? vacancyRaw : [];
   const vacantUnitIds = new Set<string>();
-  for (const v of vacancyRows) {
+  for (const v of vacancyList) {
     const id = String(v.unit_id || v.UnitId || "");
-    if (id) vacantUnitIds.add(id);
+    if (id && moxieUnitIds.has(id)) vacantUnitIds.add(id);
+  }
+  if (ayStart && vacancyList.length > 0 && vacantUnitIds.size === 0) {
+    console.warn(
+      `[Moxie] fetchUnitStats: 0/${vacancyList.length} vacancy rows matched Moxie unit_ids`
+    );
   }
 
   const preLeased = ayStart ? Math.max(0, total - vacantUnitIds.size) : 0;
@@ -576,12 +581,33 @@ export async function fetchVacanciesOnDate(
     }),
   ]);
 
-  const vacancyRows = Array.isArray(rawVacancy) && rawVacancy.length > 0
-    ? await filterToMoxie(rawVacancy)
-    : [];
   const rentRollRows = Array.isArray(rawRentRoll) && rawRentRoll.length > 0
     ? await filterToMoxie(rawRentRoll)
     : [];
+
+  // unit_vacancy_detail may not carry portfolio_id or even the Moxie-set
+  // property_id in a form filterToMoxie can use, so filtering by those
+  // fields silently drops everything. Use the rent roll (which we already
+  // filter correctly) as the ground truth for "is this a Moxie unit_id",
+  // and only trust vacancy rows whose unit_id is in that set.
+  const moxieUnitIds = new Set<string>();
+  for (const r of rentRollRows) {
+    const id = String(r.unit_id || r.UnitId || "");
+    if (id) moxieUnitIds.add(id);
+  }
+
+  const rawVacancyList = Array.isArray(rawVacancy) ? rawVacancy : [];
+  const vacancyRows = rawVacancyList.filter((v) => {
+    const id = String(v.unit_id || v.UnitId || "");
+    return id && moxieUnitIds.has(id);
+  });
+  if (rawVacancyList.length > 0 && vacancyRows.length === 0) {
+    console.warn(
+      `[Moxie] unit_vacancy_detail: 0/${rawVacancyList.length} rows matched Moxie unit_ids ` +
+        `(moxie set size: ${moxieUnitIds.size}). Sample row keys: ` +
+        `${Object.keys(rawVacancyList[0] || {}).slice(0, 12).join(", ")}`
+    );
+  }
 
   // Index rent roll by unit_id — keep the row with the latest lease_to so
   // "last tenant / last lease-end" refers to the most recent lease on file.
