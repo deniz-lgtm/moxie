@@ -566,38 +566,34 @@ export async function diagnoseVacancyFetch(targetDate: string) {
   // predicate. A unit is "leased" iff ANY of its rows passes isLeasedOnTarget.
   let leasedUnits = 0;
   let vacantUnits = 0;
-  let leasedByStatusReplacement = 0; // units leased only due to *-rented status
-  let leasedByDirectLease = 0; // units leased via direct lease_from/to coverage
-  let leasedByFuture = 0; // units leased via status=future + lease_from
+  // Why a unit is counted as leased — mirrors the branches of
+  // isLeasedOnTarget so the diagnostic explains itself:
+  let leasedByCurrentLease = 0;       // status=current|notice-*, lease covers target
+  let leasedByReplacementSignal = 0;  // notice-*-rented, current lease ended before target
+  let leasedByFutureStarted = 0;      // vacant-rented/future, lease_from <= target
   const vacantSample: any[] = [];
 
   for (const [, rows] of byUnit) {
     const leased = rows.some((r) => isLeasedOnTarget(r, target));
     if (leased) {
       leasedUnits++;
-      // Figure out *why* it was leased (first-matching signal).
       for (const r of rows) {
+        if (!isLeasedOnTarget(r, target)) continue;
         const status = String(r.status || r.Status || "").toLowerCase();
-        if (status.endsWith("-rented")) {
-          leasedByStatusReplacement++;
-          break;
+        const fromStr = r.lease_from || r.LeaseFrom;
+        const toStr = r.lease_to || r.LeaseTo;
+        const from = fromStr ? new Date(fromStr) : null;
+        const to = toStr ? new Date(toStr) : null;
+        if (status.startsWith("vacant") || status === "future") {
+          leasedByFutureStarted++;
+        } else if (to && !isNaN(to.getTime()) && from && !isNaN(from.getTime()) && from <= target && to >= target) {
+          leasedByCurrentLease++;
+        } else if (status.endsWith("-rented")) {
+          leasedByReplacementSignal++;
+        } else {
+          leasedByCurrentLease++; // MTM or other "tenant present today" case
         }
-        const from = r.lease_from || r.LeaseFrom;
-        if (status === "future" && from && new Date(from) <= target) {
-          leasedByFuture++;
-          break;
-        }
-        const tenant = String(r.tenant || r.Tenant || "").trim();
-        const to = r.lease_to || r.LeaseTo;
-        if (
-          tenant &&
-          from &&
-          new Date(from) <= target &&
-          (!to || new Date(to) >= target)
-        ) {
-          leasedByDirectLease++;
-          break;
-        }
+        break;
       }
     } else {
       vacantUnits++;
@@ -630,56 +626,81 @@ export async function diagnoseVacancyFetch(targetDate: string) {
     classification: {
       leasedUnits,
       vacantUnits,
-      leasedByDirectLease,
-      leasedByStatusReplacement,
-      leasedByFuture,
-      sumCheck: leasedByDirectLease + leasedByStatusReplacement + leasedByFuture,
+      leasedByCurrentLease,
+      leasedByReplacementSignal,
+      leasedByFutureStarted,
+      sumCheck: leasedByCurrentLease + leasedByReplacementSignal + leasedByFutureStarted,
     },
     vacantSample,
   };
 }
 
 /**
- * A unit is LEASED on the target date iff one of these is true on ANY of
- * its rent_roll rows:
- *   (a) The lease dates cover target: lease_from <= target <= lease_to
- *       (null lease_to = MTM, treated as covered).
- *   (b) Status ends in "-rented" (AppFolio's "Notice-Rented" / "Vacant-
- *       Rented" explicitly signals a replacement lease is already signed
- *       for when the current tenant leaves — the rent roll encodes the
- *       upcoming lease in the status field rather than as a separate row).
- *   (c) Status is "future" with lease_from <= target (future-signed lease
- *       whose start date already arrived).
+ * A unit is LEASED on the target date iff its rent-roll row satisfies one
+ * of the branches below. The AppFolio `status` field encodes both the
+ * current state AND whether a replacement lease has been signed:
  *
- * Tenant_directory doesn't carry future-only leases (confirmed via the
- * vacancy_debug diagnostic — 0 rows with lease_from > target), so the
- * status-suffix signal on the rent roll is the authoritative source for
- * "has a replacement been signed".
+ *   "Current"          — tenant actively in place under lease.
+ *   "Notice-Unrented"  — current tenant on notice, no replacement signed.
+ *   "Notice-Rented"    — current tenant on notice, replacement signed.
+ *   "Vacant-Unrented"  — unit empty, no replacement signed.
+ *   "Vacant-Rented"    — unit empty, FUTURE lease already signed (but not
+ *                         yet active — row's lease_from is the start date).
+ *   "Future"           — lease signed, not yet active.
+ *
+ * The key subtlety: "Vacant-Rented" does NOT mean occupied *today* — the
+ * unit is genuinely empty right now; someone is just lined up to move in
+ * later. So a blanket "-rented suffix ⇒ leased" check over-counts
+ * occupancy for student-housing pre-leases months ahead of the school
+ * year.
+ *
+ * Rule:
+ *   - status starts with "vacant": empty today. Leased iff the row's
+ *     lease_from (the replacement's start, for -Rented variants) is
+ *     already on/before target.
+ *   - status "future": same — leased iff lease_from <= target.
+ *   - status "current" or "notice-*": a tenant is in place. Leased iff
+ *     direct lease dates cover target. If the current lease has ended
+ *     and status ends with "-rented", the replacement takes over, so
+ *     still leased (this is approximate — we assume the replacement
+ *     starts immediately at the old lease end, since AppFolio doesn't
+ *     carry the replacement's dates on this row).
  */
 function isLeasedOnTarget(row: any, target: Date): boolean {
   const status = String(row.status || row.Status || "").toLowerCase();
   const statusSqft = String(row.status_by_square_feet || "").toLowerCase();
+  const canonStatus = status || statusSqft;
 
-  // (b) Replacement already signed.
-  if (status.endsWith("-rented") || statusSqft.endsWith("-rented")) return true;
-
-  // (c) Future-signed lease whose start date has arrived on/before target.
   const fromStr =
     row.lease_from || row.LeaseFrom || row.lease_start_date || row.LeaseStartDate;
+  const toStr = row.lease_to || row.LeaseTo;
   const from = fromStr ? new Date(fromStr) : null;
-  if ((status === "future" || statusSqft === "future") && from && !isNaN(from.getTime())) {
-    if (from <= target) return true;
+  const to = toStr ? new Date(toStr) : null;
+  const fromValid = from != null && !isNaN(from.getTime());
+  const toValid = to != null && !isNaN(to.getTime());
+
+  // "Vacant-*" — empty today. Only leased if the replacement's start
+  // date is already on/before target.
+  if (canonStatus.startsWith("vacant")) {
+    if (canonStatus === "vacant-rented") {
+      return Boolean(fromValid && from! <= target);
+    }
+    return false; // "vacant-unrented" and other vacant-* variants
   }
 
-  // (a) Direct lease coverage.
+  // "Future" — lease signed but not yet active.
+  if (canonStatus === "future") {
+    return Boolean(fromValid && from! <= target);
+  }
+
+  // "Current" / "Notice-*" — a tenant is in place.
   const tenant = String(row.tenant || row.Tenant || "").trim();
-  if (!tenant) return false;
-  if (!from || isNaN(from.getTime()) || from > target) return false;
-  const toStr = row.lease_to || row.LeaseTo;
-  if (!toStr) return true; // MTM
-  const to = new Date(toStr);
-  if (isNaN(to.getTime())) return false;
-  return to >= target;
+  if (!tenant || !fromValid || from! > target) return false;
+  if (!toValid) return true; // MTM — indefinitely occupied.
+  if (to! >= target) return true; // target within current lease
+  // target is AFTER current lease end: the replacement takes over only if
+  // it's been signed (status ends with "-rented").
+  return canonStatus.endsWith("-rented");
 }
 
 /** Moxie rent roll grouped by unit_id (single authoritative source). */
