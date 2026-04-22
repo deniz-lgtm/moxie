@@ -2,35 +2,28 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
-import type { Unit } from "@/lib/types";
+import type {
+  CapitalProject,
+  CapitalProjectMilestone as Milestone,
+  ProjectCategory,
+  ProjectStatus,
+  Unit,
+} from "@/lib/types";
 
-type ProjectStatus = "planning" | "in_progress" | "on_hold" | "completed";
-type ProjectCategory = "roof" | "hvac" | "plumbing" | "electrical" | "renovation" | "landscaping" | "other";
-
-type CapitalProject = {
-  id: string;
-  propertyId: string;
-  propertyName: string;
-  name: string;
-  category: ProjectCategory;
-  status: ProjectStatus;
-  startDate: string;
-  targetDate: string;
-  completedDate: string;
-  budget: number;
-  spent: number;
-  contractor: string;
-  description: string;
-  milestones: Milestone[];
-};
-
-type Milestone = {
-  id: string;
-  name: string;
-  completed: boolean;
-  date: string;
-};
+// Persist one project to Supabase via the API. All mutation sites call
+// this after updating local state so the portfolio view stays in sync
+// across the whole team.
+async function persistProject(project: CapitalProject) {
+  try {
+    await fetch("/api/capital-projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(project),
+    });
+  } catch (e) {
+    console.error("[capital-projects] persist failed:", e);
+  }
+}
 
 const CATEGORIES: { value: ProjectCategory; label: string }[] = [
   { value: "roof", label: "Roofing" },
@@ -44,7 +37,7 @@ const CATEGORIES: { value: ProjectCategory; label: string }[] = [
 
 export default function CapitalProjectsPage() {
   const [units, setUnits] = useState<Unit[]>([]);
-  const [projects, setProjects] = useState<CapitalProject[]>(() => loadFromStorage<CapitalProject[]>("capital_projects", []));
+  const [projects, setProjects] = useState<CapitalProject[]>([]);
   const [selected, setSelected] = useState<CapitalProject | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -60,25 +53,25 @@ export default function CapitalProjectsPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
-      .then((res) => res.json())
-      .then((data) => setUnits(data.units || []))
-      .catch(() => {})
+    Promise.all([
+      fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({})),
+      fetch("/api/capital-projects").then((r) => r.json()).catch(() => ({})),
+    ])
+      .then(([unitData, projectData]) => {
+        setUnits(unitData.units || []);
+        setProjects(projectData.projects || []);
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    saveToStorage("capital_projects", projects);
-  }, [projects]);
-
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
 
-  function createProject() {
+  async function createProject() {
     if (!newProject.name.trim() || !newProject.propertyName) return;
 
     const project: CapitalProject = {
       id: `cp-${Date.now()}`,
-      propertyId: "",
+      propertyId: units.find((u) => u.propertyName === newProject.propertyName)?.propertyId ?? "",
       propertyName: newProject.propertyName,
       name: newProject.name,
       category: newProject.category,
@@ -95,6 +88,7 @@ export default function CapitalProjectsPage() {
     setProjects((prev) => [...prev, project]);
     setShowCreateForm(false);
     setNewProject({ propertyName: "", name: "", category: "renovation", budget: 0, contractor: "", targetDate: "", description: "" });
+    await persistProject(project);
   }
 
   function updateProjectStatus(status: ProjectStatus) {
@@ -106,6 +100,7 @@ export default function CapitalProjectsPage() {
     };
     setSelected(updated);
     setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    persistProject(updated);
   }
 
   function addMilestone(name: string) {
@@ -119,6 +114,7 @@ export default function CapitalProjectsPage() {
     const updated = { ...selected, milestones: [...selected.milestones, milestone] };
     setSelected(updated);
     setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    persistProject(updated);
   }
 
   function toggleMilestone(msId: string) {
@@ -131,6 +127,7 @@ export default function CapitalProjectsPage() {
     };
     setSelected(updated);
     setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    persistProject(updated);
   }
 
   if (loading) {

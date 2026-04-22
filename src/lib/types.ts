@@ -52,6 +52,58 @@ export interface Unit {
   appfolioId?: string;
 }
 
+// --- Property Attributes (Moxie overlay) ---
+// Per-property facts that aren't in AppFolio: insurance, taxes, notes.
+export interface PropertyAttribute {
+  propertyId: string;
+  insuranceCarrier?: string;
+  insurancePolicyNumber?: string;
+  insuranceExpires?: string;          // YYYY-MM-DD
+  insurancePremiumAnnual?: number;
+  taxApn?: string;
+  taxAnnualAmount?: number;
+  taxNextInstallmentDue?: string;     // YYYY-MM-DD
+  taxYtdPaid?: number;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// --- Capital Projects (Moxie-managed) ---
+export type ProjectCategory =
+  | "roof"
+  | "hvac"
+  | "plumbing"
+  | "electrical"
+  | "renovation"
+  | "landscaping"
+  | "other";
+export type ProjectStatus = "planning" | "in_progress" | "on_hold" | "completed";
+
+export interface CapitalProjectMilestone {
+  id: string;
+  name: string;
+  completed: boolean;
+  date: string;
+}
+
+export interface CapitalProject {
+  id: string;
+  propertyId: string;
+  propertyName: string;
+  name: string;
+  category: ProjectCategory;
+  status: ProjectStatus;
+  startDate: string;
+  targetDate: string;
+  completedDate: string;
+  budget: number;
+  spent: number;
+  contractor: string;
+  description: string;
+  milestones: CapitalProjectMilestone[];
+}
+
 // A unit that has no lease covering a given target date. Produced by
 // `fetchVacanciesOnDate` in lib/data.ts; consumed by the meetings agenda
 // to answer "which units will be empty on 2026-08-15?"
