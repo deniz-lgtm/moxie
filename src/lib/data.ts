@@ -25,6 +25,7 @@ import type {
   MaintenanceStatus,
   ApplicationGroup,
   AcademicYear,
+  VacantUnit,
 } from "./types";
 import { academicYearDates } from "./types";
 
@@ -509,20 +510,28 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
 
     if (!ayStart) continue;
 
-    // A unit is pre-leased if ANY row satisfies:
-    const hasCurrent = rows.some((r: any) => String(r.status || r.Status || "").toLowerCase() === "current");
-    const hasFuture = rows.some((r: any) => String(r.status || r.Status || "").toLowerCase() === "future");
-    const hasMTM = rows.some((r: any) => {
-      const leaseTo = r.lease_to || r.LeaseTo;
+    // A unit is pre-leased for the academic year iff SOME row on the rent
+    // roll represents a lease (or MTM tenancy) that actually covers the
+    // academic-year start date — i.e. lease_from <= ayStart AND
+    // (lease_to is null OR lease_to >= ayStart), with a tenant name on it.
+    // The previous logic over-counted: a current tenant whose lease ended
+    // before ayStart with no renewal in the system was still counted as
+    // pre-leased because of a blanket `status === "current"` check; and a
+    // future lease starting AFTER ayStart would pass the lease_to check.
+    const coversAyStart = rows.some((r: any) => {
       const tenant = String(r.tenant || r.Tenant || "").trim();
-      return !leaseTo && tenant;
-    });
-    const hasExtendedLease = rows.some((r: any) => {
-      const leaseTo = r.lease_to || r.LeaseTo;
-      return leaseTo && new Date(leaseTo) >= ayStart;
+      if (!tenant) return false;
+      const leaseFromStr = r.lease_from || r.LeaseFrom;
+      const leaseToStr = r.lease_to || r.LeaseTo;
+      if (!leaseFromStr) return false;
+      const from = new Date(leaseFromStr);
+      if (from > ayStart) return false;
+      if (!leaseToStr) return true; // MTM tenancy — occupied indefinitely
+      const to = new Date(leaseToStr);
+      return to >= ayStart;
     });
 
-    if (hasCurrent || hasFuture || hasMTM || hasExtendedLease) {
+    if (coversAyStart) {
       preLeased++;
     } else {
       // Include raw data so we can see WHY it's not pre-leased
@@ -538,6 +547,121 @@ export async function fetchUnitStats(academicYear?: AcademicYear): Promise<{
   }
 
   return { total, occupied, preLeased, unleased, source: "appfolio" };
+}
+
+// --- Vacancy Detection (date-aware) ---
+/**
+ * Units that will NOT have a lease covering a given date. Groups the rent
+ * roll by unit_id so a unit with multiple tenant rows is evaluated once;
+ * "covered" means some row has lease_from <= target <= lease_to (or is a
+ * month-to-month tenancy starting on/before the target). Used by the
+ * meetings agenda to answer "which units will be vacant on 2026-08-15".
+ */
+export async function fetchVacanciesOnDate(
+  targetDate: string
+): Promise<{ data: VacantUnit[]; target: string; source: "appfolio" }> {
+  const rentRollRows = await afGetRentRoll();
+  const filtered = Array.isArray(rentRollRows) && rentRollRows.length > 0
+    ? await filterToMoxie(rentRollRows)
+    : [];
+
+  const target = new Date(targetDate);
+  if (isNaN(target.getTime())) {
+    throw new Error(`Invalid targetDate: ${targetDate}`);
+  }
+
+  // Group rent-roll rows by unit_id so we evaluate each physical unit once.
+  const byUnit = new Map<string, any[]>();
+  for (const r of filtered) {
+    const key = String(r.unit_id || r.UnitId || "");
+    if (!key) continue;
+    if (!byUnit.has(key)) byUnit.set(key, []);
+    byUnit.get(key)!.push(r);
+  }
+
+  const vacancies: VacantUnit[] = [];
+
+  for (const [unitId, rows] of byUnit) {
+    // Does ANY row represent a lease (or MTM) that covers `target`?
+    const covers = rows.some((r: any) => {
+      const tenant = String(r.tenant || r.Tenant || "").trim();
+      if (!tenant) return false;
+      const leaseFromStr = r.lease_from || r.LeaseFrom;
+      const leaseToStr = r.lease_to || r.LeaseTo;
+      if (!leaseFromStr) return false;
+      const from = new Date(leaseFromStr);
+      if (from > target) return false;
+      if (!leaseToStr) return true;
+      const to = new Date(leaseToStr);
+      return to >= target;
+    });
+
+    if (covers) continue; // Occupied on target date — skip.
+
+    // Surface the most recent lease_to that's <= target as "last tenant"
+    // and the next lease_from > target as "next tenant incoming", so the
+    // meeting can see what window of emptiness this unit sits in.
+    let lastRow: any = null;
+    let nextRow: any = null;
+    for (const r of rows) {
+      const leaseFromStr = r.lease_from || r.LeaseFrom;
+      const leaseToStr = r.lease_to || r.LeaseTo;
+      const to = leaseToStr ? new Date(leaseToStr) : null;
+      const from = leaseFromStr ? new Date(leaseFromStr) : null;
+      if (to && to <= target) {
+        if (!lastRow || new Date(lastRow.lease_to || lastRow.LeaseTo) < to) lastRow = r;
+      }
+      if (from && from > target) {
+        if (!nextRow || new Date(nextRow.lease_from || nextRow.LeaseFrom) > from) nextRow = r;
+      }
+    }
+
+    // Pick a representative row for unit metadata (any row works — they
+    // all share unit_id). Prefer one with a tenant + bd/ba filled in.
+    const meta =
+      rows.find((r) => (r.bd_ba || r.BdBa) && (r.tenant || r.Tenant)) ?? rows[0];
+
+    const unitName = String(meta.unit || meta.Unit || meta.UnitStreetAddress1 || "");
+    const { bed, bath } = parseBdBa(meta.bd_ba || meta.BdBa);
+    const lastLeaseTo = lastRow
+      ? String(lastRow.lease_to || lastRow.LeaseTo || "")
+      : null;
+    const nextLeaseFrom = nextRow
+      ? String(nextRow.lease_from || nextRow.LeaseFrom || "")
+      : null;
+
+    let daysVacantOnTarget: number | null = null;
+    if (lastLeaseTo) {
+      const endDay = new Date(lastLeaseTo);
+      daysVacantOnTarget = Math.max(
+        0,
+        Math.round((target.getTime() - endDay.getTime()) / 86400000)
+      );
+    }
+
+    vacancies.push({
+      unitId,
+      unitName,
+      propertyId: String(meta.property_id || meta.PropertyId || "") || null,
+      propertyName: String(meta.property_name || meta.PropertyName || ""),
+      bedrooms: bed,
+      bathrooms: bath,
+      sqft: parseSqft(meta.sqft || meta.SquareFt),
+      rent: meta.rent || meta.Rent || null,
+      lastTenant: lastRow ? String(lastRow.tenant || lastRow.Tenant || "") || null : null,
+      lastLeaseTo,
+      nextLeaseFrom,
+      daysVacantOnTarget,
+    });
+  }
+
+  // Sort by propertyName, unitName for a stable, readable agenda.
+  vacancies.sort((a, b) => {
+    const pc = a.propertyName.localeCompare(b.propertyName);
+    return pc !== 0 ? pc : a.unitName.localeCompare(b.unitName, undefined, { numeric: true });
+  });
+
+  return { data: vacancies, target: targetDate, source: "appfolio" };
 }
 
 // --- Work Orders / Maintenance ---

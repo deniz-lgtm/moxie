@@ -1,10 +1,29 @@
 import { NextResponse } from "next/server";
-import { fetchUnits, fetchUnitsWithTenants, fetchTenantsForUnit, debugMoxieFilter, fetchUnitStats } from "@/lib/data";
-import type { AcademicYear } from "@/lib/types";
+import {
+  debugMoxieFilter,
+  fetchTenantsForUnit,
+  fetchUnits,
+  fetchUnitStats,
+  fetchUnitsWithTenants,
+  fetchVacanciesOnDate,
+} from "@/lib/data";
+import { academicYearDates, type AcademicYear } from "@/lib/types";
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
+    // ?vacancies_on=YYYY-MM-DD (or ?vacancies_ay=2026-2027 to use the
+    // academic-year start). Returns units that have NO lease covering that
+    // date — the question the Monday meeting actually cares about.
+    const vacanciesOn = url.searchParams.get("vacancies_on");
+    const vacanciesAy = url.searchParams.get("vacancies_ay") as AcademicYear | null;
+    if (vacanciesOn || vacanciesAy) {
+      const target = vacanciesOn
+        ? vacanciesOn
+        : academicYearDates(vacanciesAy as AcademicYear).leaseStart;
+      const { data, source } = await fetchVacanciesOnDate(target);
+      return NextResponse.json({ vacancies: data, target, source });
+    }
     // Add ?debug=1 to see cross-reference diagnostics
     if (url.searchParams.get("debug")) {
       const diag = await debugMoxieFilter();

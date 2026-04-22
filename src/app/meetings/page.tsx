@@ -13,11 +13,13 @@ import type {
   DbPropertyMeeting,
 } from "@/lib/supabase";
 import type {
+  AcademicYear,
   ApplicationGroup,
   Inspection,
   InspectionType,
   MaintenanceRequest,
   Unit,
+  VacantUnit,
 } from "@/lib/types";
 
 const INSPECTION_TYPES: InspectionType[] = [
@@ -27,6 +29,11 @@ const INSPECTION_TYPES: InspectionType[] = [
   "quarterly",
   "punch_list",
 ];
+
+// Vacancy question the meeting is actually asking: which units are not
+// leased on the upcoming academic-year start date? This anchors the
+// "Vacancies" agenda block across the whole portfolio.
+const TARGET_ACADEMIC_YEAR: AcademicYear = "2026-2027";
 
 function makeId() {
   return `mtg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -117,9 +124,14 @@ export default function MeetingsPage() {
     try {
       const { units: allUnits, workOrders: allWO } = await loadPortfolio();
 
-      // Fetch applications + inspections in parallel
-      const [appsResp, ...inspectionResps] = await Promise.all([
+      // Fetch applications, inspections, and date-aware vacancies in parallel.
+      // Vacancies here means "units with no lease covering the academic-year
+      // start date" — the actual question a Monday meeting wants answered.
+      const [appsResp, vacanciesResp, ...inspectionResps] = await Promise.all([
         fetch(`/api/appfolio/applications`).then((r) => r.json()).catch(() => ({})),
+        fetch(`/api/appfolio/units?vacancies_ay=${TARGET_ACADEMIC_YEAR}`)
+          .then((r) => r.json())
+          .catch(() => ({})),
         ...INSPECTION_TYPES.map((t) =>
           fetch(`/api/inspections/crud?type=${t}`)
             .then((r) => r.json())
@@ -146,17 +158,19 @@ export default function MeetingsPage() {
         vendor: w.vendor || null,
       }));
 
-      // ── Leasing: vacancies
-      const openUnits = allUnits.filter((u) => u.status === "vacant" || u.status === "notice");
-      const agendaVacancies: DbAgendaVacancy[] = openUnits.map((u) => ({
-        unitId: u.id,
-        unitName: u.unitName || u.number,
-        propertyName: u.propertyName,
-        bedrooms: u.bedrooms,
-        bathrooms: u.bathrooms,
-        rent: u.rent,
-        daysVacant: u.moveOut ? Math.max(0, daysBetween(u.moveOut, today())) : null,
-        leaseEnded: u.moveOut,
+      // ── Leasing: vacancies (date-aware — "vacant on academic-year start")
+      const rawVacancies: VacantUnit[] = Array.isArray(vacanciesResp.vacancies)
+        ? vacanciesResp.vacancies
+        : [];
+      const agendaVacancies: DbAgendaVacancy[] = rawVacancies.map((v) => ({
+        unitId: v.unitId,
+        unitName: v.unitName,
+        propertyName: v.propertyName,
+        bedrooms: v.bedrooms,
+        bathrooms: v.bathrooms,
+        rent: v.rent,
+        daysVacant: v.daysVacantOnTarget,
+        leaseEnded: v.lastLeaseTo,
       }));
 
       // ── Leasing: applications (not yet approved/denied)
