@@ -122,11 +122,17 @@ function formatDate(d: Date): string {
 }
 
 // --- Unit Vacancy ---
-// v2 unit_vacancy_detail uses available_from_date / available_to_date
-export async function getVacancyReport(availableFrom?: string) {
+// unit_vacancy_detail is authoritative for "is this unit leased on DATE":
+// it accounts for FUTURE signed leases, unlike rent_roll which is a
+// point-in-time snapshot of the current tenant. The v2 report takes
+// `as_of_date` in MM/DD/YYYY format (confirmed via the /api/appfolio/debug
+// diagnostic route); we accept either ISO (YYYY-MM-DD) or the native format
+// and normalize.
+export async function getVacancyReport(asOfDate?: string) {
   const body: Record<string, string> = {};
-  if (availableFrom) {
-    body.available_from_date = availableFrom;
+  if (asOfDate) {
+    const iso = asOfDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    body.as_of_date = iso ? `${iso[2]}/${iso[3]}/${iso[1]}` : asOfDate;
   }
   return appfolioFetchAll("/reports/unit_vacancy_detail.json", body);
 }
