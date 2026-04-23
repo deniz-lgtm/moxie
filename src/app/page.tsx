@@ -10,7 +10,6 @@ import {
 } from "@/lib/mock-data";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
 import { TeamCalendar } from "@/components/TeamCalendar";
-import { WeekAgenda } from "@/components/WeekAgenda";
 import type { DashboardStats, AcademicYear } from "@/lib/types";
 import {
   ClipboardCheck,
@@ -229,12 +228,6 @@ export default function Dashboard() {
           <p className="text-3xl font-bold mt-2 tracking-tight text-purple-600">{stats.activeApplications}</p>
           <p className="text-xs text-muted-foreground mt-1">pending applications</p>
         </Link>
-      </div>
-
-      {/* This Week — 7-day glanceable list */}
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">This Week</h2>
-        <WeekAgenda />
       </div>
 
       {/* Team Calendar */}

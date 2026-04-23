@@ -25,8 +25,33 @@ function addMonths(d: Date, n: number): Date {
   return r;
 }
 
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+/** Start of the week containing `d` (Sunday, midnight local). */
+function weekStart(d: Date): Date {
+  const r = new Date(d);
+  r.setHours(0, 0, 0, 0);
+  r.setDate(r.getDate() - r.getDay()); // 0 = Sun
+  return r;
+}
+
 function monthLabel(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function weekRangeLabel(d: Date): string {
+  const start = weekStart(d);
+  const end = addDays(start, 6);
+  const sameMonth = start.getMonth() === end.getMonth();
+  const startPart = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const endPart = sameMonth
+    ? end.toLocaleDateString("en-US", { day: "numeric", year: "numeric" })
+    : end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${startPart} – ${endPart}`;
 }
 
 function daysInMonth(year: number, month: number): number {
@@ -39,7 +64,10 @@ function firstDayOfWeek(year: number, month: number): number {
 
 // ─── main component ──────────────────────────────────────────────────────────
 
+type ViewMode = "month" | "week";
+
 export function TeamCalendar() {
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [current, setCurrent] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -77,58 +105,101 @@ export function TeamCalendar() {
 
   useEffect(() => { load(); }, [load]);
 
-  const year = current.getFullYear();
-  const month = current.getMonth();
-  const totalDays = daysInMonth(year, month);
-  const startDow = firstDayOfWeek(year, month); // 0 = Sun
   const todayStr = isoDate(new Date());
 
-  // Build 42-cell grid
-  const cells: { date: string; isCurrentMonth: boolean }[] = [];
-  const prevDays = daysInMonth(year, month === 0 ? 11 : month - 1);
-  for (let i = startDow - 1; i >= 0; i--) {
-    const d = new Date(year, month - 1, prevDays - i);
-    cells.push({ date: isoDate(d), isCurrentMonth: false });
-  }
-  for (let i = 1; i <= totalDays; i++) {
-    cells.push({ date: isoDate(new Date(year, month, i)), isCurrentMonth: true });
-  }
-  while (cells.length < 42) {
-    const d = new Date(year, month + 1, cells.length - startDow - totalDays + 1);
-    cells.push({ date: isoDate(d), isCurrentMonth: false });
-  }
+  // Build cell grid — 7 for week, 42 for month.
+  const cells: { date: string; isCurrentMonth: boolean }[] = useMemo(() => {
+    if (viewMode === "week") {
+      const start = weekStart(current);
+      return Array.from({ length: 7 }, (_, i) => ({
+        date: isoDate(addDays(start, i)),
+        isCurrentMonth: true, // all cells fully opaque in week view
+      }));
+    }
+    const year = current.getFullYear();
+    const month = current.getMonth();
+    const totalDays = daysInMonth(year, month);
+    const startDow = firstDayOfWeek(year, month);
+    const result: { date: string; isCurrentMonth: boolean }[] = [];
+    const prevDays = daysInMonth(year, month === 0 ? 11 : month - 1);
+    for (let i = startDow - 1; i >= 0; i--) {
+      const d = new Date(year, month - 1, prevDays - i);
+      result.push({ date: isoDate(d), isCurrentMonth: false });
+    }
+    for (let i = 1; i <= totalDays; i++) {
+      result.push({ date: isoDate(new Date(year, month, i)), isCurrentMonth: true });
+    }
+    while (result.length < 42) {
+      const d = new Date(year, month + 1, result.length - startDow - totalDays + 1);
+      result.push({ date: isoDate(d), isCurrentMonth: false });
+    }
+    return result;
+  }, [viewMode, current]);
 
   const byDate = groupEventsByDate(visibleEvents);
 
   const selectedEvents = selected ? (byDate.get(selected) ?? []) : [];
 
+  // Week view shows more events per day since each cell is taller.
+  const eventsPerCell = viewMode === "week" ? 8 : 3;
+  const cellMinHeight = viewMode === "week" ? "min-h-[220px]" : "min-h-[72px]";
+
+  const navPrev = () => {
+    setCurrent((c) => (viewMode === "week" ? addDays(weekStart(c), -7) : addMonths(c, -1)));
+    setSelected(null);
+  };
+  const navNext = () => {
+    setCurrent((c) => (viewMode === "week" ? addDays(weekStart(c), 7) : addMonths(c, 1)));
+    setSelected(null);
+  };
+  const goToday = () => {
+    const d = new Date();
+    setCurrent(viewMode === "week" ? weekStart(d) : new Date(d.getFullYear(), d.getMonth(), 1));
+    setSelected(null);
+  };
+
   return (
     <div className="bg-card border border-border rounded-2xl overflow-hidden">
       {/* Calendar header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="font-semibold">{monthLabel(current)}</h2>
+          <h2 className="font-semibold">
+            {viewMode === "week" ? weekRangeLabel(current) : monthLabel(current)}
+          </h2>
           {loading && <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />}
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => { setCurrent((c) => addMonths(c, -1)); setSelected(null); }}
-            className="p-1.5 rounded hover:bg-muted"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => { setCurrent(new Date(new Date().setDate(1))); setSelected(null); }}
-            className="text-xs px-2.5 py-1 rounded border border-border hover:bg-muted font-medium"
-          >
-            Today
-          </button>
-          <button
-            onClick={() => { setCurrent((c) => addMonths(c, 1)); setSelected(null); }}
-            className="p-1.5 rounded hover:bg-muted"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
+        <div className="flex items-center gap-2">
+          {/* Month / Week toggle */}
+          <div className="flex rounded-lg border border-border overflow-hidden text-xs font-medium">
+            {(["month", "week"] as ViewMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => {
+                  setViewMode(v);
+                  setSelected(null);
+                }}
+                className={`px-3 py-1 capitalize ${
+                  viewMode === v ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={navPrev} className="p-1.5 rounded hover:bg-muted">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={goToday}
+              className="text-xs px-2.5 py-1 rounded border border-border hover:bg-muted font-medium"
+            >
+              Today
+            </button>
+            <button onClick={navNext} className="p-1.5 rounded hover:bg-muted">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -168,14 +239,14 @@ export function TeamCalendar() {
           const cellEvents = byDate.get(cell.date) ?? [];
           const isToday = cell.date === todayStr;
           const isSelected = cell.date === selected;
-          const hasMore = cellEvents.length > 3;
+          const hasMore = cellEvents.length > eventsPerCell;
 
           return (
             <button
               key={i}
               onClick={() => setSelected(cell.date === selected ? null : cell.date)}
               className={`
-                min-h-[72px] p-1.5 text-left border-b border-r border-border last:border-r-0
+                ${cellMinHeight} p-1.5 text-left border-b border-r border-border last:border-r-0
                 transition-colors hover:bg-muted/50
                 ${!cell.isCurrentMonth ? "opacity-40" : ""}
                 ${isSelected ? "bg-primary/5" : ""}
@@ -190,7 +261,7 @@ export function TeamCalendar() {
                 {new Date(cell.date + "T12:00:00").getDate()}
               </span>
               <div className="space-y-0.5">
-                {cellEvents.slice(0, 3).map((e) => (
+                {cellEvents.slice(0, eventsPerCell).map((e) => (
                   <div
                     key={e.id}
                     className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate font-medium ${
@@ -204,7 +275,7 @@ export function TeamCalendar() {
                   </div>
                 ))}
                 {hasMore && (
-                  <div className="text-[10px] text-muted-foreground px-1">+{cellEvents.length - 3} more</div>
+                  <div className="text-[10px] text-muted-foreground px-1">+{cellEvents.length - eventsPerCell} more</div>
                 )}
               </div>
             </button>
