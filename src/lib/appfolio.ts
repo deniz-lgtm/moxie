@@ -39,18 +39,49 @@ function getAuthHeaders() {
   };
 }
 
+// AppFolio v2 rate limit is 7 requests per 15 seconds. When we go over
+// the API returns 429 with body "Retry later\n" (optionally an HTTP
+// Retry-After header). Rather than fail the whole page, retry with
+// exponential backoff a few times before giving up.
+async function fetchWithRateLimit(
+  input: string,
+  init: RequestInit,
+  label: string
+): Promise<Response> {
+  const backoffMs = [500, 1500, 3500]; // up to ~5.5 s total
+  for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
+    const res = await fetch(input, init);
+    if (res.status !== 429) return res;
+    if (attempt === backoffMs.length) return res; // out of retries, propagate
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 10000)
+      : backoffMs[attempt];
+    console.warn(
+      `[AppFolio] 429 on ${label}; waiting ${wait}ms (attempt ${attempt + 1}/${backoffMs.length + 1})`
+    );
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  // Unreachable, TS needs it.
+  return fetch(input, init);
+}
+
 async function appfolioFetch(endpoint: string, body?: Record<string, string>) {
   const url = `${getBaseUrl()}${endpoint}`;
 
   // v2 uses POST with JSON body; paginate_results is always included
   const requestBody = { paginate_results: true, ...body };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(requestBody),
-    next: { revalidate: 300 }, // cache for 5 minutes
-  });
+  const response = await fetchWithRateLimit(
+    url,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(requestBody),
+      next: { revalidate: 300 }, // cache for 5 minutes
+    },
+    endpoint
+  );
 
   if (!response.ok) {
     const text = await response.text();
@@ -67,9 +98,11 @@ async function appfolioFetchAll(endpoint: string, body?: Record<string, string>)
 
   while (result.next_page_url) {
     // Pagination URLs are fetched with GET (they contain auth info in the URL)
-    const response = await fetch(result.next_page_url, {
-      headers: getAuthHeaders(),
-    });
+    const response = await fetchWithRateLimit(
+      result.next_page_url,
+      { headers: getAuthHeaders() },
+      `${endpoint} [paginate]`
+    );
     if (!response.ok) break;
     result = await response.json();
     allResults = allResults.concat(result.results || []);
@@ -135,7 +168,11 @@ async function appfolioGet(endpoint: string, params?: Record<string, string>) {
     }
   }
   const headers = getAuthHeaders();
-  const res = await fetch(url.toString(), { headers, next: { revalidate: 300 } });
+  const res = await fetchWithRateLimit(
+    url.toString(),
+    { headers, next: { revalidate: 300 } },
+    endpoint
+  );
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`AppFolio API error ${res.status}: ${text.slice(0, 300)}`);
@@ -143,7 +180,11 @@ async function appfolioGet(endpoint: string, params?: Record<string, string>) {
   let data = await res.json();
   let rows: any[] = data.results || [];
   while (data.next_page_url) {
-    const np = await fetch(data.next_page_url, { headers });
+    const np = await fetchWithRateLimit(
+      data.next_page_url,
+      { headers },
+      `${endpoint} [paginate]`
+    );
     if (!np.ok) break;
     data = await np.json();
     rows = rows.concat(data.results || []);
