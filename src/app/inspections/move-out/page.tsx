@@ -1044,7 +1044,7 @@ function MoveOutInspectionContent() {
     setGeneratingPDF(true);
 
     try {
-      const { generateDepositDeductionPDF, generateDispositionLetterPDF, generateContractorReportPDF, downloadPDF } = await import("@/lib/pdf-invoice");
+      const { generateDepositDeductionPDF, generateDispositionLetterPDF, generateContractorReportPDF, generateContractorInvoicePDF, downloadPDF } = await import("@/lib/pdf-invoice");
 
       const logo = await loadLogoBase64();
       const pdfData = await buildPdfData(activeInspection, logo);
@@ -1052,7 +1052,7 @@ function MoveOutInspectionContent() {
 
       const totalDed = calcDeductions(activeInspection);
 
-      // Download all three documents
+      // Download all four documents
       downloadPDF(pdfDataUri, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
       const letterPdf = generateDispositionLetterPDF(pdfData);
       downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
@@ -1062,6 +1062,8 @@ function MoveOutInspectionContent() {
       }
       const contractorPdf = generateContractorReportPDF(pdfData, floorPlanBase64);
       downloadPDF(contractorPdf, `ContractorReport-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+      const invoicePdf = generateContractorInvoicePDF(pdfData);
+      downloadPDF(invoicePdf, `DJA-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
 
       saveInspection({
         ...activeInspection,
@@ -2396,6 +2398,19 @@ function MoveOutInspectionContent() {
           >
             <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
             <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
+          </button>
+          <button
+            onClick={async () => {
+              const { generateContractorInvoicePDF, downloadPDF } = await import("@/lib/pdf-invoice");
+              const logo = await loadLogoBase64();
+              const pdfData = await buildPdfData(activeInspection, logo);
+              const invoicePdf = generateContractorInvoicePDF(pdfData);
+              downloadPDF(invoicePdf, `DJA-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+            }}
+            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+          >
+            <span className="font-medium group-hover:text-accent transition-colors">Download DJA CO. Invoice</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">Contractor invoice with hours & materials — §1950.5 supporting document</span>
           </button>
           <button
             onClick={async () => {
