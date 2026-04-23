@@ -21,6 +21,7 @@ import {
 import ActionItemDetailModal from "@/components/ActionItemDetailModal";
 import InfoPopup, { type InfoRow } from "@/components/InfoPopup";
 import { StatusBadge } from "@/components/StatusBadge";
+import { WeekAgenda } from "@/components/WeekAgenda";
 import { useMeetingRecorder } from "@/hooks/useMeetingRecorder";
 import type {
   ActionItemStatus,
@@ -382,6 +383,10 @@ export default function MeetingDetailView({
           won&rsquo;t default everything to one person.
         </p>
       </div>
+
+      {/* Weekly at-a-glance — anchored to the meeting date so the team can
+          discuss the upcoming 7 days together without leaving the agenda. */}
+      <WeekAgenda startDate={meeting.meeting_date} fixed />
 
       {/* Review: carry-over action items from prior meetings */}
       <AgendaCard

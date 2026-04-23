@@ -3,77 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { MaintenanceRequest, Unit } from "@/lib/types";
-
-// ─── event model ────────────────────────────────────────────────────────────
-
-type EventType = "showing" | "move_in" | "move_out" | "academic" | "meeting" | "work_order";
-
-interface CalEvent {
-  id: string;
-  date: string; // YYYY-MM-DD
-  label: string;
-  type: EventType;
-  href?: string;
-}
-
-const TYPE_STYLES: Record<EventType, string> = {
-  academic:   "bg-blue-100 text-blue-800",
-  showing:    "bg-purple-100 text-purple-800",
-  move_in:    "bg-emerald-100 text-emerald-800",
-  move_out:   "bg-orange-100 text-orange-800",
-  meeting:    "bg-teal-100 text-teal-800",
-  work_order: "bg-yellow-100 text-yellow-800",
-};
-
-const TYPE_DOT: Record<EventType, string> = {
-  academic:   "bg-blue-500",
-  showing:    "bg-purple-500",
-  move_in:    "bg-emerald-500",
-  move_out:   "bg-orange-500",
-  meeting:    "bg-teal-500",
-  work_order: "bg-yellow-500",
-};
-
-const TYPE_LABEL: Record<EventType, string> = {
-  academic:   "Academic",
-  showing:    "Showings",
-  move_in:    "Move-in",
-  move_out:   "Move-out",
-  meeting:    "Meetings",
-  work_order: "Work orders",
-};
-
-const ALL_TYPES: EventType[] = ["academic", "showing", "move_in", "move_out", "meeting", "work_order"];
-
-// ─── hardcoded academic calendar ────────────────────────────────────────────
-
-const ACADEMIC_DATES: { date: string; label: string }[] = [
-  // 2025–2026
-  { date: "2025-08-15", label: "Move-in (Fall 2025)" },
-  { date: "2025-08-18", label: "Fall semester starts" },
-  { date: "2025-11-26", label: "Thanksgiving break" },
-  { date: "2025-12-12", label: "Fall semester ends" },
-  { date: "2026-01-12", label: "Spring semester starts" },
-  { date: "2026-03-23", label: "Spring break (USC)" },
-  { date: "2026-05-08", label: "Spring semester ends" },
-  { date: "2026-07-31", label: "Lease end / Move-out deadline" },
-  // 2026–2027
-  { date: "2026-08-15", label: "Move-in (Fall 2026)" },
-  { date: "2026-08-17", label: "Fall semester starts" },
-  { date: "2026-11-25", label: "Thanksgiving break" },
-  { date: "2026-12-11", label: "Fall semester ends" },
-  { date: "2027-01-11", label: "Spring semester starts" },
-  { date: "2027-03-22", label: "Spring break (USC)" },
-  { date: "2027-05-07", label: "Spring semester ends" },
-  { date: "2027-07-31", label: "Lease end / Move-out deadline" },
-];
+import {
+  ALL_EVENT_TYPES,
+  TYPE_DOT,
+  TYPE_LABEL,
+  TYPE_STYLES,
+  groupEventsByDate,
+  isoDate,
+  loadCalendarEvents,
+  type CalEvent,
+  type CalEventType,
+} from "@/lib/calendar-events";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
-
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
 
 function addMonths(d: Date, n: number): Date {
   const r = new Date(d);
@@ -105,14 +47,14 @@ export function TeamCalendar() {
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null); // YYYY-MM-DD
   const [loading, setLoading] = useState(true);
-  const [hidden, setHidden] = useState<Set<EventType>>(new Set());
+  const [hidden, setHidden] = useState<Set<CalEventType>>(new Set());
 
   const visibleEvents = useMemo(
     () => events.filter((e) => !hidden.has(e.type)),
     [events, hidden]
   );
 
-  const toggleFilter = (t: EventType) => {
+  const toggleFilter = (t: CalEventType) => {
     setHidden((prev) => {
       const next = new Set(prev);
       if (next.has(t)) next.delete(t); else next.add(t);
@@ -123,105 +65,7 @@ export function TeamCalendar() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [showingsRes, unitsRes, meetingsRes, workOrdersRes] = await Promise.allSettled([
-        fetch("/api/showings/slots?include_regs=1").then((r) => r.json()),
-        fetch("/api/appfolio/units").then((r) => r.json()),
-        fetch("/api/meetings/crud").then((r) => r.json()),
-        fetch("/api/maintenance/requests").then((r) => r.json()),
-      ]);
-
-      const collected: CalEvent[] = [];
-
-      // Academic dates
-      for (const ad of ACADEMIC_DATES) {
-        collected.push({ id: `ac-${ad.date}`, date: ad.date, label: ad.label, type: "academic" });
-      }
-
-      // Showings
-      if (showingsRes.status === "fulfilled" && Array.isArray(showingsRes.value.slots)) {
-        for (const s of showingsRes.value.slots) {
-          if (s.status === "cancelled") continue;
-          const date = (s.startsAt as string).slice(0, 10);
-          const time = new Date(s.startsAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-          const label = s.propertyName ? `Showing: ${s.propertyName} @ ${time}` : `Open house @ ${time}`;
-          collected.push({ id: `show-${s.id}`, date, label, type: "showing", href: "/showings" });
-        }
-      }
-
-      // Move-in / move-out from units
-      if (unitsRes.status === "fulfilled" && Array.isArray(unitsRes.value.units)) {
-        const units: Unit[] = unitsRes.value.units;
-        const cutoff = new Date();
-        cutoff.setMonth(cutoff.getMonth() - 1); // show up to 1 month ago
-        const ceiling = new Date();
-        ceiling.setMonth(ceiling.getMonth() + 6); // and 6 months ahead
-
-        for (const u of units) {
-          const name = u.unitName || u.displayName || u.number;
-          if (u.moveIn) {
-            const d = new Date(u.moveIn);
-            if (d >= cutoff && d <= ceiling) {
-              collected.push({
-                id: `mi-${u.id}`,
-                date: isoDate(d),
-                label: `Move-in: ${name}${u.tenant ? ` (${u.tenant})` : ""}`,
-                type: "move_in",
-                href: "/portfolio",
-              });
-            }
-          }
-          if (u.moveOut) {
-            const d = new Date(u.moveOut);
-            if (d >= cutoff && d <= ceiling) {
-              collected.push({
-                id: `mo-${u.id}`,
-                date: isoDate(d),
-                label: `Move-out: ${name}${u.tenant ? ` (${u.tenant})` : ""}`,
-                type: "move_out",
-                href: "/portfolio",
-              });
-            }
-          }
-        }
-      }
-
-      // Meetings
-      if (meetingsRes.status === "fulfilled" && Array.isArray(meetingsRes.value.meetings)) {
-        for (const m of meetingsRes.value.meetings) {
-          const date = (m.meeting_date as string).slice(0, 10);
-          const label = m.title || m.property_name
-            ? `Meeting: ${m.title || m.property_name}`
-            : "Team meeting";
-          collected.push({ id: `mtg-${m.id}`, date, label, type: "meeting", href: "/meetings" });
-        }
-      }
-
-      // Work orders — scheduled date from AppFolio (+ Moxie override via scheduled_date_override).
-      // Only show currently-actionable ones: not completed/closed, with a scheduled date.
-      if (workOrdersRes.status === "fulfilled" && Array.isArray(workOrdersRes.value.workOrders)) {
-        const workOrders: MaintenanceRequest[] = workOrdersRes.value.workOrders;
-        const cutoff = new Date();
-        cutoff.setMonth(cutoff.getMonth() - 2);
-        const ceiling = new Date();
-        ceiling.setMonth(ceiling.getMonth() + 6);
-
-        for (const wo of workOrders) {
-          if (!wo.scheduledDate) continue;
-          if (wo.status === "completed" || wo.status === "closed") continue;
-          const d = new Date(wo.scheduledDate);
-          if (!(d >= cutoff && d <= ceiling)) continue;
-          const propertyBit = wo.unitNumber ? ` · ${wo.unitNumber}` : "";
-          const priorityBit = wo.priority === "emergency" || wo.priority === "high" ? ` [${wo.priority}]` : "";
-          collected.push({
-            id: `wo-${wo.id}`,
-            date: isoDate(d),
-            label: `WO: ${wo.title}${propertyBit}${priorityBit}`,
-            type: "work_order",
-            href: `/maintenance?id=${wo.id}`,
-          });
-        }
-      }
-
+      const collected = await loadCalendarEvents();
       setEvents(collected);
     } catch {
       // leave events empty
@@ -253,11 +97,7 @@ export function TeamCalendar() {
     cells.push({ date: isoDate(d), isCurrentMonth: false });
   }
 
-  const byDate = new Map<string, CalEvent[]>();
-  for (const e of visibleEvents) {
-    if (!byDate.has(e.date)) byDate.set(e.date, []);
-    byDate.get(e.date)!.push(e);
-  }
+  const byDate = groupEventsByDate(visibleEvents);
 
   const selectedEvents = selected ? (byDate.get(selected) ?? []) : [];
 
@@ -293,7 +133,7 @@ export function TeamCalendar() {
 
       {/* Filter chips — click to toggle visibility of an event type */}
       <div className="px-5 py-3 border-b border-border flex flex-wrap gap-1.5">
-        {ALL_TYPES.map((t) => {
+        {ALL_EVENT_TYPES.map((t) => {
           const isHidden = hidden.has(t);
           return (
             <button
