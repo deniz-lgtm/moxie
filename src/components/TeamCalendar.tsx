@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { Unit } from "@/lib/types";
+import type { MaintenanceRequest, Unit } from "@/lib/types";
 
 // ─── event model ────────────────────────────────────────────────────────────
 
-type EventType = "showing" | "move_in" | "move_out" | "academic" | "meeting";
+type EventType = "showing" | "move_in" | "move_out" | "academic" | "meeting" | "work_order";
 
 interface CalEvent {
   id: string;
@@ -18,20 +18,33 @@ interface CalEvent {
 }
 
 const TYPE_STYLES: Record<EventType, string> = {
-  academic:  "bg-blue-100 text-blue-800",
-  showing:   "bg-purple-100 text-purple-800",
-  move_in:   "bg-emerald-100 text-emerald-800",
-  move_out:  "bg-orange-100 text-orange-800",
-  meeting:   "bg-slate-100 text-slate-700",
+  academic:   "bg-blue-100 text-blue-800",
+  showing:    "bg-purple-100 text-purple-800",
+  move_in:    "bg-emerald-100 text-emerald-800",
+  move_out:   "bg-orange-100 text-orange-800",
+  meeting:    "bg-teal-100 text-teal-800",
+  work_order: "bg-yellow-100 text-yellow-800",
 };
 
 const TYPE_DOT: Record<EventType, string> = {
-  academic:  "bg-blue-500",
-  showing:   "bg-purple-500",
-  move_in:   "bg-emerald-500",
-  move_out:  "bg-orange-500",
-  meeting:   "bg-slate-400",
+  academic:   "bg-blue-500",
+  showing:    "bg-purple-500",
+  move_in:    "bg-emerald-500",
+  move_out:   "bg-orange-500",
+  meeting:    "bg-teal-500",
+  work_order: "bg-yellow-500",
 };
+
+const TYPE_LABEL: Record<EventType, string> = {
+  academic:   "Academic",
+  showing:    "Showings",
+  move_in:    "Move-in",
+  move_out:   "Move-out",
+  meeting:    "Meetings",
+  work_order: "Work orders",
+};
+
+const ALL_TYPES: EventType[] = ["academic", "showing", "move_in", "move_out", "meeting", "work_order"];
 
 // ─── hardcoded academic calendar ────────────────────────────────────────────
 
@@ -92,14 +105,29 @@ export function TeamCalendar() {
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null); // YYYY-MM-DD
   const [loading, setLoading] = useState(true);
+  const [hidden, setHidden] = useState<Set<EventType>>(new Set());
+
+  const visibleEvents = useMemo(
+    () => events.filter((e) => !hidden.has(e.type)),
+    [events, hidden]
+  );
+
+  const toggleFilter = (t: EventType) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t); else next.add(t);
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [showingsRes, unitsRes, meetingsRes] = await Promise.allSettled([
+      const [showingsRes, unitsRes, meetingsRes, workOrdersRes] = await Promise.allSettled([
         fetch("/api/showings/slots?include_regs=1").then((r) => r.json()),
         fetch("/api/appfolio/units").then((r) => r.json()),
         fetch("/api/meetings/crud").then((r) => r.json()),
+        fetch("/api/maintenance/requests").then((r) => r.json()),
       ]);
 
       const collected: CalEvent[] = [];
@@ -168,6 +196,32 @@ export function TeamCalendar() {
         }
       }
 
+      // Work orders — scheduled date from AppFolio (+ Moxie override via scheduled_date_override).
+      // Only show currently-actionable ones: not completed/closed, with a scheduled date.
+      if (workOrdersRes.status === "fulfilled" && Array.isArray(workOrdersRes.value.workOrders)) {
+        const workOrders: MaintenanceRequest[] = workOrdersRes.value.workOrders;
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - 2);
+        const ceiling = new Date();
+        ceiling.setMonth(ceiling.getMonth() + 6);
+
+        for (const wo of workOrders) {
+          if (!wo.scheduledDate) continue;
+          if (wo.status === "completed" || wo.status === "closed") continue;
+          const d = new Date(wo.scheduledDate);
+          if (!(d >= cutoff && d <= ceiling)) continue;
+          const propertyBit = wo.unitNumber ? ` · ${wo.unitNumber}` : "";
+          const priorityBit = wo.priority === "emergency" || wo.priority === "high" ? ` [${wo.priority}]` : "";
+          collected.push({
+            id: `wo-${wo.id}`,
+            date: isoDate(d),
+            label: `WO: ${wo.title}${propertyBit}${priorityBit}`,
+            type: "work_order",
+            href: `/maintenance?id=${wo.id}`,
+          });
+        }
+      }
+
       setEvents(collected);
     } catch {
       // leave events empty
@@ -200,7 +254,7 @@ export function TeamCalendar() {
   }
 
   const byDate = new Map<string, CalEvent[]>();
-  for (const e of events) {
+  for (const e of visibleEvents) {
     if (!byDate.has(e.date)) byDate.set(e.date, []);
     byDate.get(e.date)!.push(e);
   }
@@ -235,6 +289,27 @@ export function TeamCalendar() {
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+      </div>
+
+      {/* Filter chips — click to toggle visibility of an event type */}
+      <div className="px-5 py-3 border-b border-border flex flex-wrap gap-1.5">
+        {ALL_TYPES.map((t) => {
+          const isHidden = hidden.has(t);
+          return (
+            <button
+              key={t}
+              onClick={() => toggleFilter(t)}
+              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium transition ${
+                isHidden
+                  ? "bg-muted text-muted-foreground opacity-50 hover:opacity-75"
+                  : TYPE_STYLES[t] + " hover:opacity-80"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${TYPE_DOT[t]}`} />
+              {TYPE_LABEL[t]}
+            </button>
+          );
+        })}
       </div>
 
       {/* Day-of-week headers */}
@@ -315,15 +390,6 @@ export function TeamCalendar() {
         </div>
       )}
 
-      {/* Legend */}
-      <div className="border-t border-border px-5 py-3 flex flex-wrap gap-3">
-        {(["academic", "showing", "move_in", "move_out", "meeting"] as EventType[]).map((t) => (
-          <div key={t} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={`w-2 h-2 rounded-full ${TYPE_DOT[t]}`} />
-            {t.replace("_", " ")}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
