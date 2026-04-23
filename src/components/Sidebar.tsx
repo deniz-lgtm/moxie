@@ -44,6 +44,7 @@ const navItems: NavItem[] = [
   // Leasing & Operations
   { label: "Applications", href: "/leasing/applications", icon: FileText, category: "Leasing & Operations" },
   { label: "Leasing", href: "/leasing", icon: FileText, category: "Leasing & Operations" },
+  { label: "Showings", href: "/showings", icon: Calendar, category: "Leasing & Operations" },
   { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations", disabled: true },
   
   // Property Management

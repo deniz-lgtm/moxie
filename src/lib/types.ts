@@ -421,6 +421,50 @@ export interface ApplicationGroup {
   updatedAt: string;
 }
 
+// --- Leasing: Showings (open-house sign-up flow) ---
+// Distinct from the older TourSlot concept below (localStorage-only,
+// one-on-one appointments). Showings are scheduled open-house blocks
+// a leasing manager publishes; students sign up via a public token URL.
+export type ShowingSlotStatus = "open" | "cancelled" | "completed";
+export type ShowingRegistrationStatus =
+  | "confirmed"
+  | "attended"
+  | "no_show"
+  | "cancelled";
+
+export interface ShowingRegistration {
+  id: string;
+  slotId: string;
+  prospectName: string;
+  prospectEmail?: string;
+  prospectPhone?: string;
+  partySize: number;
+  status: ShowingRegistrationStatus;
+  notes?: string;
+  guestCardId?: string;
+  source?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ShowingSlot {
+  id: string;
+  propertyId?: string;
+  propertyName?: string;
+  startsAt: string;   // ISO
+  endsAt: string;     // ISO
+  hostUserId?: string;
+  hostName?: string;
+  capacity: number;
+  notes?: string;
+  publicDescription?: string;
+  publicToken: string;
+  status: ShowingSlotStatus;
+  registrations?: ShowingRegistration[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // --- Leasing: Tours ---
 export type TourRegistrationStatus = "confirmed" | "pending" | "attended" | "no_show" | "rescheduled" | "cancelled";
 

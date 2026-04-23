@@ -241,3 +241,56 @@ export async function getGeneralLedger(params?: {
   if (params?.to_date) body.to_date = params.to_date;
   return appfolioFetchAll("/reports/general_ledger.json", body);
 }
+
+// --- Guest Cards ---
+// AppFolio v2 guest card endpoint (REST, not report-based):
+//   POST /api/v2/guest_cards
+// Creates a prospect/lead in the AppFolio CRM. Returns the guest_card_id.
+// Required fields: first_name, last_name, email or phone.
+// Optional: property_id, unit_type, notes.
+//
+// See AppFolio API docs: Guest Card — Create
+export interface GuestCardInput {
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  propertyId?: string;
+  notes?: string;
+}
+
+export interface GuestCardResult {
+  id: string;
+  [key: string]: unknown;
+}
+
+export async function createGuestCard(input: GuestCardInput): Promise<GuestCardResult> {
+  const url = `${getBaseUrl()}/guest_cards`;
+  const headers = getAuthHeaders();
+  const body: Record<string, string | undefined> = {
+    first_name: input.firstName,
+    last_name: input.lastName,
+    email: input.email,
+    phone: input.phone,
+    property_id: input.propertyId,
+    notes: input.notes,
+  };
+  // Strip undefined values
+  for (const k of Object.keys(body)) {
+    if (body[k] === undefined) delete body[k];
+  }
+  const res = await fetchWithRateLimit(
+    url,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    },
+    "guest_cards"
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`AppFolio guest_card error ${res.status}: ${text.slice(0, 300)}`);
+  }
+  return res.json() as Promise<GuestCardResult>;
+}
