@@ -85,19 +85,43 @@ function RegStatusBadge({ status }: { status: string }) {
 
 function RegRow({
   reg,
+  slotId,
   onStatus,
   onDelete,
+  onGuestCard,
 }: {
   reg: ShowingRegistration;
+  slotId: string;
   onStatus: (id: string, status: string) => void;
   onDelete: (id: string) => void;
+  onGuestCard: (id: string, guestCardId: string) => void;
 }) {
+  const [pushing, setPushing] = useState(false);
+
+  const pushToAppFolio = async () => {
+    setPushing(true);
+    try {
+      const res = await fetch("/api/showings/guest-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ registrationId: reg.id, slotId }),
+      });
+      const j = await res.json();
+      if (j.guestCardId) onGuestCard(reg.id, j.guestCardId);
+    } finally {
+      setPushing(false);
+    }
+  };
+
   return (
     <tr className="border-b border-border last:border-0">
       <td className="py-2 pr-3">
         <p className="font-medium text-sm">{reg.prospectName}</p>
         {reg.prospectEmail && <p className="text-xs text-muted-foreground">{reg.prospectEmail}</p>}
         {reg.prospectPhone && <p className="text-xs text-muted-foreground">{reg.prospectPhone}</p>}
+        {reg.guestCardId && (
+          <p className="text-xs text-emerald-600 font-medium">AppFolio #{reg.guestCardId}</p>
+        )}
       </td>
       <td className="py-2 pr-3 text-sm text-center">{reg.partySize}</td>
       <td className="py-2 pr-3">
@@ -105,6 +129,16 @@ function RegRow({
       </td>
       <td className="py-2 text-right">
         <div className="flex items-center justify-end gap-1">
+          {!reg.guestCardId && (
+            <button
+              onClick={pushToAppFolio}
+              disabled={pushing}
+              title="Create guest card in AppFolio"
+              className="text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-50"
+            >
+              {pushing ? "…" : "→AF"}
+            </button>
+          )}
           {reg.status === "confirmed" && (
             <>
               <button
@@ -349,7 +383,16 @@ function SlotDetail({
               </thead>
               <tbody>
                 {regs.map((r) => (
-                  <RegRow key={r.id} reg={r} onStatus={updateStatus} onDelete={deleteReg} />
+                  <RegRow
+                    key={r.id}
+                    reg={r}
+                    slotId={slot.id}
+                    onStatus={updateStatus}
+                    onDelete={deleteReg}
+                    onGuestCard={(id, guestCardId) =>
+                      setRegs((prev) => prev.map((x) => (x.id === id ? { ...x, guestCardId } : x)))
+                    }
+                  />
                 ))}
               </tbody>
             </table>
@@ -632,6 +675,15 @@ export default function ShowingsPage() {
           <p className="text-muted-foreground mt-1">
             Schedule open-house blocks and share sign-up links with prospects.
           </p>
+          <a
+            href="/api/showings/calendar"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary mt-1"
+          >
+            <CalendarDays className="w-3 h-3" />
+            Subscribe to calendar (.ics)
+          </a>
         </div>
         <button
           onClick={() => setNewSlotOpen(true)}
