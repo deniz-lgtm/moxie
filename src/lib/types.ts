@@ -520,7 +520,7 @@ export interface DashboardStats {
 
 // --- App Launcher ---
 export type UserRole = "property_manager" | "maintenance_tech" | "leasing_agent" | "asset_manager" | "owner";
-export type AppCategory = "inspections" | "operations" | "leasing" | "finance" | "asset_management" | "communications" | "marketing";
+export type AppCategory = "inspections" | "operations" | "leasing" | "finance" | "asset_management" | "communications" | "marketing" | "team";
 
 export interface AppConfig {
   id: string;

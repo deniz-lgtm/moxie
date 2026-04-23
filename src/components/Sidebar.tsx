@@ -6,56 +6,72 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   ClipboardCheck,
-  RefreshCw,
   Wrench,
   Users,
   FileText,
   Zap,
-  BarChart3,
   Building2,
-  HardHat,
   Bell,
-  TrendingUp,
-  MessageSquare,
-  Calendar,
-  ChevronDown,
   Megaphone,
-  DollarSign,
-  Settings,
-  Link as LinkIcon,
+  ChevronDown,
+  TrendingUp,
+  Calendar,
+  MessageSquare,
+  LinkIcon as LinkIcon2,
+  HardHat,
+  BarChart3,
   LogOut,
+  type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { appCategories, apps } from "@/lib/mock-data";
+import type { AppCategory } from "@/lib/types";
 
-type NavItem = {
-  label: string;
-  href: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  children?: { label: string; href: string }[];
-  category?: string;
-  disabled?: boolean;
+// Map Lucide icon name (string in AppConfig.icon) to the actual component
+const iconByName: Record<string, LucideIcon> = {
+  ClipboardCheck, Wrench, Users, FileText, Zap, Building2, Bell,
+  Megaphone, TrendingUp, Calendar, MessageSquare, HardHat, BarChart3,
+  Truck: ClipboardCheck,
 };
 
-const navItems: NavItem[] = [
-  // Primary
-  { label: "Dashboard", href: "/", icon: LayoutDashboard, category: "Primary" },
-  
-  // Leasing & Operations
-  { label: "Applications", href: "/leasing/applications", icon: FileText, category: "Leasing & Operations" },
-  { label: "Leasing", href: "/leasing", icon: FileText, category: "Leasing & Operations" },
-  { label: "Showings", href: "/showings", icon: Calendar, category: "Leasing & Operations" },
-  { label: "Tenants", href: "/tenants", icon: Users, category: "Leasing & Operations", disabled: true },
-  
-  // Property Management
-  { label: "Maintenance", href: "/maintenance", icon: Wrench, category: "Property Management" },
-  { label: "Buildings", href: "/portfolio", icon: Building2, category: "Property Management" },
-  { label: "Units/Spaces", href: "/units", icon: Building2, category: "Property Management", disabled: true },
+type Child = { label: string; href: string };
+
+// Nested children expose sub-pages for apps whose single tool card actually
+// spans multiple routes (Marketing, RUBs, Inspections).
+const childrenByAppId: Record<string, Child[]> = {
+  "marketing-dashboard": [
+    { label: "Dashboard", href: "/marketing" },
+    { label: "Create Content", href: "/marketing/create" },
+    { label: "Monthly Report", href: "/marketing/report" },
+  ],
+  "rubs": [
+    { label: "Bills", href: "/rubs" },
+    { label: "Settings", href: "/rubs/settings" },
+  ],
+};
+
+// Extra nav items that aren't backed by an entry in the apps array
+// (dashboard, floor plans rollup under inspections, unit turns).
+type ExtraItem = {
+  id: string;
+  label: string;
+  href: string;
+  iconName: string;
+  category: AppCategory | "primary";
+  children?: Child[];
+};
+
+const extraItems: ExtraItem[] = [
+  // Inspections roll-up with children — replaces the 5 individual tool cards
+  // in the sidebar so the nav stays tight. The individual cards still exist
+  // in the apps array and appear on the Inspections category page.
   {
+    id: "inspections-hub",
     label: "Inspections",
     href: "/inspections",
-    icon: ClipboardCheck,
-    category: "Property Management",
+    iconName: "ClipboardCheck",
+    category: "inspections",
     children: [
       { label: "Move-Out", href: "/inspections/move-out" },
       { label: "Move-In", href: "/inspections/move-in" },
@@ -65,89 +81,98 @@ const navItems: NavItem[] = [
       { label: "Floor Plans", href: "/floor-plans" },
     ],
   },
-  
-  // Revenue & Finance
-  { label: "Revenue", href: "/revenue", icon: DollarSign, category: "Revenue & Finance", disabled: true },
-  { label: "Financials", href: "/financials", icon: BarChart3, category: "Revenue & Finance", disabled: true },
-  { label: "Analytics", href: "/resident-pulse", icon: MessageSquare, category: "Revenue & Finance" },
-  
-  // Asset Management
-  { label: "Assets", href: "/assets", icon: HardHat, category: "Asset Management", disabled: true },
-  { label: "Depreciation", href: "/depreciation", icon: TrendingUp, category: "Asset Management", disabled: true },
-  { label: "Maintenance Log", href: "/maintenance-log", icon: Wrench, category: "Asset Management", disabled: true },
-  { label: "Compliance", href: "/compliance", icon: ClipboardCheck, category: "Asset Management", disabled: true },
-  
-  // Admin
-  { label: "Users", href: "/users", icon: Users, category: "Admin" },
-  { label: "Settings", href: "/settings", icon: Settings, category: "Admin", disabled: true },
-  { label: "Integrations", href: "/integrations", icon: LinkIcon, category: "Admin", disabled: true },
-  
-  // Legacy items (to be reviewed)
-  { label: "Unit Turns", href: "/unit-turns", icon: RefreshCw, category: "Property Management" },
-  { label: "Vendors", href: "/vendors", icon: Users, category: "Property Management" },
-  { label: "Contacts", href: "/contacts", icon: Users, category: "Property Management" },
+  // Unit Turns lives under operations but isn't in the apps array
   {
-    label: "RUBs",
-    href: "/rubs",
-    icon: Zap,
-    category: "Revenue & Finance",
-    children: [
-      { label: "Bills", href: "/rubs" },
-      { label: "Settings", href: "/rubs/settings" },
-    ],
-  },
-  { label: "Capital Projects", href: "/capital-projects", icon: HardHat, category: "Asset Management" },
-
-  // Communications
-  { label: "Meetings", href: "/meetings", icon: Calendar, category: "Communications" },
-  { label: "Notices", href: "/notices", icon: Bell, category: "Communications" },
-  {
-    label: "Marketing",
-    href: "/marketing",
-    icon: Megaphone,
-    category: "Leasing & Operations",
-    children: [
-      { label: "Dashboard", href: "/marketing" },
-      { label: "Create Content", href: "/marketing/create" },
-      { label: "Monthly Report", href: "/marketing/report" },
-    ],
+    id: "unit-turns",
+    label: "Unit Turns",
+    href: "/unit-turns",
+    iconName: "HardHat",
+    category: "operations",
   },
 ];
 
-// Group items by category
-const categoryOrder = [
-  "Primary",
-  "Leasing & Operations",
-  "Property Management",
-  "Revenue & Finance",
-  "Asset Management",
-  "Communications",
-  "Admin"
-];
+// Inspections: suppress the individual inspection apps since the roll-up
+// covers them via children.
+const APP_IDS_HIDDEN_IN_SIDEBAR = new Set<string>([
+  "move-out-inspection",
+  "move-in-inspection",
+  "onboarding-inspection",
+  "quarterly-inspection",
+  "punch-list",
+]);
 
-const groupedItems = navItems.reduce((acc, item) => {
-  const category = item.category || "Other";
-  if (!acc[category]) {
-    acc[category] = [];
+type SidebarItem = {
+  id: string;
+  label: string;
+  href: string;
+  Icon: LucideIcon;
+  category: AppCategory | "primary";
+  children?: Child[];
+};
+
+function buildSidebarItems(): SidebarItem[] {
+  const items: SidebarItem[] = [
+    {
+      id: "dashboard",
+      label: "Dashboard",
+      href: "/",
+      Icon: LayoutDashboard,
+      category: "primary",
+    },
+  ];
+
+  for (const app of apps) {
+    if (APP_IDS_HIDDEN_IN_SIDEBAR.has(app.id)) continue;
+    items.push({
+      id: app.id,
+      label: app.name,
+      href: app.href,
+      Icon: iconByName[app.icon] ?? FileText,
+      category: app.category,
+      children: childrenByAppId[app.id],
+    });
   }
-  acc[category].push(item);
-  return acc;
-}, {} as Record<string, NavItem[]>);
+
+  for (const extra of extraItems) {
+    items.push({
+      id: extra.id,
+      label: extra.label,
+      href: extra.href,
+      Icon: iconByName[extra.iconName] ?? FileText,
+      category: extra.category,
+      children: extra.children,
+    });
+  }
+
+  return items;
+}
+
+const sidebarItems = buildSidebarItems();
+
+// Category header labels: "primary" has no header, others come from appCategories
+const categoryHeaders: Record<string, string> = Object.fromEntries(
+  appCategories.map((c) => [c.id, c.label])
+);
+
+const categoryOrder: (AppCategory | "primary")[] = [
+  "primary",
+  ...appCategories.sort((a, b) => a.order - b.order).map((c) => c.id),
+];
 
 export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    Inspections: pathname.startsWith("/inspections"),
-    Marketing: pathname.startsWith("/marketing"),
+    "inspections-hub": pathname.startsWith("/inspections") || pathname.startsWith("/floor-plans"),
+    "marketing-dashboard": pathname.startsWith("/marketing"),
+    "rubs": pathname.startsWith("/rubs"),
   });
 
-  function toggleExpand(label: string) {
-    setExpanded((prev) => ({ ...prev, [label]: !prev[label] }));
+  function toggleExpand(id: string) {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
-  // Collect all nav hrefs (including children) for specificity checks
-  const allHrefs = navItems.flatMap((item) =>
+  const allHrefs = sidebarItems.flatMap((item) =>
     item.children ? [item.href, ...item.children.map((c) => c.href)] : [item.href]
   );
 
@@ -155,7 +180,6 @@ export function Sidebar() {
     if (href === "/") return pathname === "/";
     if (pathname === href) return true;
     if (!pathname.startsWith(href + "/")) return false;
-    // Only match if no other nav item is a more specific (longer) match
     const hasMoreSpecific = allHrefs.some(
       (other) => other !== href && other.length > href.length && (pathname === other || pathname.startsWith(other + "/"))
     );
@@ -163,8 +187,10 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5" style={{ backgroundColor: '#111827' }}>
-      {/* Brand */}
+    <aside
+      className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5"
+      style={{ backgroundColor: "#111827" }}
+    >
       <div className="h-24 flex items-center justify-center px-4 border-b border-white/10">
         <Link href="/" className="group hover:opacity-85 transition-opacity">
           <Image
@@ -177,34 +203,29 @@ export function Sidebar() {
         </Link>
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3">
-        {categoryOrder.map((category) => {
-          const items = groupedItems[category];
-          if (!items || items.length === 0) return null;
-          
+        {categoryOrder.map((cat) => {
+          const items = sidebarItems.filter((i) => i.category === cat);
+          if (items.length === 0) return null;
+          const header = cat === "primary" ? null : categoryHeaders[cat];
+
           return (
-            <div key={category} className={`mb-4 ${category === "Primary" ? "" : ""}`}>
-              {/* Category header (hidden for Primary) */}
-              {category !== "Primary" && (
+            <div key={cat} className="mb-4">
+              {header && (
                 <div className="px-3 mb-2">
                   <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
-                    {category}
+                    {header}
                   </h3>
                 </div>
               )}
-              
-              {/* Category items */}
               <div className="space-y-0.5">
-                {items.filter(item => !item.disabled).map((item) => {
+                {items.map((item) => {
                   const active = isActive(item.href);
-                  const Icon = item.icon;
-                  const isExpanded = expanded[item.label];
+                  const isExpanded = !!expanded[item.id];
                   const hasChildren = item.children && item.children.length > 0;
 
                   return (
-                    <div key={item.href}>
-                      {/* Main nav item */}
+                    <div key={item.id}>
                       <div className="flex items-center">
                         <Link
                           href={item.href}
@@ -214,18 +235,16 @@ export function Sidebar() {
                               : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
                           }`}
                         >
-                          <Icon
+                          <item.Icon
                             size={18}
-                            className={`transition-colors duration-200 ${active ? "text-red-400" : "text-sidebar-text group-hover:text-sidebar-text-active"}`}
+                            className={`transition-colors duration-200 ${active ? "text-red-400" : "text-sidebar-text"}`}
                           />
                           <span className="flex-1">{item.label}</span>
-                          {active && (
-                            <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-                          )}
+                          {active && <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />}
                         </Link>
                         {hasChildren && (
                           <button
-                            onClick={() => toggleExpand(item.label)}
+                            onClick={() => toggleExpand(item.id)}
                             className="p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors"
                           >
                             <ChevronDown
@@ -236,7 +255,6 @@ export function Sidebar() {
                         )}
                       </div>
 
-                      {/* Sub-navigation */}
                       {hasChildren && isExpanded && (
                         <div className="ml-5 pl-4 border-l border-white/5 mt-1 mb-1 space-y-0.5">
                           {item.children!.map((child) => {
@@ -266,7 +284,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Bottom section */}
       <div className="border-t border-white/5 p-4">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-sidebar-hover flex items-center justify-center">
@@ -278,9 +295,7 @@ export function Sidebar() {
             <p className="text-xs font-medium text-sidebar-text-active truncate">
               {user?.email || "Property Manager"}
             </p>
-            <p className="text-[10px] text-sidebar-text truncate">
-              Moxie Management
-            </p>
+            <p className="text-[10px] text-sidebar-text truncate">Moxie Management</p>
           </div>
           {user && (
             <button
