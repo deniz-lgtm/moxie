@@ -10,6 +10,7 @@ import {
 } from "@/lib/mock-data";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
 import { TeamCalendar } from "@/components/TeamCalendar";
+import { WeekAgenda } from "@/components/WeekAgenda";
 import type { DashboardStats, AcademicYear } from "@/lib/types";
 import {
   ClipboardCheck,
@@ -230,9 +231,26 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* This Week — 7-day glanceable list */}
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">This Week</h2>
+        <WeekAgenda />
+      </div>
+
       {/* Team Calendar */}
       <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">Team Calendar</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Team Calendar</h2>
+          <a
+            href="/api/calendar/team"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-muted-foreground hover:text-primary inline-flex items-center gap-1"
+            title="Subscribe in Google Calendar, Apple Calendar, or Outlook"
+          >
+            Subscribe (.ics) →
+          </a>
+        </div>
         <TeamCalendar />
       </div>
 
