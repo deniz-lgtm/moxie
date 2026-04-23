@@ -70,6 +70,8 @@ export async function POST(request: Request) {
       id: body.id || `slot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       propertyId: body.propertyId,
       propertyName: body.propertyName ?? undefined,
+      unitId: body.unitId,
+      unitName: body.unitName,
       startsAt: body.startsAt,
       endsAt: body.endsAt,
       hostUserId: body.hostUserId,

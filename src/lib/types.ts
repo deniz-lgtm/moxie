@@ -451,6 +451,8 @@ export interface ShowingSlot {
   id: string;
   propertyId?: string;
   propertyName?: string;
+  unitId?: string;
+  unitName?: string;
   startsAt: string;   // ISO
   endsAt: string;     // ISO
   hostUserId?: string;

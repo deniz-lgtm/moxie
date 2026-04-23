@@ -128,14 +128,17 @@ export default function FloorPlansPage() {
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const validation = validateImage(file);
-    if (!validation.valid) { setUploadError(validation.error || "Invalid file"); return; }
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      const validation = validateImage(file);
+      if (!validation.valid) { setUploadError(validation.error || "Invalid file"); return; }
+    }
     setUploadError(null);
     try {
       const dataUrl = await processImageFile(file);
       setPendingDataUrl(dataUrl);
-      setPreviewUrl(dataUrl);
-    } catch { setUploadError("Failed to process image."); }
+      setPreviewUrl(isPdf ? null : dataUrl);
+    } catch { setUploadError("Failed to process file."); }
   }
 
   async function handleUpload() {
@@ -170,6 +173,15 @@ export default function FloorPlansPage() {
   // ── Bulk upload ────────────────────────────────────
 
   async function processImageFile(file: File): Promise<string> {
+    // PDFs: read directly as base64 data URL, no compression
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read PDF"));
+        reader.readAsDataURL(file);
+      });
+    }
     if (isHeicFile(file)) {
       const converted = await convertHeicToJpeg(file);
       if (converted.startsWith("blob:")) {
@@ -206,10 +218,11 @@ export default function FloorPlansPage() {
       const newEntries: BulkFile[] = files.map((file) => {
         const filenameBase = file.name.replace(/\.[^.]+$/, "");
         const { unit, confidence } = matchUnitToFilename(file.name, units);
+        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
         return {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           file,
-          previewUrl: URL.createObjectURL(file),
+          previewUrl: isPdf ? "" : URL.createObjectURL(file),
           dataUrl: null,
           filenameBase,
           matchedUnit: unit,
@@ -253,7 +266,12 @@ export default function FloorPlansPage() {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/") || /heic|heif/i.test(f.name));
+    const files = Array.from(e.dataTransfer.files).filter(
+      (f) =>
+        f.type.startsWith("image/") ||
+        f.type === "application/pdf" ||
+        /heic|heif|\.pdf$/i.test(f.name)
+    );
     if (files.length) processBulkFiles(files);
   }
 
@@ -403,7 +421,7 @@ export default function FloorPlansPage() {
               ref={bulkInputRef}
               type="file"
               multiple
-              accept="image/*,.heic,.heif"
+              accept="image/*,.heic,.heif,application/pdf,.pdf"
               className="hidden"
               onChange={handleBulkFileInput}
             />
@@ -411,7 +429,7 @@ export default function FloorPlansPage() {
               {dragOver ? "Drop files here" : "Drag & drop files, or click to browse"}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              JPG, PNG, HEIC — name files after the unit (e.g. "1234 Figueroa.jpg") for auto-matching
+              JPG, PNG, HEIC, PDF — name files after the unit (e.g. "1234 Figueroa.pdf") for auto-matching
             </p>
           </div>
 
@@ -449,9 +467,11 @@ export default function FloorPlansPage() {
                     }`}
                   >
                     {/* Thumbnail */}
-                    <div className="w-16 h-14 rounded-lg border border-border overflow-hidden shrink-0 bg-muted/30">
-                      {bf.previewUrl && (
+                    <div className="w-16 h-14 rounded-lg border border-border overflow-hidden shrink-0 bg-muted/30 flex items-center justify-center">
+                      {bf.previewUrl ? (
                         <img src={bf.previewUrl} alt="" className="w-full h-full object-contain" />
+                      ) : (
+                        <span className="text-xs font-bold text-red-500">PDF</span>
                       )}
                     </div>
 
@@ -642,22 +662,27 @@ export default function FloorPlansPage() {
             </div>
 
             <div>
-              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Image *</label>
-              <input ref={fileInputRef} type="file" accept="image/*,.heic,.heif" className="hidden" onChange={handleFileSelect} />
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">File *</label>
+              <input ref={fileInputRef} type="file" accept="image/*,.heic,.heif,application/pdf,.pdf" className="hidden" onChange={handleFileSelect} />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full min-h-[44px] px-3 py-2.5 border border-dashed border-border rounded-xl text-sm text-muted-foreground hover:border-accent hover:text-accent transition-colors"
               >
-                {previewUrl ? "Replace image" : "Choose image"}
+                {pendingDataUrl ? "Replace file" : "Choose image or PDF"}
               </button>
             </div>
           </div>
 
-          {previewUrl && (
+          {previewUrl ? (
             <div className="rounded-xl border border-border overflow-hidden max-h-64">
               <img src={previewUrl} alt="Preview" className="w-full object-contain max-h-64 bg-muted/30" />
             </div>
-          )}
+          ) : pendingDataUrl ? (
+            <div className="rounded-xl border border-border bg-muted/20 flex items-center gap-3 px-4 py-3">
+              <span className="text-2xl font-bold text-red-500">PDF</span>
+              <span className="text-sm text-muted-foreground">PDF file ready to upload</span>
+            </div>
+          ) : null}
 
           {uploadError && <p className="text-sm text-red-500">{uploadError}</p>}
 
@@ -742,12 +767,19 @@ export default function FloorPlansPage() {
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {plans.map((fp) => (
                   <div key={fp.id} className="bg-card rounded-xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
-                    <a href={fp.storage_url} target="_blank" rel="noopener noreferrer" className="block aspect-[4/3] bg-muted/30 overflow-hidden">
-                      <img
-                        src={fp.storage_url}
-                        alt={fp.label}
-                        className="w-full h-full object-contain hover:scale-105 transition-transform duration-200"
-                      />
+                    <a href={fp.storage_url} target="_blank" rel="noopener noreferrer" className="block aspect-[4/3] bg-muted/30 overflow-hidden flex items-center justify-center">
+                      {fp.storage_url.toLowerCase().endsWith(".pdf") ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-3xl font-extrabold text-red-500">PDF</span>
+                          <span className="text-xs text-muted-foreground">Click to open</span>
+                        </div>
+                      ) : (
+                        <img
+                          src={fp.storage_url}
+                          alt={fp.label}
+                          className="w-full h-full object-contain hover:scale-105 transition-transform duration-200"
+                        />
+                      )}
                     </a>
                     <div className="p-3">
                       <p className="text-sm font-medium truncate">{fp.unit_name}</p>

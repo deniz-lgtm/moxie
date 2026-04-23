@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -182,7 +182,7 @@ function SlotDetail({
 }) {
   const [regs, setRegs] = useState<ShowingRegistration[]>(slot.registrations ?? []);
   const [adding, setAdding] = useState(false);
-  const [addForm, setAddForm] = useState({ name: "", email: "", phone: "", partySize: "1", notes: "" });
+  const [addForm, setAddForm] = useState({ name: "", email: "", phone: "", partySize: "1", notes: "", guestCardId: "" });
   const [copied, setCopied] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -226,13 +226,14 @@ function SlotDetail({
         prospectPhone: addForm.phone || undefined,
         partySize: parseInt(addForm.partySize) || 1,
         notes: addForm.notes || undefined,
+        guestCardId: addForm.guestCardId || undefined,
         source: "manual",
       }),
     });
     const j = await res.json();
     if (j.registration) {
       setRegs((prev) => [...prev, j.registration]);
-      setAddForm({ name: "", email: "", phone: "", partySize: "1", notes: "" });
+      setAddForm({ name: "", email: "", phone: "", partySize: "1", notes: "", guestCardId: "" });
       setAdding(false);
       onRefresh();
     }
@@ -262,7 +263,11 @@ function SlotDetail({
         {/* header */}
         <div className="flex items-start justify-between p-5 border-b border-border">
           <div>
-            <p className="text-xs text-muted-foreground">{slot.propertyName ?? "Open house"}</p>
+            {(slot.propertyName || slot.unitName) && (
+              <p className="text-xs text-muted-foreground">
+                {[slot.propertyName, slot.unitName].filter(Boolean).join(" – ")}
+              </p>
+            )}
             <h2 className="text-lg font-semibold mt-0.5">
               {formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}
             </h2>
@@ -354,6 +359,12 @@ function SlotDetail({
                   onChange={(e) => setAddForm((f) => ({ ...f, notes: e.target.value }))}
                 />
               </div>
+              <input
+                className="text-sm border border-border rounded px-2 py-1.5 bg-background"
+                placeholder="AppFolio Guest Card ID (optional)"
+                value={addForm.guestCardId}
+                onChange={(e) => setAddForm((f) => ({ ...f, guestCardId: e.target.value }))}
+              />
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setAdding(false)}
@@ -420,8 +431,9 @@ function SlotDetail({
 
 // ─── new slot form ───────────────────────────────────────────────────────────
 
+type UnitOption = { id: string; unitName: string; propertyName: string };
+
 const INITIAL_FORM = {
-  propertyName: "",
   date: "",
   startTime: "10:00",
   endTime: "12:00",
@@ -436,6 +448,46 @@ function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Property / unit dropdowns
+  const [allUnits, setAllUnits] = useState<UnitOption[]>([]);
+  const [loadingUnits, setLoadingUnits] = useState(true);
+  const [selectedProperty, setSelectedProperty] = useState("");
+  const [selectedUnitId, setSelectedUnitId] = useState("");
+
+  useEffect(() => {
+    fetch("/api/appfolio/units")
+      .then((r) => r.json())
+      .then((d) =>
+        setAllUnits(
+          (d.units || []).map((u: any) => ({
+            id: u.id,
+            unitName: u.unitName,
+            propertyName: u.propertyName,
+          }))
+        )
+      )
+      .catch(() => {})
+      .finally(() => setLoadingUnits(false));
+  }, []);
+
+  const propertyOptions = useMemo(
+    () => [...new Set(allUnits.map((u) => u.propertyName))].sort(),
+    [allUnits]
+  );
+
+  const unitOptions = useMemo(
+    () =>
+      allUnits
+        .filter((u) => u.propertyName === selectedProperty)
+        .sort((a, b) => a.unitName.localeCompare(b.unitName)),
+    [allUnits, selectedProperty]
+  );
+
+  const handlePropertyChange = (name: string) => {
+    setSelectedProperty(name);
+    setSelectedUnitId("");
+  };
+
   const save = async () => {
     if (!form.date || !form.startTime || !form.endTime) {
       setError("Date, start time and end time are required.");
@@ -445,11 +497,14 @@ function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setError("");
     const startsAt = new Date(`${form.date}T${form.startTime}:00`).toISOString();
     const endsAt = new Date(`${form.date}T${form.endTime}:00`).toISOString();
+    const selectedUnit = allUnits.find((u) => u.id === selectedUnitId);
     const res = await fetch("/api/showings/slots", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        propertyName: form.propertyName || undefined,
+        propertyName: selectedProperty || undefined,
+        unitId: selectedUnit?.id || undefined,
+        unitName: selectedUnit?.unitName || undefined,
         startsAt,
         endsAt,
         capacity: parseInt(form.capacity) || 20,
@@ -482,15 +537,44 @@ function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         </div>
 
         <div className="space-y-3">
+          {/* Property */}
           <div>
-            <label className="text-xs font-medium text-muted-foreground">Property / Unit</label>
-            <input
-              className="mt-1 w-full text-sm border border-border rounded px-3 py-2 bg-background"
-              placeholder="e.g. 123 Main St or leave blank"
-              value={form.propertyName}
-              onChange={(e) => setForm((f) => ({ ...f, propertyName: e.target.value }))}
-            />
+            <label className="text-xs font-medium text-muted-foreground">Property</label>
+            <div className="relative mt-1">
+              <select
+                className="w-full text-sm border border-border rounded px-3 py-2 bg-background appearance-none pr-8"
+                value={selectedProperty}
+                onChange={(e) => handlePropertyChange(e.target.value)}
+                disabled={loadingUnits}
+              >
+                <option value="">{loadingUnits ? "Loading…" : "— Select property —"}</option>
+                {propertyOptions.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
           </div>
+
+          {/* Unit — only shown once a property is picked */}
+          {selectedProperty && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Unit</label>
+              <div className="relative mt-1">
+                <select
+                  className="w-full text-sm border border-border rounded px-3 py-2 bg-background appearance-none pr-8"
+                  value={selectedUnitId}
+                  onChange={(e) => setSelectedUnitId(e.target.value)}
+                >
+                  <option value="">— All units / entire property —</option>
+                  {unitOptions.map((u) => (
+                    <option key={u.id} value={u.id}>{u.unitName}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="text-xs font-medium text-muted-foreground">Date *</label>
@@ -611,8 +695,10 @@ function SlotCard({ slot, onClick }: { slot: ShowingSlot; onClick: () => void })
               {slot.status}
             </span>
           </div>
-          {slot.propertyName && (
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">{slot.propertyName}</p>
+          {(slot.propertyName || slot.unitName) && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              {[slot.propertyName, slot.unitName].filter(Boolean).join(" – ")}
+            </p>
           )}
           {slot.hostName && (
             <p className="text-xs text-muted-foreground">Host: {slot.hostName}</p>
@@ -738,7 +824,7 @@ function WeekView({ slots, onOpenSlot, weekOf, onWeekChange }: {
                     className="bg-purple-100 border border-purple-300 rounded text-left px-1 py-0.5 hover:bg-purple-200 transition overflow-hidden"
                   >
                     <p className="text-[10px] font-semibold text-purple-900 leading-tight truncate">
-                      {slot.propertyName || "Open house"}
+                      {[slot.propertyName, slot.unitName].filter(Boolean).join(" – ") || "Open house"}
                     </p>
                     <p className="text-[9px] text-purple-700">
                       {formatTime(slot.startsAt)} · {used}/{slot.capacity}
@@ -823,7 +909,7 @@ function MonthView({ slots, onOpenSlot, monthOf, onMonthChange }: {
                   onClick={() => onOpenSlot(s)}
                   className="w-full text-left text-[10px] px-1 py-0.5 mb-0.5 rounded bg-purple-100 text-purple-800 hover:bg-purple-200 truncate font-medium"
                 >
-                  {formatTime(s.startsAt)} {s.propertyName || "Showing"}
+                  {formatTime(s.startsAt)} {[s.propertyName, s.unitName].filter(Boolean).join(" – ") || "Showing"}
                 </button>
               ))}
               {daySlots.length > 3 && (

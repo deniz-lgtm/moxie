@@ -89,6 +89,7 @@ export async function POST(request: Request) {
       partySize,
       status: "confirmed",
       notes: typeof body.notes === "string" ? body.notes.trim() || undefined : undefined,
+      guestCardId: typeof body.guestCardId === "string" ? body.guestCardId.trim() || undefined : undefined,
       source: typeof body.source === "string" ? body.source : "manual",
       createdAt: now,
       updatedAt: now,

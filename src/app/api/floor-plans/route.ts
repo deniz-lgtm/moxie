@@ -46,7 +46,11 @@ export async function POST(request: Request) {
 
     const res = await fetch(dataUrl);
     const blob = await res.blob();
-    const ext = blob.type.includes("png") ? "png" : "jpg";
+    const ext = blob.type.includes("png")
+      ? "png"
+      : blob.type.includes("pdf")
+      ? "pdf"
+      : "jpg";
     const safeName = (unitId || unitName).replace(/[^a-zA-Z0-9]/g, "_");
     const path = `floor-plans/${safeName}-${Date.now()}.${ext}`;
 
