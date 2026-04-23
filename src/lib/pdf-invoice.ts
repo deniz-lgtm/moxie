@@ -327,6 +327,20 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
       y += 4.5;
     }
 
+    // Wear-and-tear exclusion rationale — explicitly anchors every deduction
+    // to the CA Civil Code §1950.5 standard so the statement is AI-dispute-resistant.
+    checkNewPage(5);
+    doc.setFontSize(6.5);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(...BRAND.medGray);
+    doc.text(
+      "W&T exclusion: condition determined inconsistent with gradual deterioration from ordinary daily use per CA Civ. Code §1950.5",
+      margin + 48, y
+    );
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.black);
+    y += 4;
+
     // Embedded photo thumbnail — only drawn for photo-level deductions that
     // have been pre-fetched into a base64 data URL by buildPdfData.
     if (photoDataUrl) {
@@ -991,6 +1005,189 @@ export function generateContractorReportPDF(
   doc.text("Date: ________________", pageWidth - margin - 50, y);
 
   addPageFooters(doc, data, "Contractor Work Order");
+  return doc.output("datauristring");
+}
+
+// ── Photo Evidence Package ──────────────────────────
+
+/**
+ * Generate a complete photo evidence package for tenant disclosure requests.
+ * Every photo from the inspection organized by room, with item label,
+ * condition, timestamp, and deduction indicator.
+ *
+ * Pass `allPhotoDataUrls` — a Map<photoId, base64DataUrl> — pre-fetched by the caller.
+ */
+export function generatePhotoPackagePDF(
+  data: InvoiceData,
+  allPhotoDataUrls: Map<string, string>,
+): string {
+  const { inspection } = data;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  const contentWidth = pageWidth - margin * 2;
+  const photoW = (contentWidth - 6) / 2; // two columns with 6mm gap
+  const photoH = photoW * 0.72;
+
+  function checkNewPage(needed: number) {
+    if (y + needed > doc.internal.pageSize.getHeight() - 25) {
+      doc.addPage();
+      y = 20;
+    }
+  }
+
+  let y = addBrandedHeader(doc, data, 18);
+
+  // Title
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text("PHOTOGRAPHIC EVIDENCE PACKAGE", margin, y);
+  y += 5;
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.text("Complete timestamped photo documentation — move-out inspection", margin, y);
+  y += 8;
+
+  // Property/unit info box
+  doc.setFillColor(...BRAND.bgGray);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.rect(margin, y - 2, contentWidth, 22, "FD");
+  const col1x = margin + 4;
+  const col2x = margin + contentWidth / 2 + 4;
+  const labelWidth = 30;
+  let iy = y + 4;
+
+  function infoRow(label: string, value: string, x: number) {
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...BRAND.darkGray);
+    doc.text(label, x, iy);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.black);
+    doc.text(String(value || "—"), x + labelWidth, iy);
+  }
+
+  infoRow("Unit:", inspection.unit_name, col1x);
+  infoRow("Inspector:", inspection.inspector || "—", col2x);
+  iy += 6;
+  infoRow("Property:", inspection.property_name, col1x);
+  infoRow("Inspection Date:", inspection.scheduled_date || "—", col2x);
+  y += 22 + 8;
+
+  // Legal note
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "italic");
+  doc.setTextColor(...BRAND.darkGray);
+  const noteText = doc.splitTextToSize(
+    "All photographs are time-stamped and were captured during the forensic visual inspection. Photos marked \"DEDUCTION\" correspond to line items on the Itemized Statement of Security Deposit Deductions. Full-resolution originals are maintained and available upon written request per CA Civil Code §1950.5(g)(2).",
+    contentWidth
+  );
+  for (const line of noteText) { doc.text(line, margin, y); y += 3.5; }
+  doc.setFont("helvetica", "normal");
+  y += 4;
+
+  const allRooms: DbRoom[] = inspection.rooms || [];
+  let totalPhotos = 0;
+
+  for (const room of allRooms) {
+    const roomPhotos: { photo: DbRoom["items"][0]["photos"][0]; itemName: string }[] = [];
+    for (const item of room.items) {
+      for (const photo of (item.photos || [])) {
+        roomPhotos.push({ photo, itemName: item.name });
+      }
+    }
+    if (roomPhotos.length === 0) continue;
+
+    // Room heading
+    checkNewPage(14);
+    doc.setFillColor(...BRAND.maroon);
+    doc.rect(margin, y - 4, contentWidth, 8, "F");
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...BRAND.white);
+    doc.text(`${room.name.toUpperCase()}  ·  ${roomPhotos.length} photo${roomPhotos.length !== 1 ? "s" : ""}`, margin + 3, y);
+    doc.setTextColor(...BRAND.black);
+    y += 8;
+
+    // Photos in 2-column grid
+    let col = 0;
+    for (const { photo, itemName } of roomPhotos) {
+      const x = margin + col * (photoW + 6);
+      const captionH = 14;
+      checkNewPage(photoH + captionH + 6);
+
+      const dataUrl = allPhotoDataUrls.get(photo.id);
+      if (dataUrl) {
+        try {
+          doc.addImage(dataUrl, "JPEG", x, y, photoW, photoH);
+          // Deduction badge
+          if (photo.is_deduction) {
+            doc.setFillColor(...BRAND.maroon);
+            doc.rect(x, y, photoW, 5, "F");
+            doc.setFontSize(6);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...BRAND.white);
+            doc.text("DEDUCTION", x + 2, y + 3.5);
+            doc.setTextColor(...BRAND.black);
+          }
+          doc.setDrawColor(...BRAND.lightGray);
+          doc.rect(x, y, photoW, photoH);
+        } catch {
+          // Photo failed to embed — draw placeholder box
+          doc.setFillColor(...BRAND.bgGray);
+          doc.rect(x, y, photoW, photoH, "F");
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(...BRAND.medGray);
+          doc.text("[Photo unavailable]", x + photoW / 2, y + photoH / 2, { align: "center" });
+          doc.setTextColor(...BRAND.black);
+        }
+      } else {
+        doc.setFillColor(...BRAND.bgGray);
+        doc.rect(x, y, photoW, photoH, "F");
+      }
+
+      // Caption
+      const capY = y + photoH + 2;
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...BRAND.black);
+      doc.text(itemName, x, capY + 4, { maxWidth: photoW });
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...BRAND.darkGray);
+      const ts = photo.created_at
+        ? new Date(photo.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+        : "";
+      if (ts) doc.text(ts, x, capY + 8, { maxWidth: photoW });
+
+      totalPhotos++;
+      col++;
+      if (col === 2) {
+        col = 0;
+        y += photoH + captionH + 4;
+      }
+    }
+    // If we ended mid-row, advance
+    if (col !== 0) {
+      y += photoH + 14 + 4;
+      col = 0;
+    }
+    y += 4;
+  }
+
+  // Summary footer on last page
+  checkNewPage(16);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "italic");
+  doc.setTextColor(...BRAND.medGray);
+  doc.text(
+    `Total photographs: ${totalPhotos}  |  Produced by ${data.companyName}  |  CA Civil Code §1950.5`,
+    margin, y
+  );
+
+  addPageFooters(doc, data, "Photographic Evidence Package");
   return doc.output("datauristring");
 }
 

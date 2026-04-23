@@ -2397,6 +2397,31 @@ function MoveOutInspectionContent() {
             <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
             <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
           </button>
+          <button
+            onClick={async () => {
+              const { generatePhotoPackagePDF, downloadPDF } = await import("@/lib/pdf-invoice");
+              const logo = await loadLogoBase64();
+              const pdfData = await buildPdfData(activeInspection, logo);
+              // Fetch ALL photos (not just deductions) for the evidence package
+              const allPhotoDataUrls = new Map<string, string>();
+              await Promise.all(
+                activeInspection.rooms.flatMap((r) =>
+                  r.items.flatMap((item) =>
+                    item.photos.map(async (photo) => {
+                      const dataUrl = await photoUrlToDataUrl(photo.url);
+                      if (dataUrl) allPhotoDataUrls.set(photo.id, dataUrl);
+                    })
+                  )
+                )
+              );
+              const packagePdf = generatePhotoPackagePDF(pdfData, allPhotoDataUrls);
+              downloadPDF(packagePdf, `PhotoEvidence-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+            }}
+            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+          >
+            <span className="font-medium group-hover:text-accent transition-colors">Download Photo Evidence Package</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">All inspection photos by room — for tenant disclosure requests</span>
+          </button>
           {selectedEmails.length > 0 && (
             <a
               href={`mailto:${selectedEmails.join(",")}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${selectedTenantList.map((t) => t.name).join(", ")},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
