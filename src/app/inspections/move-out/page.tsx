@@ -177,6 +177,8 @@ function MoveOutInspectionContent() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [savedFloorPlan, setSavedFloorPlan] = useState<{ id: string; storage_url: string; label: string } | null>(null);
+  const [loadingFloorPlan, setLoadingFloorPlan] = useState(false);
 
   // ─── Network status & offline sync ─────────────────
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
@@ -330,6 +332,31 @@ function MoveOutInspectionContent() {
     }
     loadData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-load saved floor plan from library when entering the floor_plan step
+  useEffect(() => {
+    if (step !== "floor_plan" || !activeInspection || activeInspection.floorPlanUrl) return;
+    setLoadingFloorPlan(true);
+    const unitId = encodeURIComponent(activeInspection.unitId);
+    const unitName = encodeURIComponent(activeInspection.unitNumber);
+    fetch(`/api/floor-plans?unit_id=${unitId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const plans = data.floor_plans || [];
+        if (plans.length === 0) {
+          // fallback: try by unit name
+          return fetch(`/api/floor-plans?unit_name=${unitName}`)
+            .then((r) => r.json())
+            .then((d) => d.floor_plans || []);
+        }
+        return plans;
+      })
+      .then((plans: { id: string; storage_url: string; label: string }[]) => {
+        if (plans.length > 0) setSavedFloorPlan(plans[0]);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingFloorPlan(false));
+  }, [step, activeInspection?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch tenants when entering the completed step
   useEffect(() => {
@@ -517,6 +544,44 @@ function MoveOutInspectionContent() {
       setUploadError("Failed to process image. Please try again.");
       console.error("[MoveOut] Floor plan processing failed:", err);
     }
+  }
+
+  async function applySavedFloorPlan() {
+    if (!activeInspection || !savedFloorPlan) return;
+    const updated = {
+      ...activeInspection,
+      floorPlanUrl: savedFloorPlan.storage_url,
+      updatedAt: new Date().toISOString(),
+    };
+    // Run AI room detection on the saved floor plan
+    try {
+      const res = await fetch("/api/inspections/analyze-floor-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: savedFloorPlan.storage_url }),
+      });
+      const data = await res.json();
+      if (data.rooms?.length > 0) {
+        const detectedRooms = data.rooms.map((name: string) => ({
+          id: newId(),
+          name,
+          items: itemsForRoom(name),
+        }));
+        if (!data.rooms.some((n: string) => n.toLowerCase() === "exterior")) {
+          detectedRooms.push({ id: newId(), name: "Exterior", items: itemsForRoom("Exterior") });
+        }
+        updated.rooms = detectedRooms;
+      }
+    } catch {
+      // Fall back to default rooms if detection fails
+    }
+    if (!updated.rooms || updated.rooms.length === 0) {
+      updated.rooms = [
+        "Living Room", "Kitchen", "Bedroom 1", "Bedroom 2",
+        "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior",
+      ].map((name) => ({ id: newId(), name, items: itemsForRoom(name) }));
+    }
+    saveInspection(updated);
   }
 
   function skipFloorPlan() {
@@ -940,6 +1005,30 @@ function MoveOutInspectionContent() {
     }
   }
 
+  function acceptAllAiAssessments() {
+    if (!activeInspection) return;
+    const rooms = activeInspection.rooms.map((room) => ({
+      ...room,
+      items: room.items.map((item) => ({
+        ...item,
+        photos: item.photos.map((photo) => {
+          if (!photo.aiAnalysis) return photo;
+          return {
+            ...photo,
+            // If inspector review is empty, copy the AI inspector_review text (photo.notes was pre-filled)
+            notes: photo.notes || photo.aiAnalysis,
+            isDeduction: (photo.aiOriginalCost || 0) > 0 ? true : photo.isDeduction,
+            costEstimate:
+              photo.costEstimate === undefined || photo.costEstimate === 0
+                ? photo.aiOriginalCost || 0
+                : photo.costEstimate,
+          };
+        }),
+      })),
+    }));
+    saveInspection({ ...activeInspection, rooms, updatedAt: new Date().toISOString() });
+  }
+
   function moveToTeamReview() {
     if (!activeInspection) return;
     saveInspection({
@@ -955,7 +1044,7 @@ function MoveOutInspectionContent() {
     setGeneratingPDF(true);
 
     try {
-      const { generateDepositDeductionPDF, generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
+      const { generateDepositDeductionPDF, generateDispositionLetterPDF, generateContractorReportPDF, downloadPDF } = await import("@/lib/pdf-invoice");
 
       const logo = await loadLogoBase64();
       const pdfData = await buildPdfData(activeInspection, logo);
@@ -963,10 +1052,16 @@ function MoveOutInspectionContent() {
 
       const totalDed = calcDeductions(activeInspection);
 
-      // Download both the deduction statement and disposition letter
+      // Download all three documents
       downloadPDF(pdfDataUri, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
       const letterPdf = generateDispositionLetterPDF(pdfData);
       downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+      let floorPlanBase64: string | null = null;
+      if (activeInspection.floorPlanUrl) {
+        floorPlanBase64 = await photoUrlToDataUrl(activeInspection.floorPlanUrl);
+      }
+      const contractorPdf = generateContractorReportPDF(pdfData, floorPlanBase64);
+      downloadPDF(contractorPdf, `ContractorReport-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
 
       saveInspection({
         ...activeInspection,
@@ -1554,12 +1649,39 @@ function MoveOutInspectionContent() {
         </button>
         <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
         <div className="flex items-center gap-3">
-          <h1 className="text-xl sm:text-2xl font-bold">Upload Floor Plan</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Floor Plan</h1>
           <SaveIndicator status={saveStatus} onRetry={retrySave} />
         </div>
         <p className="text-sm text-muted-foreground">
-          {activeInspection.unitNumber} — Upload a floor plan and AI will identify rooms automatically.
+          {activeInspection.unitNumber} — AI will scan the floor plan and identify rooms automatically.
         </p>
+
+        {/* Saved floor plan banner */}
+        {loadingFloorPlan && (
+          <div className="flex items-center gap-2 py-3 px-4 bg-muted/40 rounded-xl text-sm text-muted-foreground">
+            <div className="w-3.5 h-3.5 border-[1.5px] border-accent/30 border-t-accent rounded-full animate-spin shrink-0" />
+            Checking floor plan library…
+          </div>
+        )}
+        {!loadingFloorPlan && savedFloorPlan && !activeInspection.floorPlanUrl && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+            <img
+              src={savedFloorPlan.storage_url}
+              alt="Saved floor plan"
+              className="w-20 h-16 object-contain rounded-lg border border-blue-200 shrink-0 bg-white"
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-blue-900">Saved floor plan found</p>
+              <p className="text-xs text-blue-700 mt-0.5">{savedFloorPlan.label}</p>
+              <button
+                onClick={applySavedFloorPlan}
+                className="mt-2 min-h-[36px] px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Use This Floor Plan →
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="bg-card rounded-xl border border-border p-4 sm:p-6 text-center space-y-4">
           {activeInspection.floorPlanUrl ? (
@@ -1570,7 +1692,7 @@ function MoveOutInspectionContent() {
                 className="max-h-96 mx-auto rounded-lg border border-border"
               />
               <p className="text-sm text-green-600 mt-3 font-medium">
-                Floor plan uploaded — {activeInspection.rooms.length} rooms detected
+                Floor plan loaded — {activeInspection.rooms.length} rooms detected
               </p>
               <div className="flex flex-wrap gap-2 justify-center mt-2">
                 {activeInspection.rooms.map((r) => (
@@ -1698,12 +1820,21 @@ function MoveOutInspectionContent() {
               </>
             )}
             {step === "ai_review" && (
-              <button
-                onClick={moveToTeamReview}
-                className="w-full sm:w-auto min-h-[44px] px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
-              >
-                Send to Team Review &rarr;
-              </button>
+              <>
+                <button
+                  onClick={acceptAllAiAssessments}
+                  className="flex-1 sm:flex-none min-h-[44px] px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition-colors"
+                  title="Confirm all AI-detected deductions and costs without editing each one"
+                >
+                  Accept All AI Assessments
+                </button>
+                <button
+                  onClick={moveToTeamReview}
+                  className="flex-1 sm:flex-none min-h-[44px] px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90"
+                >
+                  Send to Team Review &rarr;
+                </button>
+              </>
             )}
             {step === "team_review" && (
               <div className="flex flex-wrap items-center gap-2 w-full">
@@ -1950,9 +2081,20 @@ function MoveOutInspectionContent() {
                                 </div>
                               )}
                               <div>
-                                <label className="text-[10px] font-semibold uppercase tracking-wider text-accent block mb-1">
-                                  Inspector Review <span className="font-normal normal-case text-muted-foreground">· goes to tenant</span>
-                                </label>
+                                <div className="flex items-center justify-between mb-1">
+                                  <label className="text-[10px] font-semibold uppercase tracking-wider text-accent">
+                                    Inspector Review <span className="font-normal normal-case text-muted-foreground">· goes to tenant</span>
+                                  </label>
+                                  {photo.aiAnalysis && (
+                                    <button
+                                      onClick={() => updatePhoto(selectedRoomIdx, itemIdx, photoIdx, "notes", photo.aiAnalysis)}
+                                      className="text-[10px] font-medium text-blue-600 hover:text-blue-700 hover:underline shrink-0 ml-2"
+                                      title="Copy AI assessment text into Inspector Review"
+                                    >
+                                      Use AI →
+                                    </button>
+                                  )}
+                                </div>
                                 <textarea
                                   placeholder="Describe damage for the tenant disposition statement…"
                                   value={photo.notes || ""}
@@ -2236,6 +2378,24 @@ function MoveOutInspectionContent() {
           >
             <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
             <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
+          </button>
+          <button
+            onClick={async () => {
+              const { generateContractorReportPDF, downloadPDF } = await import("@/lib/pdf-invoice");
+              const logo = await loadLogoBase64();
+              const pdfData = await buildPdfData(activeInspection, logo);
+              // Fetch floor plan as base64 for embedding
+              let floorPlanBase64: string | null = null;
+              if (activeInspection.floorPlanUrl) {
+                floorPlanBase64 = await photoUrlToDataUrl(activeInspection.floorPlanUrl);
+              }
+              const contractorPdf = generateContractorReportPDF(pdfData, floorPlanBase64);
+              downloadPDF(contractorPdf, `ContractorReport-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+            }}
+            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+          >
+            <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
           </button>
           {selectedEmails.length > 0 && (
             <a

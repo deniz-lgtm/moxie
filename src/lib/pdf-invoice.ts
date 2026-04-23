@@ -291,7 +291,6 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
     roomName: string,
     description: string,
     cost: number,
-    aiOrigCost?: number,
     photoDataUrl?: string,
   ) {
     itemNum++;
@@ -326,19 +325,6 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
         doc.text(`$${cost.toFixed(2)}`, pageWidth - margin - 4, y, { align: "right" });
       }
       y += 4.5;
-    }
-
-    // Edit trail footnote
-    if (aiOrigCost !== undefined && cost !== aiOrigCost) {
-      checkNewPage(5);
-      doc.setFontSize(6.5);
-      doc.setFont("helvetica", "italic");
-      doc.setTextColor(...BRAND.medGray);
-      doc.text(
-        `Original assessment: $${aiOrigCost.toFixed(2)} — adjusted to $${cost.toFixed(2)} by inspector`,
-        margin + 48, y
-      );
-      y += 4;
     }
 
     // Embedded photo thumbnail — only drawn for photo-level deductions that
@@ -380,14 +366,13 @@ export function generateDepositDeductionPDF(data: InvoiceData): string {
             room.name,
             desc,
             photo.cost_estimate || 0,
-            photo.ai_original_cost,
             photo.data_url,
           );
         }
       } else if (item.is_deduction && item.cost_estimate > 0) {
         // Item-level deduction (no per-photo deductions)
         const desc = `${item.name}${item.notes ? ` — ${item.notes}` : ""}`;
-        renderDeductionLine(room.name, desc, item.cost_estimate, item.ai_original_cost);
+        renderDeductionLine(room.name, desc, item.cost_estimate);
       }
     }
   }
@@ -827,6 +812,185 @@ export function generateDispositionLetterPDF(data: InvoiceData): string {
   doc.setTextColor(...BRAND.black);
   addPageFooters(doc, data, "Security Deposit Disposition Letter");
 
+  return doc.output("datauristring");
+}
+
+// ── Contractor Work Order Report ────────────────────
+
+/**
+ * Generate a contractor repair report from deducted items.
+ * No prices — just room locations, item descriptions, and optional floor plan.
+ */
+export function generateContractorReportPDF(
+  data: InvoiceData,
+  floorPlanBase64?: string | null,
+): string {
+  const { inspection } = data;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  const contentWidth = pageWidth - margin * 2;
+
+  function checkNewPage(needed: number) {
+    if (y + needed > doc.internal.pageSize.getHeight() - 25) {
+      doc.addPage();
+      y = 20;
+    }
+  }
+
+  let y = addBrandedHeader(doc, data, 18);
+
+  // Title
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text("CONTRACTOR WORK ORDER — UNIT REPAIR CHECKLIST", margin, y);
+  y += 5;
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.text("Items requiring remediation following move-out inspection", margin, y);
+  y += 8;
+
+  // Property / unit info box
+  doc.setFillColor(...BRAND.bgGray);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.rect(margin, y - 2, contentWidth, 24, "FD");
+  const col1x = margin + 4;
+  const col2x = margin + contentWidth / 2 + 4;
+  const labelWidth = 32;
+  let iy = y + 4;
+
+  function infoRow(label: string, value: string, x: number) {
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...BRAND.darkGray);
+    doc.text(label, x, iy);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.black);
+    doc.text(String(value || "—"), x + labelWidth, iy);
+  }
+
+  infoRow("Unit:", inspection.unit_name, col1x);
+  infoRow("Inspector:", inspection.inspector || "—", col2x);
+  iy += 6;
+  infoRow("Property:", inspection.property_name, col1x);
+  infoRow("Date:", inspection.scheduled_date || "—", col2x);
+  y += 24 + 6;
+
+  // Floor plan (if provided)
+  if (floorPlanBase64) {
+    checkNewPage(90);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...BRAND.black);
+    doc.text("UNIT FLOOR PLAN", margin, y);
+    y += 4;
+    try {
+      const imgW = contentWidth;
+      const imgH = 80;
+      doc.addImage(floorPlanBase64, "JPEG", margin, y, imgW, imgH);
+      doc.setDrawColor(...BRAND.lightGray);
+      doc.rect(margin, y, imgW, imgH);
+      y += imgH + 6;
+    } catch {
+      // Skip if floor plan can't be embedded
+    }
+  }
+
+  // Items header
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text("REPAIR ITEMS", margin, y);
+  y += 7;
+
+  // Table header
+  checkNewPage(10);
+  doc.setFillColor(...BRAND.maroon);
+  doc.rect(margin, y - 4, contentWidth, 8, "F");
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.white);
+  doc.text("#", margin + 3, y);
+  doc.text("Room / Area", margin + 12, y);
+  doc.text("Item & Description", margin + 55, y);
+  y += 7;
+  doc.setTextColor(...BRAND.black);
+
+  const allRooms: DbRoom[] = inspection.rooms || [];
+  let itemNum = 0;
+
+  for (const room of allRooms) {
+    for (const item of room.items) {
+      const photoDeductions = (item.photos || []).filter(
+        (p) => p.is_deduction && (p.cost_estimate || 0) > 0,
+      );
+
+      const renderItem = (description: string) => {
+        itemNum++;
+        checkNewPage(14);
+
+        if (itemNum % 2 === 0) {
+          doc.setFillColor(250, 250, 250);
+          doc.rect(margin, y - 4, contentWidth, 5, "F");
+        }
+
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...BRAND.darkGray);
+        doc.text(String(itemNum), margin + 3, y);
+
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(...BRAND.black);
+        doc.text(room.name, margin + 12, y);
+
+        const descLines = doc.splitTextToSize(description, contentWidth - 58);
+        for (let i = 0; i < descLines.length; i++) {
+          if (i > 0) checkNewPage(5);
+          doc.text(descLines[i], margin + 55, y);
+          y += 4.5;
+        }
+
+        y += 2;
+        doc.setDrawColor(...BRAND.lightGray);
+        doc.line(margin + 10, y - 1, pageWidth - margin, y - 1);
+      };
+
+      if (photoDeductions.length > 0) {
+        for (const photo of photoDeductions) {
+          renderItem(`${item.name}${photo.notes ? ` — ${photo.notes}` : ""}`);
+        }
+      } else if (item.is_deduction && item.cost_estimate > 0) {
+        renderItem(`${item.name}${item.notes ? ` — ${item.notes}` : ""}`);
+      }
+    }
+  }
+
+  if (itemNum === 0) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("No repair items identified.", margin + 12, y);
+    y += 8;
+  }
+
+  y += 6;
+
+  // Signature block
+  checkNewPage(30);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 8;
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.black);
+  doc.text("Contractor Signature: ____________________________", margin, y);
+  doc.text("Date: ________________", pageWidth - margin - 50, y);
+  y += 10;
+  doc.text("Work Completed: ____________________________", margin, y);
+  doc.text("Date: ________________", pageWidth - margin - 50, y);
+
+  addPageFooters(doc, data, "Contractor Work Order");
   return doc.output("datauristring");
 }
 
