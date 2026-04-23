@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { validateImage, compressImage, isHeicFile, convertHeicToJpeg } from "@/lib/image-utils";
 import type { Unit } from "@/lib/types";
@@ -15,24 +15,95 @@ type FloorPlan = {
   created_at: string;
 };
 
+type BulkFile = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  dataUrl: string | null;
+  filenameBase: string;
+  matchedUnit: Unit | null;
+  matchConfidence: "high" | "low" | null;
+  selectedUnitId: string;
+  label: string;
+  status: "pending" | "processing" | "uploading" | "done" | "error";
+  error?: string;
+};
+
+// Normalize a string for fuzzy matching: lowercase, strip extension, replace
+// hyphens/underscores/dots with spaces, collapse whitespace.
+function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\.[^.]+$/, "")       // strip file extension
+    .replace(/[-_.]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchUnitToFilename(
+  filename: string,
+  units: Unit[]
+): { unit: Unit | null; confidence: "high" | "low" | null } {
+  const norm = normalizeForMatch(filename);
+
+  // Exact match first
+  for (const u of units) {
+    const uNorm = normalizeForMatch(u.unitName || u.displayName);
+    if (uNorm === norm || norm.includes(uNorm) || uNorm.includes(norm)) {
+      return { unit: u, confidence: "high" };
+    }
+  }
+
+  // Word-overlap scoring
+  const filenameWords = norm.split(" ").filter((w) => w.length > 2);
+  if (filenameWords.length === 0) return { unit: null, confidence: null };
+
+  let bestUnit: Unit | null = null;
+  let bestScore = 0;
+
+  for (const u of units) {
+    const uNorm = normalizeForMatch(u.unitName || u.displayName);
+    const unitWords = uNorm.split(" ").filter((w) => w.length > 2);
+    const matches = filenameWords.filter(
+      (w) => unitWords.includes(w) || uNorm.includes(w)
+    ).length;
+    const score = matches / Math.max(filenameWords.length, unitWords.length, 1);
+    if (score > bestScore) {
+      bestScore = score;
+      bestUnit = u;
+    }
+  }
+
+  if (bestScore >= 0.4) return { unit: bestUnit, confidence: "low" };
+  return { unit: null, confidence: null };
+}
+
 export default function FloorPlansPage() {
   const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [propertyFilter, setPropertyFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  // Upload form state
+  // Single upload form
   const [showUpload, setShowUpload] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedProperty, setSelectedProperty] = useState("");
   const [selectedUnitId, setSelectedUnitId] = useState("");
   const [label, setLabel] = useState("Floor Plan");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [pendingDataUrl, setPendingDataUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Bulk upload state
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkFiles, setBulkFiles] = useState<BulkFile[]>([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -52,37 +123,19 @@ export default function FloorPlansPage() {
     load();
   }, []);
 
+  // ── Single upload ──────────────────────────────────
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const validation = validateImage(file);
-    if (!validation.valid) {
-      setUploadError(validation.error || "Invalid file");
-      return;
-    }
+    if (!validation.valid) { setUploadError(validation.error || "Invalid file"); return; }
     setUploadError(null);
-
     try {
-      let dataUrl: string;
-      if (isHeicFile(file)) {
-        const converted = await convertHeicToJpeg(file);
-        if (converted.startsWith("blob:")) {
-          const resp = await fetch(converted);
-          const blob = await resp.blob();
-          dataUrl = await compressImage(new File([blob], "plan.jpg", { type: "image/jpeg" }), 1920, 0.85);
-          URL.revokeObjectURL(converted);
-        } else {
-          dataUrl = converted;
-        }
-      } else {
-        dataUrl = await compressImage(file, 1920, 0.85);
-      }
+      const dataUrl = await processImageFile(file);
       setPendingDataUrl(dataUrl);
       setPreviewUrl(dataUrl);
-    } catch {
-      setUploadError("Failed to process image. Please try again.");
-    }
+    } catch { setUploadError("Failed to process image."); }
   }
 
   async function handleUpload() {
@@ -90,50 +143,175 @@ export default function FloorPlansPage() {
       setUploadError("Please select a unit and image.");
       return;
     }
-
     const unit = units.find((u) => u.id === selectedUnitId);
     if (!unit) return;
-
     setUploading(true);
     setUploadError(null);
     try {
-      const res = await fetch("/api/floor-plans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dataUrl: pendingDataUrl,
-          propertyName: unit.propertyName,
-          unitId: unit.id,
-          unitName: unit.unitName || unit.displayName,
-          label,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setUploadError(data.error || "Upload failed");
-        return;
-      }
-      setFloorPlans((prev) => [data.floor_plan, ...prev]);
-      setShowUpload(false);
-      setSelectedProperty("");
-      setSelectedUnitId("");
-      setLabel("Floor Plan");
-      setPreviewUrl(null);
-      setPendingDataUrl(null);
-    } catch {
-      setUploadError("Upload failed. Please try again.");
+      const fp = await uploadFloorPlan(pendingDataUrl, unit, label);
+      setFloorPlans((prev) => [fp, ...prev]);
+      resetSingleForm();
+    } catch (e: any) {
+      setUploadError(e.message || "Upload failed.");
     } finally {
       setUploading(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    const res = await fetch(`/api/floor-plans?id=${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setFloorPlans((prev) => prev.filter((fp) => fp.id !== id));
-    }
-    setDeleteConfirm(null);
+  function resetSingleForm() {
+    setShowUpload(false);
+    setSelectedProperty("");
+    setSelectedUnitId("");
+    setLabel("Floor Plan");
+    setPreviewUrl(null);
+    setPendingDataUrl(null);
   }
+
+  // ── Bulk upload ────────────────────────────────────
+
+  async function processImageFile(file: File): Promise<string> {
+    if (isHeicFile(file)) {
+      const converted = await convertHeicToJpeg(file);
+      if (converted.startsWith("blob:")) {
+        const resp = await fetch(converted);
+        const blob = await resp.blob();
+        const dataUrl = await compressImage(new File([blob], "plan.jpg", { type: "image/jpeg" }), 1920, 0.85);
+        URL.revokeObjectURL(converted);
+        return dataUrl;
+      }
+      return converted;
+    }
+    return compressImage(file, 1920, 0.85);
+  }
+
+  async function uploadFloorPlan(dataUrl: string, unit: Unit, lbl: string): Promise<FloorPlan> {
+    const res = await fetch("/api/floor-plans", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dataUrl,
+        propertyName: unit.propertyName,
+        unitId: unit.id,
+        unitName: unit.unitName || unit.displayName,
+        label: lbl,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+    return data.floor_plan;
+  }
+
+  const processBulkFiles = useCallback(
+    async (files: File[]) => {
+      const newEntries: BulkFile[] = files.map((file) => {
+        const filenameBase = file.name.replace(/\.[^.]+$/, "");
+        const { unit, confidence } = matchUnitToFilename(file.name, units);
+        return {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          file,
+          previewUrl: URL.createObjectURL(file),
+          dataUrl: null,
+          filenameBase,
+          matchedUnit: unit,
+          matchConfidence: confidence,
+          selectedUnitId: unit?.id || "",
+          label: "Floor Plan",
+          status: "processing" as const,
+        };
+      });
+
+      setBulkFiles((prev) => [...prev, ...newEntries]);
+
+      // Compress images in the background
+      for (const entry of newEntries) {
+        try {
+          const dataUrl = await processImageFile(entry.file);
+          setBulkFiles((prev) =>
+            prev.map((bf) =>
+              bf.id === entry.id ? { ...bf, dataUrl, previewUrl: dataUrl, status: "pending" } : bf
+            )
+          );
+        } catch {
+          setBulkFiles((prev) =>
+            prev.map((bf) =>
+              bf.id === entry.id ? { ...bf, status: "error", error: "Failed to process image" } : bf
+            )
+          );
+        }
+      }
+    },
+    [units] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  async function handleBulkFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    await processBulkFiles(files);
+    e.target.value = "";
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/") || /heic|heif/i.test(f.name));
+    if (files.length) processBulkFiles(files);
+  }
+
+  async function uploadAll() {
+    const toUpload = bulkFiles.filter(
+      (bf) => bf.status === "pending" && bf.dataUrl && bf.selectedUnitId
+    );
+    if (toUpload.length === 0) return;
+
+    setBulkUploading(true);
+    setBulkProgress(0);
+    let done = 0;
+
+    for (const bf of toUpload) {
+      const unit = units.find((u) => u.id === bf.selectedUnitId);
+      if (!unit || !bf.dataUrl) {
+        setBulkFiles((prev) =>
+          prev.map((b) => (b.id === bf.id ? { ...b, status: "error", error: "No unit assigned" } : b))
+        );
+        done++;
+        setBulkProgress(Math.round((done / toUpload.length) * 100));
+        continue;
+      }
+
+      setBulkFiles((prev) =>
+        prev.map((b) => (b.id === bf.id ? { ...b, status: "uploading" } : b))
+      );
+
+      try {
+        const fp = await uploadFloorPlan(bf.dataUrl, unit, bf.label);
+        setFloorPlans((prev) => [fp, ...prev]);
+        setBulkFiles((prev) =>
+          prev.map((b) => (b.id === bf.id ? { ...b, status: "done" } : b))
+        );
+      } catch (err: any) {
+        setBulkFiles((prev) =>
+          prev.map((b) => (b.id === bf.id ? { ...b, status: "error", error: err.message } : b))
+        );
+      }
+
+      done++;
+      setBulkProgress(Math.round((done / toUpload.length) * 100));
+    }
+
+    setBulkUploading(false);
+  }
+
+  function closeBulk() {
+    // Revoke any object URLs we created
+    bulkFiles.forEach((bf) => {
+      if (bf.previewUrl.startsWith("blob:")) URL.revokeObjectURL(bf.previewUrl);
+    });
+    setBulkFiles([]);
+    setShowBulk(false);
+    setBulkProgress(0);
+  }
+
+  // ── Filtering ──────────────────────────────────────
 
   const propertyNames = [...new Set(floorPlans.map((fp) => fp.property_name))].sort();
   const filteredUnits = selectedProperty ? units.filter((u) => u.propertyName === selectedProperty) : [];
@@ -143,16 +321,30 @@ export default function FloorPlansPage() {
   if (search.trim()) {
     const q = search.toLowerCase();
     displayed = displayed.filter(
-      (fp) => fp.unit_name.toLowerCase().includes(q) || fp.property_name.toLowerCase().includes(q) || fp.label.toLowerCase().includes(q)
+      (fp) =>
+        fp.unit_name.toLowerCase().includes(q) ||
+        fp.property_name.toLowerCase().includes(q) ||
+        fp.label.toLowerCase().includes(q)
     );
   }
 
-  // Group by property
   const byProperty = displayed.reduce<Record<string, FloorPlan[]>>((acc, fp) => {
     if (!acc[fp.property_name]) acc[fp.property_name] = [];
     acc[fp.property_name].push(fp);
     return acc;
   }, {});
+
+  async function handleDelete(id: string) {
+    await fetch(`/api/floor-plans?id=${id}`, { method: "DELETE" });
+    setFloorPlans((prev) => prev.filter((fp) => fp.id !== id));
+    setDeleteConfirm(null);
+  }
+
+  const pendingCount = bulkFiles.filter((bf) => bf.status === "pending" && bf.selectedUnitId).length;
+  const unassignedCount = bulkFiles.filter((bf) => bf.status === "pending" && !bf.selectedUnitId).length;
+  const doneCount = bulkFiles.filter((bf) => bf.status === "done").length;
+
+  // ── Render ─────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -163,23 +355,247 @@ export default function FloorPlansPage() {
           </Link>
           <h1 className="text-2xl font-bold tracking-tight mt-1">Floor Plans Library</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Pre-load floor plans by unit — they auto-populate during move-out inspections so inspectors don&apos;t need to upload on site.
+            Pre-load floor plans by unit — they auto-populate during move-out inspections.
           </p>
         </div>
-        <button
-          onClick={() => setShowUpload(true)}
-          className="shrink-0 min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 transition-colors shadow-sm"
-        >
-          + Upload Floor Plan
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => { setShowBulk(true); setShowUpload(false); }}
+            className="min-h-[44px] px-4 py-2.5 border border-border text-sm font-medium rounded-xl hover:bg-muted transition-colors"
+          >
+            Bulk Upload
+          </button>
+          <button
+            onClick={() => { setShowUpload(true); setShowBulk(false); }}
+            className="min-h-[44px] px-4 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 transition-colors shadow-sm"
+          >
+            + Upload
+          </button>
+        </div>
       </div>
 
-      {/* Upload form */}
+      {/* ── Bulk Upload Panel ── */}
+      {showBulk && (
+        <div className="bg-card rounded-2xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold">Bulk Upload</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Drop multiple floor plans — the app tries to match filenames to units automatically.
+              </p>
+            </div>
+            <button onClick={closeBulk} className="text-xs text-muted-foreground hover:text-foreground min-h-[44px] px-3">
+              Close
+            </button>
+          </div>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            className={`mx-6 mt-4 border-2 border-dashed rounded-xl text-center py-8 transition-colors cursor-pointer ${
+              dragOver ? "border-accent bg-accent/5" : "border-border hover:border-accent/50 hover:bg-muted/30"
+            }`}
+            onClick={() => bulkInputRef.current?.click()}
+          >
+            <input
+              ref={bulkInputRef}
+              type="file"
+              multiple
+              accept="image/*,.heic,.heif"
+              className="hidden"
+              onChange={handleBulkFileInput}
+            />
+            <p className="text-sm font-medium">
+              {dragOver ? "Drop files here" : "Drag & drop files, or click to browse"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              JPG, PNG, HEIC — name files after the unit (e.g. "1234 Figueroa.jpg") for auto-matching
+            </p>
+          </div>
+
+          {/* File list */}
+          {bulkFiles.length > 0 && (
+            <div className="px-6 pb-6 mt-4 space-y-3">
+              {/* Stats row */}
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span>{bulkFiles.length} file{bulkFiles.length !== 1 ? "s" : ""}</span>
+                {unassignedCount > 0 && (
+                  <span className="text-amber-600 font-medium">{unassignedCount} need{unassignedCount === 1 ? "s" : ""} unit assignment</span>
+                )}
+                {doneCount > 0 && (
+                  <span className="text-green-600 font-medium">{doneCount} uploaded</span>
+                )}
+              </div>
+
+              {/* Per-file rows */}
+              {bulkFiles.map((bf) => {
+                const unit = units.find((u) => u.id === bf.selectedUnitId);
+                const propName = unit?.propertyName || "";
+                const propUnits = propName ? units.filter((u) => u.propertyName === propName) : units;
+
+                return (
+                  <div
+                    key={bf.id}
+                    className={`flex items-start gap-3 p-3 rounded-xl border ${
+                      bf.status === "done"
+                        ? "border-green-200 bg-green-50/40"
+                        : bf.status === "error"
+                        ? "border-red-200 bg-red-50/30"
+                        : bf.matchedUnit && bf.selectedUnitId
+                        ? "border-border bg-card"
+                        : "border-amber-200 bg-amber-50/30"
+                    }`}
+                  >
+                    {/* Thumbnail */}
+                    <div className="w-16 h-14 rounded-lg border border-border overflow-hidden shrink-0 bg-muted/30">
+                      {bf.previewUrl && (
+                        <img src={bf.previewUrl} alt="" className="w-full h-full object-contain" />
+                      )}
+                    </div>
+
+                    {/* Controls */}
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-xs font-medium truncate max-w-[180px]">{bf.filenameBase}</p>
+                        {bf.status === "processing" && (
+                          <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">Processing…</span>
+                        )}
+                        {bf.matchConfidence === "high" && bf.status !== "done" && (
+                          <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">Auto-matched</span>
+                        )}
+                        {bf.matchConfidence === "low" && bf.status !== "done" && (
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">Low confidence</span>
+                        )}
+                        {!bf.matchedUnit && bf.status === "pending" && (
+                          <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">Needs assignment</span>
+                        )}
+                        {bf.status === "done" && (
+                          <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">✓ Uploaded</span>
+                        )}
+                        {bf.status === "uploading" && (
+                          <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">Uploading…</span>
+                        )}
+                        {bf.status === "error" && (
+                          <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">{bf.error || "Error"}</span>
+                        )}
+                      </div>
+
+                      {bf.status !== "done" && bf.status !== "uploading" && (
+                        <div className="flex gap-2 flex-wrap">
+                          {/* Property selector */}
+                          <select
+                            value={unit?.propertyName || ""}
+                            onChange={(e) => {
+                              setBulkFiles((prev) =>
+                                prev.map((b) => b.id === bf.id ? { ...b, selectedUnitId: "" } : b)
+                              );
+                            }}
+                            className="text-xs border border-border rounded-lg px-2 py-1.5 min-h-[34px] bg-card"
+                          >
+                            <option value="">Property…</option>
+                            {[...new Set(units.map((u) => u.propertyName))].sort().map((p) => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+
+                          {/* Unit selector */}
+                          <select
+                            value={bf.selectedUnitId}
+                            onChange={(e) =>
+                              setBulkFiles((prev) =>
+                                prev.map((b) => b.id === bf.id ? { ...b, selectedUnitId: e.target.value, matchedUnit: units.find((u) => u.id === e.target.value) || null } : b)
+                              )
+                            }
+                            className={`text-xs border rounded-lg px-2 py-1.5 min-h-[34px] bg-card flex-1 min-w-[120px] ${
+                              !bf.selectedUnitId ? "border-amber-300" : "border-border"
+                            }`}
+                          >
+                            <option value="">Assign unit…</option>
+                            {(unit?.propertyName
+                              ? units.filter((u) => u.propertyName === unit.propertyName)
+                              : units
+                            ).map((u) => (
+                              <option key={u.id} value={u.id}>{u.unitName || u.displayName}</option>
+                            ))}
+                          </select>
+
+                          {/* Label */}
+                          <input
+                            type="text"
+                            value={bf.label}
+                            onChange={(e) =>
+                              setBulkFiles((prev) =>
+                                prev.map((b) => b.id === bf.id ? { ...b, label: e.target.value } : b)
+                              )
+                            }
+                            className="text-xs border border-border rounded-lg px-2 py-1.5 min-h-[34px] bg-card w-28"
+                            placeholder="Label"
+                          />
+
+                          {/* Remove */}
+                          <button
+                            onClick={() =>
+                              setBulkFiles((prev) => prev.filter((b) => b.id !== bf.id))
+                            }
+                            className="text-xs text-muted-foreground/50 hover:text-red-500 min-h-[34px] px-2"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Upload all button */}
+              {pendingCount > 0 && (
+                <div className="pt-2 flex items-center gap-3">
+                  <button
+                    onClick={uploadAll}
+                    disabled={bulkUploading}
+                    className="min-h-[44px] px-5 py-2.5 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                  >
+                    {bulkUploading
+                      ? `Uploading… ${bulkProgress}%`
+                      : `Upload ${pendingCount} Floor Plan${pendingCount !== 1 ? "s" : ""}`}
+                  </button>
+                  {unassignedCount > 0 && (
+                    <p className="text-xs text-amber-600">
+                      {unassignedCount} file{unassignedCount !== 1 ? "s" : ""} without a unit will be skipped
+                    </p>
+                  )}
+                </div>
+              )}
+              {bulkUploading && (
+                <div className="w-full bg-muted rounded-full h-1.5">
+                  <div
+                    className="h-1.5 rounded-full bg-accent transition-all duration-300"
+                    style={{ width: `${bulkProgress}%` }}
+                  />
+                </div>
+              )}
+              {doneCount > 0 && doneCount === bulkFiles.filter((bf) => bf.status !== "error").length && !bulkUploading && (
+                <div className="flex items-center justify-between py-2 px-3 bg-green-50 border border-green-200 rounded-xl">
+                  <p className="text-sm text-green-800 font-medium">All uploads complete!</p>
+                  <button onClick={closeBulk} className="text-xs font-medium text-green-700 hover:underline min-h-[40px] px-2">
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Single Upload Form ── */}
       {showUpload && (
         <div className="bg-card rounded-2xl border border-border p-6 space-y-4" style={{ boxShadow: "var(--shadow-sm)" }}>
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Upload Floor Plan</h2>
-            <button onClick={() => { setShowUpload(false); setPreviewUrl(null); setPendingDataUrl(null); setUploadError(null); }} className="text-muted-foreground hover:text-foreground text-xs">
+            <button onClick={() => { setShowUpload(false); setPreviewUrl(null); setPendingDataUrl(null); setUploadError(null); }} className="text-muted-foreground hover:text-foreground text-xs min-h-[40px] px-2">
               Cancel
             </button>
           </div>
@@ -227,13 +643,7 @@ export default function FloorPlansPage() {
 
             <div>
               <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Image *</label>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,.heic,.heif"
-                className="hidden"
-                onChange={handleFileSelect}
-              />
+              <input ref={fileInputRef} type="file" accept="image/*,.heic,.heif" className="hidden" onChange={handleFileSelect} />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full min-h-[44px] px-3 py-2.5 border border-dashed border-border rounded-xl text-sm text-muted-foreground hover:border-accent hover:text-accent transition-colors"
@@ -249,9 +659,7 @@ export default function FloorPlansPage() {
             </div>
           )}
 
-          {uploadError && (
-            <p className="text-sm text-red-500">{uploadError}</p>
-          )}
+          {uploadError && <p className="text-sm text-red-500">{uploadError}</p>}
 
           <button
             onClick={handleUpload}
@@ -263,7 +671,7 @@ export default function FloorPlansPage() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* ── Filters ── */}
       {floorPlans.length > 0 && (
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -289,6 +697,7 @@ export default function FloorPlansPage() {
         </div>
       )}
 
+      {/* ── Floor Plans Grid ── */}
       {loading ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
@@ -308,14 +717,22 @@ export default function FloorPlansPage() {
           </div>
           <p className="text-sm font-semibold">No floor plans yet</p>
           <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
-            Upload floor plans for each unit. They&apos;ll auto-load when inspectors start a move-out inspection.
+            Upload floor plans for each unit. They auto-load when inspectors start a move-out inspection.
           </p>
-          <button
-            onClick={() => setShowUpload(true)}
-            className="mt-4 px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 transition-colors shadow-sm"
-          >
-            + Upload First Floor Plan
-          </button>
+          <div className="flex justify-center gap-2 mt-4">
+            <button
+              onClick={() => setShowBulk(true)}
+              className="px-4 py-2 border border-border text-sm font-medium rounded-xl hover:bg-muted transition-colors"
+            >
+              Bulk Upload
+            </button>
+            <button
+              onClick={() => setShowUpload(true)}
+              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 transition-colors shadow-sm"
+            >
+              + Upload First Floor Plan
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-8">
@@ -324,7 +741,7 @@ export default function FloorPlansPage() {
               <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">{propertyName}</h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {plans.map((fp) => (
-                  <div key={fp.id} className="bg-card rounded-xl border border-border overflow-hidden group" style={{ boxShadow: "var(--shadow-sm)" }}>
+                  <div key={fp.id} className="bg-card rounded-xl border border-border overflow-hidden" style={{ boxShadow: "var(--shadow-sm)" }}>
                     <a href={fp.storage_url} target="_blank" rel="noopener noreferrer" className="block aspect-[4/3] bg-muted/30 overflow-hidden">
                       <img
                         src={fp.storage_url}
@@ -341,12 +758,8 @@ export default function FloorPlansPage() {
                         </p>
                         {deleteConfirm === fp.id ? (
                           <div className="flex items-center gap-2">
-                            <button onClick={() => handleDelete(fp.id)} className="text-xs font-medium text-red-600 hover:underline">
-                              Confirm
-                            </button>
-                            <button onClick={() => setDeleteConfirm(null)} className="text-xs text-muted-foreground hover:underline">
-                              Cancel
-                            </button>
+                            <button onClick={() => handleDelete(fp.id)} className="text-xs font-medium text-red-600 hover:underline">Confirm</button>
+                            <button onClick={() => setDeleteConfirm(null)} className="text-xs text-muted-foreground hover:underline">Cancel</button>
                           </div>
                         ) : (
                           <button
