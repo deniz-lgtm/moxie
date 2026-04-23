@@ -304,6 +304,48 @@ export type DbCapitalProject = {
   updated_at: string;
 };
 
+// ─── Showings (open-house scheduling) ──────────────────────────
+// Mirrors supabase/migrations/20260424_showings.sql.
+
+export type ShowingSlotStatus = "open" | "cancelled" | "completed";
+export type ShowingRegistrationStatus =
+  | "confirmed"
+  | "attended"
+  | "no_show"
+  | "cancelled";
+
+export type DbShowingSlot = {
+  id: string;
+  property_id: string | null;
+  property_name: string | null;
+  starts_at: string;
+  ends_at: string;
+  host_user_id: string | null;
+  host_name: string | null;
+  capacity: number;
+  notes: string | null;
+  public_description: string | null;
+  public_token: string;
+  status: ShowingSlotStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbShowingRegistration = {
+  id: string;
+  slot_id: string;
+  prospect_name: string;
+  prospect_email: string | null;
+  prospect_phone: string | null;
+  party_size: number;
+  status: ShowingRegistrationStatus;
+  notes: string | null;
+  guest_card_id: string | null;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Property P&L Line Items (monthly opex + other income) ──────
 // Mirrors supabase/migrations/20260423_property_pnl_line_items.sql.
 // One row per property × month × category. Rent comes from rent roll;
