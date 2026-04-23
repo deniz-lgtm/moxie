@@ -61,6 +61,7 @@ const navItems: NavItem[] = [
       { label: "Onboarding", href: "/inspections/onboarding" },
       { label: "Quarterly", href: "/inspections/quarterly" },
       { label: "Punch List", href: "/inspections/punch-list" },
+      { label: "Floor Plans", href: "/floor-plans" },
     ],
   },
   
