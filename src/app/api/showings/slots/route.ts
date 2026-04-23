@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   deleteShowingSlot,
   getShowingSlot,
+  getShowingSlotByToken,
   listShowingSlots,
   makePublicToken,
   upsertShowingSlot,
@@ -12,12 +13,13 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/showings/slots
- *   ?id=<slot_id>       — single slot (with registrations)
- *   ?from=YYYY-MM-DD    — only slots starting on/after (inclusive)
- *   ?to=YYYY-MM-DD      — only slots starting on/before (inclusive)
- *   ?status=...         — open | cancelled | completed
- *   ?host_user_id=...   — slots hosted by this user
- *   ?include_regs=1     — hydrate registrations on the listing response
+ *   ?id=<slot_id>           — single slot (with registrations)
+ *   ?public_token=<token>   — single slot by public token (for sign-up page)
+ *   ?from=YYYY-MM-DD        — only slots starting on/after (inclusive)
+ *   ?to=YYYY-MM-DD          — only slots starting on/before (inclusive)
+ *   ?status=...             — open | cancelled | completed
+ *   ?host_user_id=...       — slots hosted by this user
+ *   ?include_regs=1         — hydrate registrations on the listing response
  */
 export async function GET(request: Request) {
   try {
@@ -25,6 +27,12 @@ export async function GET(request: Request) {
     const id = url.searchParams.get("id");
     if (id) {
       const slot = await getShowingSlot(id);
+      if (!slot) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ slot });
+    }
+    const publicToken = url.searchParams.get("public_token");
+    if (publicToken) {
+      const slot = await getShowingSlotByToken(publicToken);
       if (!slot) return NextResponse.json({ error: "Not found" }, { status: 404 });
       return NextResponse.json({ slot });
     }

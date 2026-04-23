@@ -1,14 +1,24 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { LoginPage } from "@/components/LoginPage";
+
+/** Routes that are publicly accessible without login. */
+const PUBLIC_PREFIXES = ["/s/"];
 
 /**
  * Wraps protected content. Shows login if not authenticated.
  * When Supabase is not configured, passes through (dev mode).
+ * Routes under PUBLIC_PREFIXES bypass auth entirely.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const { user, loading } = useAuth();
+
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
+    return <>{children}</>;
+  }
 
   // Loading — show a minimal spinner
   if (loading) {
