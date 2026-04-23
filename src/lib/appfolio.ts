@@ -174,6 +174,17 @@ export async function getRentRoll(propertyId?: string) {
   return appfolioFetchAll("/reports/rent_roll.json", body);
 }
 
+// --- Rental Applications (v2 rental_application_detail) ---
+// One row per applicant, with a rental_application_id / group reference
+// that's stable across syncs — which `tenant_directory?status=applicant`
+// doesn't give us. Caller should treat a 404/empty response as "fall
+// back to tenant_directory".
+export async function getRentalApplications(propertyId?: string) {
+  const body: Record<string, string> = {};
+  if (propertyId) body.property_id = propertyId;
+  return appfolioFetchAll("/reports/rental_application_detail.json", body);
+}
+
 // --- Aged Receivables ---
 export async function getAgedReceivables() {
   return appfolioFetchAll("/reports/aged_receivables_detail.json");

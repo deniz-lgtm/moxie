@@ -12,6 +12,7 @@ import {
   getProperties as afGetProperties,
   getWorkOrders as afGetWorkOrders,
   getRentRoll as afGetRentRoll,
+  getRentalApplications as afGetRentalApplications,
   getTenants as afGetTenants,
 } from "./appfolio";
 import type {
@@ -22,7 +23,11 @@ import type {
   MaintenanceCategory,
   MaintenancePriority,
   MaintenanceStatus,
+  Applicant,
+  ApplicantRole,
+  ApplicantStep,
   ApplicationGroup,
+  ApplicationGroupStatus,
   AcademicYear,
   VacantUnit,
 } from "./types";
@@ -998,13 +1003,234 @@ export async function fetchMaintenanceRequests(params?: {
   return { data: rows.map((wo, i) => mapWorkOrderRow(wo, i)), source: "appfolio" };
 }
 
-// --- Applications (from AppFolio tenant directory) ---
-// Groups applicants by unit — roommates in same unit form one ApplicationGroup.
-export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; source: "appfolio" }> {
+// --- Applications ---
+// Prefer AppFolio's v2 `rental_application_detail` — it carries a stable
+// rental_application_id that roommates sharing one application all share,
+// which is what the automations keying off ApplicationGroup.id need. If
+// that report is unavailable on this account (404 / empty), we fall back
+// to the legacy path: group `tenant_directory?status=applicant` rows by
+// unit and mint a synthetic id. The UI shape is identical either way.
+
+/** Pluck the first truthy value from a row using a list of candidate keys. */
+function pick(row: any, keys: string[]): any {
+  for (const k of keys) {
+    if (row[k] != null && row[k] !== "") return row[k];
+  }
+  return undefined;
+}
+
+function normalizeAppStatus(raw: unknown): ApplicationGroupStatus {
+  const s = String(raw ?? "").toLowerCase();
+  if (/approved|accepted|current/.test(s)) return "approved";
+  if (/denied|rejected|declined/.test(s)) return "denied";
+  if (/review|screening|processing|pending/.test(s)) return "under_review";
+  return "incomplete";
+}
+
+function normalizeApplicantStepFromScreening(raw: unknown): "complete" | "in_review" | "pending" {
+  const s = String(raw ?? "").toLowerCase();
+  if (/complete|passed|approved|cleared/.test(s)) return "complete";
+  if (/review|pending|processing/.test(s)) return "in_review";
+  return "pending";
+}
+
+function buildApplicantSteps(row: any, groupKey: string, idx: number): ApplicantStep[] {
+  const screeningStatus =
+    pick(row, [
+      "screening_status",
+      "ScreeningStatus",
+      "background_check_status",
+      "rental_application_screening_status",
+    ]) ?? "";
+  return [
+    {
+      id: `${groupKey}-s${idx}-1`,
+      name: "Application Submitted",
+      description: "Complete online application",
+      required: true,
+      status: "complete",
+    },
+    {
+      id: `${groupKey}-s${idx}-2`,
+      name: "Background Check",
+      description: "Credit and background screening",
+      required: true,
+      status: normalizeApplicantStepFromScreening(screeningStatus),
+    },
+    {
+      id: `${groupKey}-s${idx}-3`,
+      name: "Income Verification",
+      description: "Verify income documentation",
+      required: true,
+      status: "pending",
+    },
+    {
+      id: `${groupKey}-s${idx}-4`,
+      name: "Lease Signing",
+      description: "Sign the lease agreement",
+      required: true,
+      status: "pending",
+    },
+  ];
+}
+
+async function fetchApplicationsFromRentalAppDetail(): Promise<ApplicationGroup[] | null> {
+  let rows: any[];
+  try {
+    rows = await afGetRentalApplications();
+  } catch (err) {
+    console.warn("[applications] rental_application_detail unavailable:", (err as Error).message);
+    return null;
+  }
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const moxie = await filterToMoxie(rows);
+  if (moxie.length === 0) return null;
+
+  // Try a set of candidate group-id field names (AppFolio v2 column names
+  // vary by account). We prefer the one that actually has a value.
+  const groupIdCandidates = [
+    "rental_application_group_id",
+    "rental_application_id",
+    "application_group_id",
+    "application_id",
+    "rental_app_id",
+  ];
+  const getGroupId = (r: any): string => {
+    for (const k of groupIdCandidates) {
+      if (r[k] != null && r[k] !== "") return String(r[k]);
+    }
+    // Last resort: property+unit to keep roommates together, same as the
+    // legacy path. This should only fire if AppFolio changes their column
+    // naming — flagged in the warn below for visibility.
+    const propId = pick(r, ["property_id", "PropertyId"]) ?? "";
+    const unitId = pick(r, ["unit_id", "UnitId", "unit"]) ?? "";
+    return `fallback:${propId}:${unitId}`;
+  };
+
+  // Warn once if we had to fall back to the synthetic grouping.
+  const anyFallback = moxie.some((r) => getGroupId(r).startsWith("fallback:"));
+  if (anyFallback) {
+    console.warn(
+      "[applications] rental_application_detail response is missing a group_id column; " +
+        "sample keys:",
+      Object.keys(moxie[0] || {}).slice(0, 30).join(", ")
+    );
+  }
+
+  const byGroup = new Map<string, any[]>();
+  for (const r of moxie) {
+    const gid = getGroupId(r);
+    if (!byGroup.has(gid)) byGroup.set(gid, []);
+    byGroup.get(gid)!.push(r);
+  }
+
+  const groups: ApplicationGroup[] = [];
+  for (const [gid, rowsInGroup] of byGroup) {
+    const first = rowsInGroup[0];
+    const unitName =
+      pick(first, [
+        "unit_street_address_1",
+        "UnitStreetAddress1",
+        "unit",
+        "Unit",
+        "unit_name",
+      ]) ?? "";
+
+    // Each row is one applicant on the application. Build Applicant[].
+    const applicants: Applicant[] = rowsInGroup.map((r, i) => {
+      const name =
+        pick(r, ["applicant_name", "tenant_name", "TenantName", "Name"]) ??
+        [pick(r, ["applicant_first_name", "first_name"]), pick(r, ["applicant_last_name", "last_name"])]
+          .filter(Boolean)
+          .join(" ");
+      const appStatus = pick(r, [
+        "application_status",
+        "rental_application_status",
+        "tenant_status",
+        "Status",
+        "status",
+      ]);
+      return {
+        id: String(
+          pick(r, [
+            "applicant_id",
+            "rental_applicant_id",
+            "tenant_id",
+            "TenantId",
+          ]) ?? `${gid}-${i}`
+        ),
+        groupId: gid,
+        name: String(name || "Unknown"),
+        email: String(pick(r, ["email", "Email", "applicant_email", "tenant_email"]) ?? ""),
+        phone:
+          pick(r, ["phone", "Phone", "applicant_phone", "tenant_phone", "phone_numbers"]) ??
+          undefined,
+        role: (i === 0 ? "primary" : "co_applicant") as ApplicantRole,
+        steps: buildApplicantSteps(r, gid, i),
+        documents: [],
+        nudges: [],
+        status:
+          normalizeAppStatus(appStatus) === "approved"
+            ? "complete"
+            : "in_progress",
+        startedAt: String(
+          pick(r, [
+            "submitted_at",
+            "application_date",
+            "ApplicationDate",
+            "created_at",
+            "CreatedAt",
+          ]) ?? new Date().toISOString()
+        ),
+      };
+    });
+
+    const rawStatus = pick(first, [
+      "application_status",
+      "rental_application_status",
+      "tenant_status",
+      "Status",
+      "status",
+    ]);
+    const rawRent = pick(first, ["rent", "market_rent", "monthly_rent"]);
+    const monthlyRent =
+      rawRent != null && rawRent !== "" && !isNaN(Number(rawRent)) ? Number(rawRent) : 0;
+
+    groups.push({
+      id: gid,
+      propertyId: String(pick(first, ["property_id", "PropertyId"]) ?? ""),
+      propertyName: String(pick(first, ["property_name", "PropertyName"]) ?? ""),
+      unitNumber: String(unitName),
+      unitDetails: "",
+      leaseCycle: "fall_2026",
+      targetMoveIn: "08/15/2026",
+      monthlyRent,
+      applicants,
+      status: normalizeAppStatus(rawStatus),
+      createdAt: String(
+        pick(first, [
+          "submitted_at",
+          "application_date",
+          "ApplicationDate",
+          "created_at",
+          "CreatedAt",
+        ]) ?? new Date().toISOString()
+      ),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return groups;
+}
+
+async function fetchApplicationsFromTenantDirectory(): Promise<ApplicationGroup[]> {
+  // Legacy fallback: pull applicants from tenant_directory and group by
+  // unit. The group id is synthetic — the *first* PR (#52) tries the
+  // dedicated rental_application_detail report before this, so this path
+  // only fires if the dedicated report is unavailable on the account.
   const allTenants = await afGetTenants({ status: "applicant" }).catch(() => [] as any[]);
   const tenants = await filterToMoxie(allTenants || []);
 
-  // Group applicants by unit (UnitStreetAddress1 or UnitId)
   const groupMap = new Map<string, any[]>();
   for (const t of tenants) {
     const unitKey = String(
@@ -1017,43 +1243,35 @@ export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; s
 
   const groups: ApplicationGroup[] = [];
   let idx = 0;
-  for (const [, members] of groupMap) {
+  for (const [key, members] of groupMap) {
     idx++;
     const first = members[0];
     const unitName = String(
       first.UnitStreetAddress1 || first["Unit Street Address 1"] || first.Unit || first.UnitName || ""
     );
+    const groupId = `grp-${key || idx}`;
 
-    const applicants = members.map((m: any, i: number) => ({
-      id: String(m.TenantId || m.tenant_id || `app-${idx}-${i}`),
-      groupId: `grp-${idx}`,
+    const applicants: Applicant[] = members.map((m: any, i: number) => ({
+      id: String(m.TenantId || m.tenant_id || `${groupId}-${i}`),
+      groupId,
       name: String(m.TenantName || m.tenant_name || m.Name || "Unknown"),
       email: String(m.Email || m.TenantEmail || m.email || ""),
       phone: m.Phone || m.TenantPhone || m.phone || undefined,
-      role: (i === 0 ? "primary" : "co_applicant") as "primary" | "co_applicant",
-      steps: [
-        { id: `s-${idx}-${i}-1`, name: "Application Submitted", description: "Complete online application", required: true, status: "complete" as const },
-        { id: `s-${idx}-${i}-2`, name: "Background Check", description: "Credit and background screening", required: true, status: (m.ScreeningStatus === "Completed" || m.screening_status === "completed" ? "complete" : "in_review") as "complete" | "in_review" },
-        { id: `s-${idx}-${i}-3`, name: "Income Verification", description: "Verify income documentation", required: true, status: "pending" as const },
-        { id: `s-${idx}-${i}-4`, name: "Lease Signing", description: "Sign the lease agreement", required: true, status: "pending" as const },
-      ],
+      role: (i === 0 ? "primary" : "co_applicant") as ApplicantRole,
+      steps: buildApplicantSteps(m, groupId, i),
       documents: [],
       nudges: [],
-      status: "in_progress" as const,
+      status: "in_progress",
       startedAt: m.ApplicationDate || m.application_date || m.CreatedAt || new Date().toISOString(),
     }));
 
-    const hasApproved = members.some((m: any) => {
-      const s = String(m.TenantStatus || m.tenant_status || m.Status || "").toLowerCase();
-      return s === "approved" || s === "current";
-    });
-    const hasDenied = members.some((m: any) => {
-      const s = String(m.TenantStatus || m.tenant_status || m.Status || "").toLowerCase();
-      return s === "denied" || s === "rejected";
-    });
+    const rawStatus =
+      members.find((m) => m.TenantStatus || m.tenant_status || m.Status)?.TenantStatus ??
+      members[0].tenant_status ??
+      members[0].Status;
 
     groups.push({
-      id: `grp-${idx}`,
+      id: groupId,
       propertyId: String(first.PropertyId || first.property_id || ""),
       propertyName: String(first.PropertyName || first.property_name || ""),
       unitNumber: unitName,
@@ -1062,13 +1280,58 @@ export async function fetchApplications(): Promise<{ data: ApplicationGroup[]; s
       targetMoveIn: "08/15/2026",
       monthlyRent: 0,
       applicants,
-      status: hasApproved ? "approved" : hasDenied ? "denied" : "incomplete",
+      status: normalizeAppStatus(rawStatus),
       createdAt: first.ApplicationDate || first.application_date || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
   }
 
-  return { data: groups, source: "appfolio" };
+  return groups;
+}
+
+export async function fetchApplications(): Promise<{
+  data: ApplicationGroup[];
+  source: "appfolio";
+}> {
+  const primary = await fetchApplicationsFromRentalAppDetail();
+  if (primary && primary.length > 0) {
+    return { data: primary, source: "appfolio" };
+  }
+  const fallback = await fetchApplicationsFromTenantDirectory();
+  return { data: fallback, source: "appfolio" };
+}
+
+/** Diagnostic: raw response + candidate group-id key detection. Used from
+ *  /api/appfolio/applications?debug=1 so we can verify the column names
+ *  on this account without the grouping / mapping logic in the way. */
+export async function diagnoseApplications() {
+  const raw = await afGetRentalApplications().catch(
+    (err) => ({ _error: String(err?.message || err) })
+  );
+  const list: any[] = Array.isArray(raw) ? raw : [];
+  const moxie = list.length > 0 ? await filterToMoxie(list) : [];
+  const candidateGroupKeys = [
+    "rental_application_group_id",
+    "rental_application_id",
+    "application_group_id",
+    "application_id",
+    "rental_app_id",
+  ];
+  const keyHits: Record<string, number> = {};
+  for (const r of moxie) {
+    for (const k of candidateGroupKeys) {
+      if (r[k] != null && r[k] !== "") keyHits[k] = (keyHits[k] ?? 0) + 1;
+    }
+  }
+  return {
+    ok: Array.isArray(raw),
+    error: (raw as any)?._error ?? null,
+    totalRows: list.length,
+    moxieRows: moxie.length,
+    sampleKeys: moxie.length > 0 ? Object.keys(moxie[0]).slice(0, 30) : [],
+    sampleRow: moxie[0] ?? null,
+    groupIdCandidateHits: keyHits,
+  };
 }
 
 // --- Aggregated Dashboard Stats ---
