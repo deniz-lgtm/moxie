@@ -27,6 +27,11 @@ export interface CalEvent {
   href?: string;
   /** Minutes-past-midnight, if the underlying event has a known time */
   startMinutes?: number;
+  /** True when the event deserves a red accent — e.g. emergency work orders
+   *  or move events in the next few days. Set by markUrgency(). */
+  urgent?: boolean;
+  /** Extra context used by markUrgency() — not displayed directly. */
+  priority?: string;
 }
 
 export const TYPE_STYLES: Record<CalEventType, string> = {
@@ -211,11 +216,51 @@ export async function loadCalendarEvents(window?: {
         label: `WO: ${wo.title}${propertyBit}${priorityBit}`,
         type: "work_order",
         href: `/maintenance?id=${wo.id}`,
+        priority: wo.priority,
       });
     }
   }
 
   return collected;
+}
+
+/**
+ * Annotate events with `urgent: true` when they meet any of:
+ *   - work order with priority "emergency" (always)
+ *   - work order with priority "high" within 7 days
+ *   - move-in / move-out within 3 days
+ *   - "Move-out deadline" academic dates within 14 days
+ *
+ * Returns a new array; input is not mutated.
+ */
+export function markUrgency(events: CalEvent[], todayIso?: string): CalEvent[] {
+  const today = todayIso ?? isoDate(new Date());
+  return events.map((e) => {
+    const daysOut = daysBetween(today, e.date);
+
+    if (e.type === "work_order") {
+      const p = (e.priority || "").toLowerCase();
+      if (p === "emergency") return { ...e, urgent: true };
+      if (p === "high" && daysOut >= 0 && daysOut <= 7) return { ...e, urgent: true };
+    }
+
+    if ((e.type === "move_in" || e.type === "move_out") && daysOut >= 0 && daysOut <= 3) {
+      return { ...e, urgent: true };
+    }
+
+    if (e.type === "academic" && /move-out/i.test(e.label) && daysOut >= 0 && daysOut <= 14) {
+      return { ...e, urgent: true };
+    }
+
+    return e;
+  });
+}
+
+/** Difference in calendar days: days(toIso) - days(fromIso). Negative if `to` is before `from`. */
+function daysBetween(fromIso: string, toIso: string): number {
+  const from = new Date(fromIso + "T00:00:00").getTime();
+  const to = new Date(toIso + "T00:00:00").getTime();
+  return Math.round((to - from) / 86400000);
 }
 
 /** Group events by YYYY-MM-DD. */

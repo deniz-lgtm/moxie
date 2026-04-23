@@ -11,6 +11,7 @@ import {
   groupEventsByDate,
   isoDate,
   loadCalendarEvents,
+  markUrgency,
   type CalEvent,
   type CalEventType,
 } from "@/lib/calendar-events";
@@ -66,7 +67,7 @@ export function TeamCalendar() {
     setLoading(true);
     try {
       const collected = await loadCalendarEvents();
-      setEvents(collected);
+      setEvents(markUrgency(collected));
     } catch {
       // leave events empty
     } finally {
@@ -192,9 +193,14 @@ export function TeamCalendar() {
                 {cellEvents.slice(0, 3).map((e) => (
                   <div
                     key={e.id}
-                    className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate font-medium ${TYPE_STYLES[e.type]}`}
+                    className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate font-medium ${
+                      e.urgent
+                        ? "bg-red-100 text-red-900 ring-1 ring-red-400"
+                        : TYPE_STYLES[e.type]
+                    }`}
+                    title={e.urgent ? `Urgent — ${e.label}` : e.label}
                   >
-                    {e.label}
+                    {e.urgent && "! "}{e.label}
                   </div>
                 ))}
                 {hasMore && (
@@ -214,12 +220,25 @@ export function TeamCalendar() {
           </p>
           <div className="space-y-1.5">
             {selectedEvents.map((e) => (
-              <div key={e.id} className="flex items-center gap-2">
+              <div
+                key={e.id}
+                className={`flex items-center gap-2 ${e.urgent ? "px-2 py-1 -mx-2 rounded bg-red-50 border-l-2 border-red-500" : ""}`}
+              >
                 <span className={`w-2 h-2 rounded-full shrink-0 ${TYPE_DOT[e.type]}`} />
+                {e.urgent && (
+                  <span className="text-[10px] font-bold text-red-600 uppercase tracking-wide shrink-0">!</span>
+                )}
                 {e.href ? (
-                  <Link href={e.href} className="text-sm hover:underline flex-1 truncate">{e.label}</Link>
+                  <Link
+                    href={e.href}
+                    className={`text-sm hover:underline flex-1 truncate ${e.urgent ? "text-red-900 font-medium" : ""}`}
+                  >
+                    {e.label}
+                  </Link>
                 ) : (
-                  <span className="text-sm flex-1 truncate">{e.label}</span>
+                  <span className={`text-sm flex-1 truncate ${e.urgent ? "text-red-900 font-medium" : ""}`}>
+                    {e.label}
+                  </span>
                 )}
                 <span className={`text-xs px-1.5 py-0.5 rounded ${TYPE_STYLES[e.type]}`}>
                   {e.type.replace("_", " ")}

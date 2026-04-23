@@ -15,6 +15,7 @@ import {
   groupEventsByDate,
   isoDate,
   loadCalendarEvents,
+  markUrgency,
   type CalEvent,
   type CalEventType,
 } from "@/lib/calendar-events";
@@ -72,7 +73,7 @@ export function WeekAgenda({
         fromIso: addDays(start, -14),
         toIso: addDays(endIso, 14),
       });
-      setEvents(res);
+      setEvents(markUrgency(res));
     } catch {
       setEvents([]);
     } finally {
@@ -192,18 +193,27 @@ export function WeekAgenda({
                 ) : (
                   <div className="space-y-1">
                     {dayEvents.map((e) => (
-                      <div key={e.id} className="flex items-center gap-2">
+                      <div
+                        key={e.id}
+                        className={`flex items-center gap-2 ${e.urgent ? "px-1.5 py-0.5 -mx-1.5 rounded bg-red-50 border-l-2 border-red-500" : ""}`}
+                      >
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TYPE_DOT[e.type]}`} />
+                        {e.urgent && (
+                          <span className="text-[10px] font-bold text-red-600 uppercase tracking-wide shrink-0">!</span>
+                        )}
                         {e.href ? (
                           <Link
                             href={e.href}
-                            className="text-sm hover:underline truncate flex-1"
+                            className={`text-sm hover:underline truncate flex-1 ${e.urgent ? "text-red-900 font-medium" : ""}`}
                             title={e.label}
                           >
                             {e.label}
                           </Link>
                         ) : (
-                          <span className="text-sm truncate flex-1" title={e.label}>
+                          <span
+                            className={`text-sm truncate flex-1 ${e.urgent ? "text-red-900 font-medium" : ""}`}
+                            title={e.label}
+                          >
                             {e.label}
                           </span>
                         )}
