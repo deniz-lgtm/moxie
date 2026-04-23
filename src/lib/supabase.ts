@@ -232,6 +232,7 @@ export type DbVendor = {
   contact_name: string | null;
   license_number: string | null;
   insurance_expiry: string | null;
+  logo_url: string | null;
   status: string | null;
   rating: number | null;
   notes: string | null;
