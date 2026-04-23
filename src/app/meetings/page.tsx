@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, ClipboardList, Mic, Plus } from "lucide-react";
+import { CalendarDays, ClipboardList, Mic, Plus, Trash2, X } from "lucide-react";
 import MeetingDetailView from "@/components/MeetingDetailView";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
@@ -21,6 +21,19 @@ import type {
   Unit,
   VacantUnit,
 } from "@/lib/types";
+
+// Preset meeting titles. Selecting one fills the editable name field; the
+// last item is "Custom..." which clears the field for free-form entry.
+const MEETING_TYPE_PRESETS = [
+  "Moxie Monday Morning Meeting",
+  "Weekly Team Sync",
+  "Property Walk",
+  "Quarterly Review",
+  "Maintenance Review",
+  "Leasing Strategy",
+  "Owner Update",
+];
+const DEFAULT_MEETING_TITLE = MEETING_TYPE_PRESETS[0];
 
 const INSPECTION_TYPES: InspectionType[] = [
   "move_out",
@@ -119,7 +132,7 @@ export default function MeetingsPage() {
     loadPortfolio();
   }, [loadMeetings, loadOpenActionCount, loadPortfolio]);
 
-  const generateMeeting = useCallback(async () => {
+  const generateMeeting = useCallback(async (title: string, date: string) => {
     setCreating(true);
     try {
       const { units: allUnits, workOrders: allWO } = await loadPortfolio();
@@ -239,8 +252,8 @@ export default function MeetingsPage() {
 
       const body = {
         id: makeId(),
-        meeting_date: today(),
-        title: `Monday Morning Meeting`,
+        meeting_date: date,
+        title: title.trim() || DEFAULT_MEETING_TITLE,
         attendees: [] as string[],
         agenda: {
           // Legacy keys (for any UI that still reads them)
@@ -278,6 +291,39 @@ export default function MeetingsPage() {
     }
   }, [loadPortfolio]);
 
+  // Modal state for "+ New Meeting"
+  const [newMeetingOpen, setNewMeetingOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState<string>(DEFAULT_MEETING_TITLE);
+  const [newDate, setNewDate] = useState<string>(today());
+
+  // Open modal with fresh defaults each time
+  const openNewMeetingModal = useCallback(() => {
+    setNewTitle(DEFAULT_MEETING_TITLE);
+    setNewDate(today());
+    setNewMeetingOpen(true);
+  }, []);
+
+  const submitNewMeeting = useCallback(async () => {
+    setNewMeetingOpen(false);
+    await generateMeeting(newTitle, newDate);
+  }, [generateMeeting, newTitle, newDate]);
+
+  const deleteMeeting = useCallback(async (id: string, label: string) => {
+    if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
+    try {
+      const r = await fetch(`/api/meetings/crud?id=${id}`, { method: "DELETE" });
+      const j = await r.json();
+      if (j.ok) {
+        setMeetings((prev) => prev.filter((m) => m.id !== id));
+        if (selectedId === id) setSelectedId(null);
+      } else if (j.error) {
+        alert(`Delete failed: ${j.error}`);
+      }
+    } catch (e) {
+      alert(`Delete failed: ${(e as Error).message}`);
+    }
+  }, [selectedId]);
+
   const selected = useMemo(
     () => meetings.find((m) => m.id === selectedId) ?? null,
     [meetings, selectedId]
@@ -312,12 +358,12 @@ export default function MeetingsPage() {
           </p>
         </div>
         <button
-          onClick={generateMeeting}
+          onClick={openNewMeetingModal}
           disabled={creating}
           className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 text-sm font-medium"
         >
           <Plus className="w-4 h-4" />
-          {creating ? "Generating…" : "Generate Meeting for Today"}
+          {creating ? "Generating…" : "New Meeting"}
         </button>
       </div>
 
@@ -350,45 +396,134 @@ export default function MeetingsPage() {
                 agenda.maintenance?.openWorkOrders?.length ?? agenda.workOrders?.length ?? 0;
               const pmCount = agenda.propertyManagement?.upcomingInspections?.length ?? 0;
               const carry = agenda.carryOverActions?.length ?? 0;
+              const dateLabel = new Date(m.meeting_date + "T00:00:00").toLocaleDateString(undefined, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              });
               return (
-                <button
-                  key={m.id}
-                  onClick={() => setSelectedId(m.id)}
-                  className="w-full text-left p-5 hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold">
-                          {new Date(m.meeting_date + "T00:00:00").toLocaleDateString(undefined, {
-                            weekday: "short",
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                        </h3>
-                        <StatusBadge value={m.status} />
+                <div key={m.id} className="flex items-stretch hover:bg-muted/50 transition-colors">
+                  <button
+                    onClick={() => setSelectedId(m.id)}
+                    className="flex-1 text-left p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold">{dateLabel}</h3>
+                          <StatusBadge value={m.status} />
+                        </div>
+                        {m.title && (
+                          <p className="text-sm text-muted-foreground mt-0.5 truncate">{m.title}</p>
+                        )}
                       </div>
-                      {m.title && (
-                        <p className="text-sm text-muted-foreground mt-0.5 truncate">{m.title}</p>
-                      )}
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <ClipboardList className="w-3.5 h-3.5" />
+                          {carry} carry-over
+                        </span>
+                        <span>Leasing · {leasingCount}</span>
+                        <span>Maintenance · {maintCount}</span>
+                        <span>PM · {pmCount}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        <ClipboardList className="w-3.5 h-3.5" />
-                        {carry} carry-over
-                      </span>
-                      <span>Leasing · {leasingCount}</span>
-                      <span>Maintenance · {maintCount}</span>
-                      <span>PM · {pmCount}</span>
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    onClick={() => deleteMeeting(m.id, m.title || dateLabel)}
+                    title="Delete meeting"
+                    className="px-4 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {newMeetingOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setNewMeetingOpen(false)}
+        >
+          <div
+            className="w-full max-w-md bg-background rounded-2xl border border-border shadow-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold">New Meeting</h2>
+              <button onClick={() => setNewMeetingOpen(false)} className="p-1 rounded hover:bg-muted">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Meeting type</label>
+                <select
+                  className="mt-1 w-full text-sm border border-border rounded px-3 py-2 bg-background"
+                  value={MEETING_TYPE_PRESETS.includes(newTitle) ? newTitle : "__custom__"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "__custom__") {
+                      // Switching to custom — clear so user types fresh
+                      setNewTitle("");
+                    } else {
+                      setNewTitle(v);
+                    }
+                  }}
+                >
+                  {MEETING_TYPE_PRESETS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                  <option value="__custom__">Custom…</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Name</label>
+                <input
+                  className="mt-1 w-full text-sm border border-border rounded px-3 py-2 bg-background"
+                  placeholder="Meeting name"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Editable — pick a preset above or type your own.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Date</label>
+                <input
+                  type="date"
+                  className="mt-1 w-full text-sm border border-border rounded px-3 py-2 bg-background"
+                  value={newDate}
+                  onChange={(e) => setNewDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                onClick={() => setNewMeetingOpen(false)}
+                className="text-sm px-4 py-2 rounded border border-border hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitNewMeeting}
+                disabled={creating || !newDate}
+                className="text-sm px-4 py-2 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {creating ? "Generating…" : "Create Meeting"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

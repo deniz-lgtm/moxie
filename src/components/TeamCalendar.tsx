@@ -66,12 +66,20 @@ function firstDayOfWeek(year: number, month: number): number {
 
 type ViewMode = "month" | "week";
 
-export function TeamCalendar() {
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
+interface TeamCalendarProps {
+  /** YYYY-MM-DD — the date the calendar opens on. Defaults to today. */
+  anchorDate?: string;
+  /** Initial view mode. Defaults to "month". */
+  defaultView?: ViewMode;
+}
+
+export function TeamCalendar({ anchorDate, defaultView = "month" }: TeamCalendarProps = {}) {
+  const [viewMode, setViewMode] = useState<ViewMode>(defaultView);
   const [current, setCurrent] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d;
+    const seed = anchorDate ? new Date(anchorDate + "T12:00:00") : new Date();
+    if (defaultView === "week") return weekStart(seed);
+    seed.setDate(1);
+    return seed;
   });
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null); // YYYY-MM-DD
