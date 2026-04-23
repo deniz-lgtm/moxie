@@ -5,8 +5,10 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ClipboardCopy,
+  List,
   Plus,
   Users,
   X,
@@ -629,7 +631,215 @@ function SlotCard({ slot, onClick }: { slot: ShowingSlot; onClick: () => void })
   );
 }
 
+// ─── week view ───────────────────────────────────────────────────────────────
+
+const WEEK_START_HOUR = 7;  // 7am
+const WEEK_END_HOUR = 21;   // 9pm
+const HOUR_PX = 64;
+
+function weekStartDate(d: Date): Date {
+  const r = new Date(d);
+  const dow = r.getDay(); // 0=Sun
+  r.setDate(r.getDate() - dow);
+  r.setHours(0, 0, 0, 0);
+  return r;
+}
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+function WeekView({ slots, onOpenSlot, weekOf, onWeekChange }: {
+  slots: ShowingSlot[];
+  onOpenSlot: (s: ShowingSlot) => void;
+  weekOf: Date;
+  onWeekChange: (d: Date) => void;
+}) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekOf, i));
+  const hours = Array.from({ length: WEEK_END_HOUR - WEEK_START_HOUR }, (_, i) => WEEK_START_HOUR + i);
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  function slotStyle(slot: ShowingSlot): React.CSSProperties {
+    const start = new Date(slot.startsAt);
+    const end = new Date(slot.endsAt);
+    const startMins = (start.getHours() - WEEK_START_HOUR) * 60 + start.getMinutes();
+    const durationMins = (end.getTime() - start.getTime()) / 60000;
+    return {
+      top: `${(startMins / 60) * HOUR_PX}px`,
+      height: `${Math.max((durationMins / 60) * HOUR_PX, 24)}px`,
+    };
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* week nav */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+        <button onClick={() => onWeekChange(addDays(weekOf, -7))} className="p-1 rounded hover:bg-muted">
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="text-sm font-medium flex-1 text-center">
+          {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} –{" "}
+          {days[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+        </span>
+        <button onClick={() => onWeekChange(weekStartDate(new Date()))} className="text-xs px-2 py-1 rounded border border-border hover:bg-muted">Today</button>
+        <button onClick={() => onWeekChange(addDays(weekOf, 7))} className="p-1 rounded hover:bg-muted">
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* day headers */}
+      <div className="flex border-b border-border">
+        <div className="w-14 shrink-0" />
+        {days.map((day) => {
+          const iso = day.toISOString().slice(0, 10);
+          const isToday = iso === todayStr;
+          return (
+            <div key={iso} className={`flex-1 text-center py-2 text-xs font-medium ${isToday ? "text-primary" : "text-muted-foreground"}`}>
+              <div>{day.toLocaleDateString("en-US", { weekday: "short" })}</div>
+              <div className={`mt-0.5 w-6 h-6 mx-auto rounded-full flex items-center justify-center text-xs font-semibold ${isToday ? "bg-primary text-primary-foreground" : ""}`}>
+                {day.getDate()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* time grid */}
+      <div className="flex overflow-y-auto" style={{ maxHeight: `${HOUR_PX * 12}px` }}>
+        {/* hour labels */}
+        <div className="w-14 shrink-0 border-r border-border">
+          {hours.map((h) => (
+            <div key={h} className="text-right pr-2 text-[10px] text-muted-foreground" style={{ height: `${HOUR_PX}px`, paddingTop: "2px" }}>
+              {h % 12 === 0 ? 12 : h % 12}{h < 12 ? "am" : "pm"}
+            </div>
+          ))}
+        </div>
+
+        {/* day columns */}
+        {days.map((day) => {
+          const iso = day.toISOString().slice(0, 10);
+          const daySlots = slots.filter((s) => s.startsAt.slice(0, 10) === iso && s.status !== "cancelled");
+          return (
+            <div key={iso} className="flex-1 relative border-r border-border last:border-r-0">
+              {/* hour lines */}
+              {hours.map((h) => (
+                <div key={h} className="border-b border-border/50" style={{ height: `${HOUR_PX}px` }} />
+              ))}
+              {/* slot blocks */}
+              {daySlots.map((slot) => {
+                const used = capacityUsed(slot);
+                return (
+                  <button
+                    key={slot.id}
+                    onClick={() => onOpenSlot(slot)}
+                    style={{ ...slotStyle(slot), position: "absolute", left: "2px", right: "2px" }}
+                    className="bg-purple-100 border border-purple-300 rounded text-left px-1 py-0.5 hover:bg-purple-200 transition overflow-hidden"
+                  >
+                    <p className="text-[10px] font-semibold text-purple-900 leading-tight truncate">
+                      {slot.propertyName || "Open house"}
+                    </p>
+                    <p className="text-[9px] text-purple-700">
+                      {formatTime(slot.startsAt)} · {used}/{slot.capacity}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── month view ───────────────────────────────────────────────────────────────
+
+function MonthView({ slots, onOpenSlot, monthOf, onMonthChange }: {
+  slots: ShowingSlot[];
+  onOpenSlot: (s: ShowingSlot) => void;
+  monthOf: Date;
+  onMonthChange: (d: Date) => void;
+}) {
+  const year = monthOf.getFullYear();
+  const month = monthOf.getMonth();
+  const firstDow = new Date(year, month, 1).getDay();
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const cells: { date: string; current: boolean }[] = [];
+  const prevTotal = new Date(year, month, 0).getDate();
+  for (let i = firstDow - 1; i >= 0; i--) {
+    cells.push({ date: new Date(year, month - 1, prevTotal - i).toISOString().slice(0, 10), current: false });
+  }
+  for (let i = 1; i <= totalDays; i++) {
+    cells.push({ date: new Date(year, month, i).toISOString().slice(0, 10), current: true });
+  }
+  while (cells.length < 42) {
+    cells.push({ date: new Date(year, month + 1, cells.length - firstDow - totalDays + 1).toISOString().slice(0, 10), current: false });
+  }
+
+  const byDate = new Map<string, ShowingSlot[]>();
+  for (const s of slots) {
+    if (s.status === "cancelled") continue;
+    const d = s.startsAt.slice(0, 10);
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d)!.push(s);
+  }
+
+  const prevMonth = () => { const d = new Date(year, month - 1, 1); onMonthChange(d); };
+  const nextMonth = () => { const d = new Date(year, month + 1, 1); onMonthChange(d); };
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+        <button onClick={prevMonth} className="p-1 rounded hover:bg-muted"><ChevronLeft className="w-4 h-4" /></button>
+        <span className="flex-1 text-center text-sm font-medium">
+          {monthOf.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+        </span>
+        <button onClick={() => onMonthChange(new Date(new Date().setDate(1)))} className="text-xs px-2 py-1 rounded border border-border hover:bg-muted">Today</button>
+        <button onClick={nextMonth} className="p-1 rounded hover:bg-muted"><ChevronRight className="w-4 h-4" /></button>
+      </div>
+
+      <div className="grid grid-cols-7 border-b border-border">
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) => (
+          <div key={d} className="text-center text-xs font-medium text-muted-foreground py-2">{d}</div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7">
+        {cells.map((cell, i) => {
+          const daySlots = byDate.get(cell.date) ?? [];
+          const isToday = cell.date === todayStr;
+          return (
+            <div key={i} className={`min-h-[80px] p-1 border-b border-r border-border ${!cell.current ? "opacity-40" : ""}`}>
+              <span className={`text-xs font-medium inline-flex items-center justify-center w-5 h-5 rounded-full mb-1 ${isToday ? "bg-primary text-primary-foreground" : ""}`}>
+                {new Date(cell.date + "T12:00:00").getDate()}
+              </span>
+              {daySlots.slice(0, 3).map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => onOpenSlot(s)}
+                  className="w-full text-left text-[10px] px-1 py-0.5 mb-0.5 rounded bg-purple-100 text-purple-800 hover:bg-purple-200 truncate font-medium"
+                >
+                  {formatTime(s.startsAt)} {s.propertyName || "Showing"}
+                </button>
+              ))}
+              {daySlots.length > 3 && (
+                <span className="text-[10px] text-muted-foreground px-1">+{daySlots.length - 3} more</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── main page ───────────────────────────────────────────────────────────────
+
+type ViewMode = "week" | "month" | "list";
 
 export default function ShowingsPage() {
   const [slots, setSlots] = useState<ShowingSlot[]>([]);
@@ -637,6 +847,9 @@ export default function ShowingsPage() {
   const [showPast, setShowPast] = useState(false);
   const [newSlotOpen, setNewSlotOpen] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<ShowingSlot | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [weekOf, setWeekOf] = useState(() => weekStartDate(new Date()));
+  const [monthOf, setMonthOf] = useState(() => { const d = new Date(); d.setDate(1); return d; });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -660,7 +873,6 @@ export default function ShowingsPage() {
   const groups = groupByDate(visibleSlots);
 
   const openSlot = async (slot: ShowingSlot) => {
-    // Re-fetch to get latest registrations
     const res = await fetch(`/api/showings/slots?id=${slot.id}`);
     const j = await res.json();
     setSelectedSlot(j.slot ?? slot);
@@ -685,13 +897,27 @@ export default function ShowingsPage() {
             Subscribe to calendar (.ics)
           </a>
         </div>
-        <button
-          onClick={() => setNewSlotOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          New slot
-        </button>
+        <div className="flex items-center gap-2">
+          {/* view toggle */}
+          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
+            {(["week", "month", "list"] as ViewMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setViewMode(v)}
+                className={`px-3 py-1.5 capitalize ${viewMode === v ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              >
+                {v === "list" ? <List className="w-4 h-4" /> : v}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setNewSlotOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium"
+          >
+            <Plus className="w-4 h-4" />
+            New slot
+          </button>
+        </div>
       </div>
 
       {/* stats bar */}
@@ -714,20 +940,21 @@ export default function ShowingsPage() {
         </div>
       )}
 
-      {/* slot list */}
+      {/* views */}
       {loading ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground">
           <CalendarDays className="w-6 h-6 mr-2 animate-pulse" />
           Loading…
         </div>
+      ) : viewMode === "week" ? (
+        <WeekView slots={slots} onOpenSlot={openSlot} weekOf={weekOf} onWeekChange={setWeekOf} />
+      ) : viewMode === "month" ? (
+        <MonthView slots={slots} onOpenSlot={openSlot} monthOf={monthOf} onMonthChange={setMonthOf} />
       ) : groups.length === 0 ? (
         <div className="text-center py-20 text-muted-foreground">
           <CalendarDays className="w-8 h-8 mx-auto mb-3 opacity-40" />
           <p className="text-sm">No upcoming showing slots.</p>
-          <button
-            onClick={() => setNewSlotOpen(true)}
-            className="mt-3 text-sm text-primary hover:underline"
-          >
+          <button onClick={() => setNewSlotOpen(true)} className="mt-3 text-sm text-primary hover:underline">
             Create your first slot →
           </button>
         </div>
@@ -745,18 +972,16 @@ export default function ShowingsPage() {
               </div>
             </div>
           ))}
+          {pastSlots.length > 0 && (
+            <button
+              onClick={() => setShowPast((v) => !v)}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${showPast ? "rotate-180" : ""}`} />
+              {showPast ? "Hide" : "Show"} {pastSlots.length} past slot{pastSlots.length === 1 ? "" : "s"}
+            </button>
+          )}
         </div>
-      )}
-
-      {/* past toggle */}
-      {!loading && pastSlots.length > 0 && (
-        <button
-          onClick={() => setShowPast((v) => !v)}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronDown className={`w-4 h-4 transition-transform ${showPast ? "rotate-180" : ""}`} />
-          {showPast ? "Hide" : "Show"} {pastSlots.length} past slot{pastSlots.length === 1 ? "" : "s"}
-        </button>
       )}
 
       {/* modals */}
