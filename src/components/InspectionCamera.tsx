@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2, Globe } from "lucide-react";
+import { Camera, ChevronRight, ChevronLeft, Plus, X, Image, RotateCcw, Loader2, Globe, Map } from "lucide-react";
 import { validateImage, compressImage, compressDataUrl, isHeicFile, convertHeicToJpeg, validatePanorama, compressPanorama, isLikelyEquirectangular, stampPhoto } from "@/lib/image-utils";
 import { PanoramaViewer } from "@/components/PanoramaViewer";
+import { FloorPlanPreview } from "@/components/FloorPlanPreview";
 
 export interface CameraPhoto {
   id: string;
@@ -34,6 +35,8 @@ interface InspectionCameraProps {
   allowAddRoom?: boolean;
   showNotes?: boolean;
   enableAiAnalysis?: boolean;
+  /** Optional floor plan image/PDF URL to show in a collapsible overlay. */
+  floorPlanUrl?: string | null;
 }
 
 function newId() {
@@ -54,6 +57,7 @@ export function InspectionCamera({
   allowAddRoom = true,
   showNotes = true,
   enableAiAnalysis = false,
+  floorPlanUrl,
 }: InspectionCameraProps) {
   const [currentRoomIdx, setCurrentRoomIdx] = useState(0);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -61,6 +65,7 @@ export function InspectionCamera({
   const [showAddRoom, setShowAddRoom] = useState(false);
   const [analyzingCount, setAnalyzingCount] = useState(0);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
+  const [showFloorPlan, setShowFloorPlan] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -423,13 +428,50 @@ export function InspectionCamera({
             )}
           </p>
         </div>
-        <button
-          onClick={goToNextRoom}
-          className="text-sm font-semibold text-green-400 hover:text-green-300 px-2 py-2 -mr-2 min-h-[44px]"
-        >
-          {isLastRoom ? "Finish" : "Skip"}
-        </button>
+        <div className="flex items-center gap-1">
+          {floorPlanUrl && (
+            <button
+              onClick={() => setShowFloorPlan((v) => !v)}
+              aria-label={showFloorPlan ? "Hide floor plan" : "Show floor plan"}
+              className={`flex items-center gap-1 text-xs font-medium px-2 py-2 min-h-[44px] rounded-md ${
+                showFloorPlan ? "bg-white/15 text-white" : "text-white/80 hover:text-white"
+              }`}
+            >
+              <Map size={16} />
+              <span className="hidden sm:inline">Plan</span>
+            </button>
+          )}
+          <button
+            onClick={goToNextRoom}
+            className="text-sm font-semibold text-green-400 hover:text-green-300 px-2 py-2 -mr-2 min-h-[44px]"
+          >
+            {isLastRoom ? "Finish" : "Skip"}
+          </button>
+        </div>
       </div>
+
+      {/* Collapsible floor plan overlay */}
+      {floorPlanUrl && showFloorPlan && (
+        <div className="absolute top-16 right-2 sm:right-4 z-40 w-[85vw] sm:w-80 max-w-sm bg-white rounded-xl shadow-2xl border border-black/10 overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-muted/30">
+            <p className="text-xs font-semibold text-foreground">Floor Plan</p>
+            <button
+              onClick={() => setShowFloorPlan(false)}
+              aria-label="Close floor plan"
+              className="text-muted-foreground hover:text-foreground p-1 -mr-1"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="bg-white">
+            <FloorPlanPreview
+              url={floorPlanUrl}
+              alt="Floor plan reference"
+              className="w-full h-64 object-contain"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Room name - large, prominent, mobile-tight */}
       <div className="bg-gradient-to-b from-black/80 to-transparent px-4 pt-3 pb-2 sm:pt-4 sm:pb-4">
