@@ -25,6 +25,7 @@ type BulkFile = {
   matchedUnit: Unit | null;
   matchConfidence: "high" | "low" | null;
   selectedUnitId: string;
+  selectedPropertyName: string;
   label: string;
   status: "pending" | "processing" | "uploading" | "done" | "error";
   error?: string;
@@ -230,6 +231,7 @@ export default function FloorPlansPage() {
           matchedUnit: unit,
           matchConfidence: confidence,
           selectedUnitId: unit?.id || "",
+          selectedPropertyName: unit?.propertyName || "",
           label: "Floor Plan",
           status: "processing" as const,
         };
@@ -452,7 +454,7 @@ export default function FloorPlansPage() {
               {/* Per-file rows */}
               {bulkFiles.map((bf) => {
                 const unit = units.find((u) => u.id === bf.selectedUnitId);
-                const propName = unit?.propertyName || "";
+                const propName = bf.selectedPropertyName || unit?.propertyName || "";
                 const propUnits = propName ? units.filter((u) => u.propertyName === propName) : units;
 
                 return (
@@ -508,10 +510,15 @@ export default function FloorPlansPage() {
                         <div className="flex gap-2 flex-wrap">
                           {/* Property selector */}
                           <select
-                            value={unit?.propertyName || ""}
+                            value={propName}
                             onChange={(e) => {
+                              const nextProp = e.target.value;
                               setBulkFiles((prev) =>
-                                prev.map((b) => b.id === bf.id ? { ...b, selectedUnitId: "" } : b)
+                                prev.map((b) =>
+                                  b.id === bf.id
+                                    ? { ...b, selectedPropertyName: nextProp, selectedUnitId: "" }
+                                    : b
+                                )
                               );
                             }}
                             className="text-xs border border-border rounded-lg px-2 py-1.5 min-h-[34px] bg-card"
@@ -525,20 +532,27 @@ export default function FloorPlansPage() {
                           {/* Unit selector */}
                           <select
                             value={bf.selectedUnitId}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const nextUnit = units.find((u) => u.id === e.target.value) || null;
                               setBulkFiles((prev) =>
-                                prev.map((b) => b.id === bf.id ? { ...b, selectedUnitId: e.target.value, matchedUnit: units.find((u) => u.id === e.target.value) || null } : b)
-                              )
-                            }
+                                prev.map((b) =>
+                                  b.id === bf.id
+                                    ? {
+                                        ...b,
+                                        selectedUnitId: e.target.value,
+                                        matchedUnit: nextUnit,
+                                        selectedPropertyName: nextUnit?.propertyName || b.selectedPropertyName,
+                                      }
+                                    : b
+                                )
+                              );
+                            }}
                             className={`text-xs border rounded-lg px-2 py-1.5 min-h-[34px] bg-card flex-1 min-w-[120px] ${
                               !bf.selectedUnitId ? "border-amber-300" : "border-border"
                             }`}
                           >
                             <option value="">Assign unit…</option>
-                            {(unit?.propertyName
-                              ? units.filter((u) => u.propertyName === unit.propertyName)
-                              : units
-                            ).map((u) => (
+                            {propUnits.map((u) => (
                               <option key={u.id} value={u.id}>{u.unitName || u.displayName}</option>
                             ))}
                           </select>
