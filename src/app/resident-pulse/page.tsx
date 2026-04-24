@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { MaintenanceRequest } from "@/lib/types";
 
 type IssueSeverity = "low" | "medium" | "high" | "critical";
@@ -29,18 +30,19 @@ function daysBetween(a: string, b: string): number {
 }
 
 export default function ResidentPulsePage() {
+  const { portfolioId } = usePortfolio();
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>("90d");
   const [propertyFilter, setPropertyFilter] = useState<string>("all");
 
   useEffect(() => {
-    fetch("/api/appfolio/work-orders")
+    fetch(`/api/appfolio/work-orders?portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((data) => setWorkOrders(data.workOrders || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   const allProperties = useMemo(
     () => [...new Set(workOrders.map((w) => w.propertyName).filter(Boolean))].sort(),

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit } from "@/lib/types";
 
 type NoticeType = "violation" | "rent_reminder" | "building_announcement" | "lease_renewal" | "maintenance_notice";
@@ -32,6 +33,7 @@ const NOTICE_TYPES: { value: NoticeType; label: string }[] = [
 ];
 
 export default function NoticesPage() {
+  const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [notices, setNotices] = useState<Notice[]>(() => loadFromStorage<Notice[]>("notices", []));
   const [selected, setSelected] = useState<Notice | null>(null);
@@ -49,12 +51,12 @@ export default function NoticesPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((data) => setUnits(data.units || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   useEffect(() => {
     saveToStorage("notices", notices);

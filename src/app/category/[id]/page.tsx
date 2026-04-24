@@ -9,6 +9,7 @@ import {
   getAppsByCategory,
 } from "@/lib/mock-data";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { AppConfig, DashboardStats, AcademicYear } from "@/lib/types";
 import {
   ClipboardCheck,
@@ -150,6 +151,7 @@ function AppCard({ app }: { app: AppConfig }) {
 
 export default function CategoryPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const { portfolioId } = usePortfolio();
   const [academicYear, setAcademicYear] = useState<AcademicYear>("2026-2027");
   const [stats, setStats] = useState<DashboardStats>(defaultStats);
   const [loading, setLoading] = useState(true);
@@ -161,7 +163,7 @@ export default function CategoryPage({ params }: { params: Promise<{ id: string 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
 
-    fetch(`/api/appfolio/dashboard?academicYear=${academicYear}`, { signal: controller.signal })
+    fetch(`/api/appfolio/dashboard?academicYear=${academicYear}&portfolio_id=${portfolioId}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
         if (d.stats) {
@@ -178,7 +180,7 @@ export default function CategoryPage({ params }: { params: Promise<{ id: string 
       clearTimeout(timer);
       controller.abort();
     };
-  }, [academicYear]);
+  }, [academicYear, portfolioId]);
 
   if (!category) {
     return (

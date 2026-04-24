@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, ClipboardList, Mic, Plus, Trash2, X } from "lucide-react";
 import MeetingDetailView from "@/components/MeetingDetailView";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   DbAgendaApplication,
   DbAgendaInspection,
@@ -73,6 +74,7 @@ function withinDays(dateIso: string | null | undefined, window: number): boolean
 }
 
 export default function MeetingsPage() {
+  const { portfolioId } = usePortfolio();
   const [meetings, setMeetings] = useState<DbPropertyMeeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -111,7 +113,7 @@ export default function MeetingsPage() {
   }> => {
     try {
       const [unitsR, woR] = await Promise.all([
-        fetch(`/api/appfolio/units`).then((r) => r.json()),
+        fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()),
         fetch(`/api/maintenance/requests`).then((r) => r.json()),
       ]);
       const nextUnits: Unit[] = Array.isArray(unitsR.units) ? unitsR.units : [];
@@ -124,7 +126,7 @@ export default function MeetingsPage() {
       setWorkOrders([]);
       return { units: [], workOrders: [] };
     }
-  }, []);
+  }, [portfolioId]);
 
   useEffect(() => {
     loadMeetings();
@@ -141,8 +143,8 @@ export default function MeetingsPage() {
       // Vacancies here means "units with no lease covering the academic-year
       // start date" — the actual question a Monday meeting wants answered.
       const [appsResp, vacanciesResp, ...inspectionResps] = await Promise.all([
-        fetch(`/api/appfolio/applications`).then((r) => r.json()).catch(() => ({})),
-        fetch(`/api/appfolio/units?vacancies_ay=${TARGET_ACADEMIC_YEAR}`)
+        fetch(`/api/appfolio/applications?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({})),
+        fetch(`/api/appfolio/units?vacancies_ay=${TARGET_ACADEMIC_YEAR}&portfolio_id=${portfolioId}`)
           .then((r) => r.json())
           .catch(() => ({})),
         ...INSPECTION_TYPES.map((t) =>
@@ -289,7 +291,7 @@ export default function MeetingsPage() {
     } finally {
       setCreating(false);
     }
-  }, [loadPortfolio]);
+  }, [loadPortfolio, portfolioId]);
 
   // Modal state for "+ New Meeting"
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);

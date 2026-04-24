@@ -13,6 +13,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { ShowingRegistration, ShowingSlot } from "@/lib/types";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -444,6 +445,7 @@ const INITIAL_FORM = {
 };
 
 function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { portfolioId } = usePortfolio();
   const [form, setForm] = useState(INITIAL_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -455,7 +457,7 @@ function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [selectedUnitId, setSelectedUnitId] = useState("");
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((d) =>
         setAllUnits(
@@ -468,7 +470,7 @@ function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       )
       .catch(() => {})
       .finally(() => setLoadingUnits(false));
-  }, []);
+  }, [portfolioId]);
 
   const propertyOptions = useMemo(
     () => [...new Set(allUnits.map((u) => u.propertyName))].sort(),

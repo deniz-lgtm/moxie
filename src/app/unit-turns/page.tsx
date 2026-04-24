@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { UnitTurn, TurnTask, TurnTaskStatus, Unit } from "@/lib/types";
 
 const TASK_CATEGORIES = [
@@ -26,6 +27,7 @@ const DEFAULT_TASKS: { name: string; category: string }[] = [
 ];
 
 export default function UnitTurnsPage() {
+  const { portfolioId } = usePortfolio();
   const [allTurns, setAllTurns] = useState<UnitTurn[]>(() => loadFromStorage<UnitTurn[]>("unit_turns", []));
   const [selected, setSelected] = useState<UnitTurn | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -39,11 +41,11 @@ export default function UnitTurnsPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((data) => setUnits(data.units || []))
       .catch(() => {});
-  }, []);
+  }, [portfolioId]);
 
   useEffect(() => {
     saveToStorage("unit_turns", allTurns);

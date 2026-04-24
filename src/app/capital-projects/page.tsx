@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   CapitalProject,
   CapitalProjectMilestone as Milestone,
@@ -36,6 +37,7 @@ const CATEGORIES: { value: ProjectCategory; label: string }[] = [
 ];
 
 export default function CapitalProjectsPage() {
+  const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [projects, setProjects] = useState<CapitalProject[]>([]);
   const [selected, setSelected] = useState<CapitalProject | null>(null);
@@ -54,7 +56,7 @@ export default function CapitalProjectsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({})),
+      fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({})),
       fetch("/api/capital-projects").then((r) => r.json()).catch(() => ({})),
     ])
       .then(([unitData, projectData]) => {
@@ -62,7 +64,7 @@ export default function CapitalProjectsPage() {
         setProjects(projectData.projects || []);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
 

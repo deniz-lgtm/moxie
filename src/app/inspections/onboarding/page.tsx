@@ -5,6 +5,7 @@ import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   Inspection,
   InspectionItem,
@@ -114,6 +115,7 @@ const ONBOARDING_SECTIONS: { name: string; items: string[] }[] = [
 type View = "list" | "create" | "walking" | "completed";
 
 export default function OnboardingInspectionPage() {
+  const { portfolioId } = usePortfolio();
   const [inspections, setInspections] = useState<Inspection[]>(() =>
     loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "onboarding")
   );
@@ -130,11 +132,11 @@ export default function OnboardingInspectionPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/properties")
+    fetch(`/api/appfolio/properties?portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((d) => setProperties(d.properties || []))
       .catch(() => {});
-  }, []);
+  }, [portfolioId]);
 
   const persist = useCallback((updated: Inspection[]) => {
     const all = loadFromStorage<Inspection[]>("inspections_v2", []);

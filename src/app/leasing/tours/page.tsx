@@ -3,9 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { TourSlot, TourRegistrationStatus, Unit } from "@/lib/types";
 
 export default function ToursPage() {
+  const { portfolioId } = usePortfolio();
   const [allTours, setAllTours] = useState<TourSlot[]>(() => loadFromStorage<TourSlot[]>("tours", []));
   const [units, setUnits] = useState<Unit[]>([]);
   const [selected, setSelected] = useState<TourSlot | null>(null);
@@ -21,13 +23,13 @@ export default function ToursPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`)
       .then((res) => res.json())
       .then((data) => {
         setUnits(data.units || []);
       })
       .catch(() => {});
-  }, []);
+  }, [portfolioId]);
 
   // Persist tours to localStorage whenever they change
   useEffect(() => {

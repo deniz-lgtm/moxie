@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { ApplicationGroup, Applicant } from "@/lib/types";
 
 export default function ApplicationsPage() {
+  const { portfolioId } = usePortfolio();
   const [allGroups, setAllGroups] = useState<ApplicationGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<ApplicationGroup | null>(null);
   const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
@@ -12,7 +14,7 @@ export default function ApplicationsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/appfolio/applications")
+    fetch(`/api/appfolio/applications?portfolio_id=${portfolioId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.applications) {
@@ -21,7 +23,7 @@ export default function ApplicationsPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   const filtered = allGroups.filter((g) => {
     if (filterStatus !== "all" && g.status !== filterStatus) return false;

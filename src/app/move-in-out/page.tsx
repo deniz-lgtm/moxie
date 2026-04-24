@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit } from "@/lib/types";
 
 type MoveEvent = {
@@ -47,6 +48,7 @@ const MOVE_OUT_CHECKLIST = [
 ];
 
 export default function MoveInOutPage() {
+  const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [events, setEvents] = useState<MoveEvent[]>([]);
   const [selected, setSelected] = useState<MoveEvent | null>(null);
@@ -54,7 +56,7 @@ export default function MoveInOutPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`)
       .then((res) => res.json())
       .then((data) => {
         const unitList: Unit[] = data.units || [];
@@ -104,7 +106,7 @@ export default function MoveInOutPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   const filtered = events.filter((e) => {
     if (filterType !== "all" && e.type !== filterType) return false;
