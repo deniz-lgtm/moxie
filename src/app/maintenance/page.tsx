@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
   MaintenanceRequest,
@@ -252,6 +253,7 @@ export default function MaintenancePage() {
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const { portfolioId } = usePortfolio();
   const [newRequest, setNewRequest] = useState({
     unitId: "",
     title: "",
@@ -261,6 +263,13 @@ export default function MaintenancePage() {
   });
 
   async function loadRequests() {
+    // Portfolio 25: no Supabase cache, go live to AppFolio
+    if (portfolioId === "25") {
+      const res = await fetch(`/api/appfolio/work-orders?portfolio_id=25`);
+      if (!res.ok) return { workOrders: [] as MaintenanceRequest[], syncedAt: null };
+      const json = await res.json();
+      return { workOrders: (json.workOrders || []) as MaintenanceRequest[], syncedAt: null };
+    }
     const res = await fetch("/api/maintenance/requests");
     if (!res.ok) return { workOrders: [] as MaintenanceRequest[], syncedAt: null };
     const json = await res.json();
@@ -274,6 +283,12 @@ export default function MaintenancePage() {
     setSyncing(true);
     setSyncError(null);
     try {
+      if (portfolioId === "25") {
+        // No cache to sync — just reload live data
+        const { workOrders } = await loadRequests();
+        setAllRequests(workOrders);
+        return;
+      }
       const res = await fetch("/api/maintenance/sync", { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
@@ -292,12 +307,16 @@ export default function MaintenancePage() {
       try {
         const [wo, unitRes] = await Promise.all([
           loadRequests(),
-          fetch("/api/appfolio/units"),
+          fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`),
         ]);
         const unitJson = unitRes.ok ? await unitRes.json() : { units: [] };
         setAllRequests(wo.workOrders);
         setSyncedAt(wo.syncedAt);
         setUnits(unitJson.units || []);
+        if (portfolioId === "25") {
+          setLoading(false);
+          return;
+        }
         // First-time UX: no snapshot yet → pull once automatically
         if (wo.workOrders.length === 0 && !wo.syncedAt) {
           setLoading(false);
@@ -319,7 +338,8 @@ export default function MaintenancePage() {
       }
     }
     loadData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portfolioId]);
 
   const filteredUnits = unitSearch
     ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
@@ -653,17 +673,19 @@ export default function MaintenancePage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            {syncedAt
-              ? `Last synced ${formatRelative(syncedAt)}`
-              : "Never synced"}
-          </span>
+          {portfolioId === "24" && (
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {syncedAt
+                ? `Last synced ${formatRelative(syncedAt)}`
+                : "Never synced"}
+            </span>
+          )}
           <button
             onClick={syncFromAppFolio}
             disabled={syncing}
             className="px-3 py-2 bg-card border border-border text-sm rounded-lg hover:bg-muted transition-colors whitespace-nowrap disabled:opacity-50"
           >
-            {syncing ? "Syncing…" : "Sync now"}
+            {syncing ? "Loading…" : portfolioId === "25" ? "Refresh" : "Sync now"}
           </button>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}

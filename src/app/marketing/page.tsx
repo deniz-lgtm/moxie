@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   mockSeoMetrics,
@@ -30,9 +30,28 @@ import {
   ListChecks,
   Plus,
   ExternalLink,
+  Users,
+  RefreshCw,
+  ChevronDown,
 } from "lucide-react";
 
-type Tab = "seo" | "content" | "calendar" | "ideas";
+type Tab = "seo" | "content" | "calendar" | "ideas" | "prospects";
+
+type ProspectSourceRow = {
+  source: string;
+  guestCardInquiries: number;
+  showings: number;
+  applications: number;
+  approved: number;
+  converted: number;
+};
+
+type ProspectSourcesData = {
+  rows: ProspectSourceRow[];
+  properties: string[];
+  sourceFieldFound: string | null;
+  lastUpdated: string;
+};
 
 const contentTypeIcon: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   blog: FileText,
@@ -323,11 +342,283 @@ function IdeasTab() {
   );
 }
 
+function ProspectsTab() {
+  const [data, setData] = useState<ProspectSourcesData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [propertyFilter, setPropertyFilter] = useState<string>("all");
+  const [pendingProperty, setPendingProperty] = useState<string>("all");
+
+  const load = (property: string) => {
+    setLoading(true);
+    setError(null);
+    const qs = property !== "all" ? `?property=${encodeURIComponent(property)}` : "";
+    fetch(`/api/appfolio/prospect-sources${qs}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) throw new Error(d.error);
+        setData(d);
+        setPropertyFilter(property);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load("all");
+  }, []);
+
+  const totalRow: ProspectSourceRow | null = data
+    ? {
+        source: "Total",
+        guestCardInquiries: data.rows.reduce((s, r) => s + r.guestCardInquiries, 0),
+        showings: data.rows.reduce((s, r) => s + r.showings, 0),
+        applications: data.rows.reduce((s, r) => s + r.applications, 0),
+        approved: data.rows.reduce((s, r) => s + r.approved, 0),
+        converted: data.rows.reduce((s, r) => s + r.converted, 0),
+      }
+    : null;
+
+  return (
+    <div className="space-y-6">
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+            Prospect Source Tracking
+          </h3>
+        </div>
+
+        {/* Property filter */}
+        <div className="relative">
+          <select
+            value={pendingProperty}
+            onChange={(e) => setPendingProperty(e.target.value)}
+            className="appearance-none bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-accent/50"
+          >
+            <option value="all">All Properties</option>
+            {(data?.properties ?? []).map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={14}
+            className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"
+          />
+        </div>
+
+        <button
+          onClick={() => load(pendingProperty)}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-60 transition-colors"
+        >
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {!data?.sourceFieldFound && data && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <strong>Note:</strong> No lead source field found in AppFolio applications — all rows show as "Direct / Unknown".
+          Contact your AppFolio account manager to enable the lead source field on the rental_application_detail report.
+        </div>
+      )}
+
+      {/* Stats summary */}
+      {totalRow && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { label: "Showings", value: totalRow.showings, color: "text-blue-600", bg: "bg-blue-50" },
+            { label: "Applications", value: totalRow.applications, color: "text-purple-600", bg: "bg-purple-50" },
+            { label: "Approved", value: totalRow.approved, color: "text-green-600", bg: "bg-green-50" },
+            { label: "Converted", value: totalRow.converted, color: "text-emerald-700", bg: "bg-emerald-50" },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="bg-card rounded-2xl border border-border p-5"
+              style={{ boxShadow: "var(--shadow-sm)" }}
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {stat.label}
+              </p>
+              <p className={`text-3xl font-bold mt-1 ${stat.color}`}>{stat.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Table */}
+      <div
+        className="bg-card rounded-2xl border border-border overflow-hidden"
+        style={{ boxShadow: "var(--shadow-sm)" }}
+      >
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Users size={16} className="text-muted-foreground" />
+            <span className="text-sm font-semibold">By Source</span>
+            {propertyFilter !== "all" && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">
+                {propertyFilter}
+              </span>
+            )}
+          </div>
+          {data && (
+            <span className="text-xs text-muted-foreground">
+              Updated {new Date(data.lastUpdated).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+
+        {loading && !data ? (
+          <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+            Loading prospect data from AppFolio…
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left px-5 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Source
+                  </th>
+                  <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Showings
+                  </th>
+                  <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Applications
+                  </th>
+                  <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Approved
+                  </th>
+                  <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Converted
+                  </th>
+                  <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Conv. Rate
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.rows ?? []).length === 0 && !loading ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-8 text-center text-muted-foreground">
+                      No application data found.
+                    </td>
+                  </tr>
+                ) : (
+                  <>
+                    {(data?.rows ?? []).map((row) => {
+                      const convRate =
+                        row.applications > 0
+                          ? Math.round((row.converted / row.applications) * 100)
+                          : 0;
+                      return (
+                        <tr
+                          key={row.source}
+                          className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors"
+                        >
+                          <td className="px-5 py-3 font-medium">{row.source}</td>
+                          <td className="px-4 py-3 text-center">
+                            {row.showings > 0 ? (
+                              <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+                                {row.showings}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center font-medium">
+                            {row.applications}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {row.approved > 0 ? (
+                              <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700">
+                                {row.approved}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">0</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {row.converted > 0 ? (
+                              <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">
+                                {row.converted}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">0</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span
+                              className={`text-xs font-medium ${
+                                convRate >= 50
+                                  ? "text-green-600"
+                                  : convRate >= 20
+                                  ? "text-amber-600"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {convRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {/* Totals row */}
+                    {totalRow && data && data.rows.length > 1 && (
+                      <tr className="border-t-2 border-border bg-muted/20 font-semibold">
+                        <td className="px-5 py-3">Total</td>
+                        <td className="px-4 py-3 text-center">{totalRow.showings || "—"}</td>
+                        <td className="px-4 py-3 text-center">{totalRow.applications}</td>
+                        <td className="px-4 py-3 text-center">{totalRow.approved}</td>
+                        <td className="px-4 py-3 text-center">{totalRow.converted}</td>
+                        <td className="px-4 py-3 text-center">
+                          {totalRow.applications > 0
+                            ? `${Math.round((totalRow.converted / totalRow.applications) * 100)}%`
+                            : "—"}
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="text-xs text-muted-foreground space-y-1">
+        <p>
+          <strong>Applications / Approved / Converted</strong> — sourced from AppFolio{" "}
+          <code className="bg-muted px-1 rounded">rental_application_detail</code> report and{" "}
+          <code className="bg-muted px-1 rounded">rent_roll</code>.
+        </p>
+        <p>
+          <strong>Showings</strong> — sourced from Moxie showing registrations (Supabase).
+          Source tag is set when the prospect registers via a tracked link.
+        </p>
+        <p>
+          <strong>Guest Card Inquiries</strong> — not available from AppFolio v2 reporting API (create-only endpoint).
+        </p>
+      </div>
+    </div>
+  );
+}
+
 const tabs: { id: Tab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
   { id: "seo", label: "SEO Dashboard", icon: Search },
   { id: "content", label: "Content Hub", icon: PenLine },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "ideas", label: "AI Ideas", icon: Lightbulb },
+  { id: "prospects", label: "Prospects", icon: Users },
 ];
 
 export default function MarketingPage() {
@@ -395,6 +686,7 @@ export default function MarketingPage() {
       {activeTab === "content" && <ContentTab />}
       {activeTab === "calendar" && <CalendarTab />}
       {activeTab === "ideas" && <IdeasTab />}
+      {activeTab === "prospects" && <ProspectsTab />}
     </div>
   );
 }

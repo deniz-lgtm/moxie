@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { invalidateLogoCache } from "@/lib/pdf-logo";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { MaintenanceRequest, Vendor, VendorStatus } from "@/lib/types";
 
@@ -60,6 +61,8 @@ export default function VendorsPage() {
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [syncInfo, setSyncInfo] = useState<string | null>(null);
   const [notionConfigured, setNotionConfigured] = useState(false);
+  const [moxieLogoUrl, setMoxieLogoUrl] = useState<string>("");
+
   const [newVendor, setNewVendor] = useState({
     name: "",
     category: VENDOR_CATEGORIES[0],
@@ -89,6 +92,10 @@ export default function VendorsPage() {
       /* ignore */
     }
   }
+
+  useEffect(() => {
+    setMoxieLogoUrl(localStorage.getItem("moxie_logo_url") || "");
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -269,6 +276,28 @@ export default function VendorsPage() {
     if (selected?.id === id) setSelected(null);
   }
 
+  async function uploadLogoFile(dataUrl: string, slot: "moxie" | "vendor", vendorId?: string): Promise<string> {
+    try {
+      const res = await fetch("/api/logos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl, slot, vendorId }),
+      });
+      if (res.ok) {
+        const j = await res.json();
+        return j.url as string;
+      }
+    } catch {}
+    return dataUrl;
+  }
+
+  async function handleMoxieLogoUpload(dataUrl: string) {
+    const url = await uploadLogoFile(dataUrl, "moxie");
+    localStorage.setItem("moxie_logo_url", url);
+    setMoxieLogoUrl(url);
+    invalidateLogoCache();
+  }
+
   if (selected) {
     const m = getMetrics(selected.name);
     const vendorWorkOrders = workOrders.filter(
@@ -282,13 +311,22 @@ export default function VendorsPage() {
         </button>
 
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-          <div className="min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
+            {selected.logoUrl && (
+              <img
+                src={selected.logoUrl}
+                alt={selected.name}
+                className="h-12 w-auto max-w-[6rem] object-contain rounded border border-border bg-white p-1 shrink-0"
+              />
+            )}
+            <div className="min-w-0">
             <h1 className="text-2xl font-bold break-words">{selected.name}</h1>
             <p className="text-muted-foreground mt-1">
               {selected.category || "—"}
               {selected.isInternal && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Internal</span>}
               {selected.notionPageId && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-700">Linked to Notion</span>}
             </p>
+            </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <select
@@ -332,6 +370,17 @@ export default function VendorsPage() {
             <EditableField label="Website" value={selected.website || ""} onBlurSave={(v) => updateVendor(selected.id, "website", v || undefined)} />
             <EditableField label="Contact Name" value={selected.contactName || ""} onBlurSave={(v) => updateVendor(selected.id, "contactName", v || undefined)} />
             <EditableField label="Address" value={selected.address || ""} onBlurSave={(v) => updateVendor(selected.id, "address", v || undefined)} />
+            <div>
+              <label className="text-xs text-muted-foreground block mb-2">Logo</label>
+              <LogoUploader
+                currentUrl={selected.logoUrl}
+                label={`${selected.name} logo`}
+                onUpload={async (dataUrl) => {
+                  const url = await uploadLogoFile(dataUrl, "vendor", selected.id);
+                  updateVendor(selected.id, "logoUrl", url);
+                }}
+              />
+            </div>
           </div>
           <div className="bg-card rounded-xl border border-border p-5 space-y-3">
             <h2 className="font-semibold">Compliance + Performance</h2>
@@ -526,6 +575,22 @@ export default function VendorsPage() {
         </div>
       )}
 
+      <div className="bg-card rounded-xl border border-border p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold text-sm">Company Branding</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Moxie Management logo — used on deposit letters and reports.
+            </p>
+          </div>
+          <LogoUploader
+            currentUrl={moxieLogoUrl}
+            label="Moxie Management logo"
+            onUpload={handleMoxieLogoUpload}
+          />
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <input
           type="text"
@@ -632,6 +697,71 @@ function EditableField({
         }}
         className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
       />
+    </div>
+  );
+}
+
+function LogoUploader({
+  currentUrl,
+  label,
+  onUpload,
+}: {
+  currentUrl?: string;
+  label: string;
+  onUpload: (dataUrl: string) => Promise<void>;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      await onUpload(dataUrl);
+    } catch {
+      // ignore
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      {currentUrl ? (
+        <img
+          src={currentUrl}
+          alt={label}
+          className="h-12 w-auto max-w-[8rem] object-contain border border-border rounded bg-white p-1"
+        />
+      ) : (
+        <div className="h-12 w-20 border border-dashed border-border rounded flex items-center justify-center text-xs text-muted-foreground bg-muted">
+          No logo
+        </div>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+          e.target.value = "";
+        }}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted transition-colors disabled:opacity-50"
+      >
+        {uploading ? "Uploading…" : currentUrl ? "Replace" : "Upload"}
+      </button>
     </div>
   );
 }

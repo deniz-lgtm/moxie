@@ -320,6 +320,7 @@ export interface Vendor {
   contactName?: string;
   licenseNumber?: string;
   insuranceExpiry?: string;
+  logoUrl?: string;
   status?: VendorStatus;
   rating?: number;
   notes?: string;
@@ -451,6 +452,8 @@ export interface ShowingSlot {
   id: string;
   propertyId?: string;
   propertyName?: string;
+  unitId?: string;
+  unitName?: string;
   startsAt: string;   // ISO
   endsAt: string;     // ISO
   hostUserId?: string;

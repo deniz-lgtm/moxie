@@ -8,7 +8,8 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const academicYear = url.searchParams.get("academicYear") as AcademicYear | null;
-    const { data, source } = await fetchDashboardStats(academicYear || undefined);
+    const portfolioId = url.searchParams.get("portfolio_id") || undefined;
+    const { data, source } = await fetchDashboardStats(academicYear || undefined, portfolioId);
     return NextResponse.json({ stats: data, source });
   } catch (error: any) {
     return NextResponse.json(

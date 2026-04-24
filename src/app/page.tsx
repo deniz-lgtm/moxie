@@ -10,6 +10,7 @@ import {
 } from "@/lib/mock-data";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
 import { TeamCalendar } from "@/components/TeamCalendar";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { DashboardStats, AcademicYear } from "@/lib/types";
 import {
   ClipboardCheck,
@@ -129,13 +130,15 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>(defaultStats);
   const [source, setSource] = useState<string>("mock");
   const [loading, setLoading] = useState(true);
+  const { portfolioId } = usePortfolio();
+  const isUSC = portfolioId === "24";
 
   useEffect(() => {
     setLoading(true);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
 
-    fetch(`/api/appfolio/dashboard?academicYear=${academicYear}`, { signal: controller.signal })
+    fetch(`/api/appfolio/dashboard?academicYear=${academicYear}&portfolio_id=${portfolioId}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
         if (d.error) {
@@ -158,12 +161,13 @@ export default function Dashboard() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [academicYear]);
+  }, [academicYear, portfolioId]);
 
   const rawApps = getAppsForRole(currentUserRole);
   const grouped = getAppsByCategory(rawApps);
   const sortedCategories = appCategories
     .filter((cat) => grouped[cat.id]?.length)
+    .filter((cat) => isUSC || cat.id !== "leasing")
     .sort((a, b) => a.order - b.order);
 
   const preLeasedPct = stats.totalUnits > 0
@@ -193,41 +197,73 @@ export default function Dashboard() {
             )}
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            {yearLabel} Lease Year &middot; Leases starting Aug 15
+            {isUSC
+              ? `${yearLabel} Lease Year · Leases starting Aug 15`
+              : "LA Portfolio · Current occupancy & maintenance"}
           </p>
         </div>
-        <AcademicYearSelector value={academicYear} onChange={setAcademicYear} />
+        {isUSC && <AcademicYearSelector value={academicYear} onChange={setAcademicYear} />}
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Link
-          href="/unleased"
-          className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
-          style={{ boxShadow: "var(--shadow-sm)" }}
-        >
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pre-Leased</p>
-          <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{preLeasedPct}%</p>
-          <p className="text-xs text-muted-foreground mt-1">{stats.preLeasedUnits} of {stats.totalUnits} units</p>
-        </Link>
-        <Link
-          href="/maintenance?status=open"
-          className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
-          style={{ boxShadow: "var(--shadow-sm)" }}
-        >
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Open Work Orders</p>
-          <p className="text-3xl font-bold mt-2 tracking-tight text-blue-600">{stats.openMaintenanceRequests}</p>
-          <p className="text-xs text-muted-foreground mt-1">maintenance requests</p>
-        </Link>
-        <Link
-          href="/leasing/applications"
-          className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
-          style={{ boxShadow: "var(--shadow-sm)" }}
-        >
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Leasing</p>
-          <p className="text-3xl font-bold mt-2 tracking-tight text-purple-600">{stats.activeApplications}</p>
-          <p className="text-xs text-muted-foreground mt-1">pending applications</p>
-        </Link>
+        {isUSC ? (
+          <>
+            <Link
+              href="/unleased"
+              className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+              style={{ boxShadow: "var(--shadow-sm)" }}
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pre-Leased</p>
+              <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{preLeasedPct}%</p>
+              <p className="text-xs text-muted-foreground mt-1">{stats.preLeasedUnits} of {stats.totalUnits} units</p>
+            </Link>
+            <Link
+              href="/maintenance?status=open"
+              className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+              style={{ boxShadow: "var(--shadow-sm)" }}
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Open Work Orders</p>
+              <p className="text-3xl font-bold mt-2 tracking-tight text-blue-600">{stats.openMaintenanceRequests}</p>
+              <p className="text-xs text-muted-foreground mt-1">maintenance requests</p>
+            </Link>
+            <Link
+              href="/leasing/applications"
+              className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+              style={{ boxShadow: "var(--shadow-sm)" }}
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Leasing</p>
+              <p className="text-3xl font-bold mt-2 tracking-tight text-purple-600">{stats.activeApplications}</p>
+              <p className="text-xs text-muted-foreground mt-1">pending applications</p>
+            </Link>
+          </>
+        ) : (
+          <>
+            <div className="bg-card rounded-2xl border border-border p-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Occupied</p>
+              <p className="text-3xl font-bold mt-2 tracking-tight text-green-600">{currentOccPct}%</p>
+              <p className="text-xs text-muted-foreground mt-1">{stats.occupiedUnits} of {stats.totalUnits} units</p>
+            </div>
+            <Link
+              href="/maintenance?status=open"
+              className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+              style={{ boxShadow: "var(--shadow-sm)" }}
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Open Work Orders</p>
+              <p className="text-3xl font-bold mt-2 tracking-tight text-blue-600">{stats.openMaintenanceRequests}</p>
+              <p className="text-xs text-muted-foreground mt-1">maintenance requests</p>
+            </Link>
+            <Link
+              href="/portfolio"
+              className="bg-card rounded-2xl border border-border p-5 hover:shadow-md transition-shadow"
+              style={{ boxShadow: "var(--shadow-sm)" }}
+            >
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Upcoming Move-Outs</p>
+              <p className="text-3xl font-bold mt-2 tracking-tight text-amber-600">{stats.upcomingMoveOuts}</p>
+              <p className="text-xs text-muted-foreground mt-1">scheduled in next 90 days</p>
+            </Link>
+          </>
+        )}
       </div>
 
       {/* Team Calendar */}

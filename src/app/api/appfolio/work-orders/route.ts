@@ -88,10 +88,13 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const { data, source } = await fetchMaintenanceRequests({
-      property_id: searchParams.get("property_id") || undefined,
-      status: searchParams.get("status") || undefined,
-    });
+    const { data, source } = await fetchMaintenanceRequests(
+      {
+        property_id: searchParams.get("property_id") || undefined,
+        status: searchParams.get("status") || undefined,
+      },
+      searchParams.get("portfolio_id") || undefined
+    );
     return NextResponse.json({ workOrders: data, source });
   } catch (error: any) {
     return NextResponse.json(

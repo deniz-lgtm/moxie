@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import { usePortfolio, PORTFOLIO_LABELS, type PortfolioId } from "@/contexts/PortfolioContext";
 import { appCategories, apps } from "@/lib/mock-data";
 import type { AppCategory } from "@/lib/types";
 
@@ -147,7 +148,8 @@ function buildSidebarItems(): SidebarItem[] {
   return items;
 }
 
-const sidebarItems = buildSidebarItems();
+// Sidebar items that only apply to the USC student housing portfolio.
+const USC_ONLY_APP_IDS = new Set(["applications", "showings", "comp-watch"]);
 
 // Category header labels: "primary" has no header, others come from appCategories
 const categoryHeaders: Record<string, string> = Object.fromEntries(
@@ -162,11 +164,17 @@ const categoryOrder: (AppCategory | "primary")[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
+  const { portfolioId, setPortfolioId } = usePortfolio();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     "inspections-hub": pathname.startsWith("/inspections") || pathname.startsWith("/floor-plans"),
     "marketing-dashboard": pathname.startsWith("/marketing"),
     "rubs": pathname.startsWith("/rubs"),
   });
+
+  const allSidebarItems = buildSidebarItems();
+  const sidebarItems = portfolioId === "25"
+    ? allSidebarItems.filter((i) => !USC_ONLY_APP_IDS.has(i.id))
+    : allSidebarItems;
 
   function toggleExpand(id: string) {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -283,6 +291,27 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <div className="border-t border-white/5 px-3 py-3">
+        <p className="text-[10px] font-semibold text-sidebar-text uppercase tracking-wider mb-2 px-1">
+          Portfolio
+        </p>
+        <div className="inline-flex w-full rounded-lg border border-white/10 bg-white/5 p-0.5">
+          {(["24", "25"] as PortfolioId[]).map((id) => (
+            <button
+              key={id}
+              onClick={() => setPortfolioId(id)}
+              className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                portfolioId === id
+                  ? "bg-sidebar-active text-sidebar-text-active shadow-sm"
+                  : "text-sidebar-text hover:text-sidebar-text-active"
+              }`}
+            >
+              {PORTFOLIO_LABELS[id]}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="border-t border-white/5 p-4">
         <div className="flex items-center gap-3">

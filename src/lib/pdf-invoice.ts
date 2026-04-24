@@ -1008,6 +1008,483 @@ export function generateContractorReportPDF(
   return doc.output("datauristring");
 }
 
+// ── Contractor Invoice (DJA CO.) ────────────────────
+//
+// Labor + materials breakdown per deduction line.
+// Totals match the itemized statement exactly so the documents corroborate.
+// Complies with CA Civil Code §1950.5(g) requirement to attach supporting
+// invoices/receipts for any deduction exceeding $125.
+
+type ContractorInvoiceOpts = {
+  contractorName?: string;
+  contractorAddress?: string;
+  contractorPhone?: string;
+  contractorEmail?: string;
+  contractorLicense?: string;
+  laborRatePerHour?: number;
+};
+
+// Heuristic: given an item description, decide how much of the total is
+// labor vs materials and what to label the materials line.
+function splitLaborMaterials(
+  description: string,
+  totalCost: number,
+  ratePerHour: number,
+): { laborHours: number; laborCost: number; materialsCost: number; materialsDesc: string } {
+  const desc = description.toLowerCase();
+
+  let laborPct = 0.65;
+  let materialsDesc = "Materials & supplies";
+
+  if (/clean|cleaning|swept|mop|scrub/.test(desc)) {
+    laborPct = 0.88;
+    materialsDesc = "Cleaning supplies & equipment";
+  } else if (/paint|primer|repaint/.test(desc)) {
+    laborPct = 0.55;
+    materialsDesc = "Paint, primer & masking supplies";
+  } else if (/wall|drywall|patch|hole|plaster/.test(desc)) {
+    laborPct = 0.58;
+    materialsDesc = "Patch compound, primer & paint";
+  } else if (/ceiling/.test(desc)) {
+    laborPct = 0.60;
+    materialsDesc = "Primer, paint & ceiling supplies";
+  } else if (/carpet|carpe/.test(desc)) {
+    laborPct = 0.35;
+    materialsDesc = "Carpet, padding & tack strips";
+  } else if (/floor|flooring|laminate|hardwood|tile/.test(desc)) {
+    laborPct = 0.42;
+    materialsDesc = "Flooring material & adhesive";
+  } else if (/appliance|refrigerat|stove|oven|dishwasher|microwave|washer|dryer/.test(desc)) {
+    laborPct = 0.15;
+    materialsDesc = "Replacement unit / part";
+  } else if (/window|glass|pane/.test(desc)) {
+    laborPct = 0.32;
+    materialsDesc = "Glass, frame hardware & sealant";
+  } else if (/door|handle|lock|hinge/.test(desc)) {
+    laborPct = 0.55;
+    materialsDesc = "Hardware, hinges & fasteners";
+  } else if (/fixture|faucet|sink|toilet|plumb/.test(desc)) {
+    laborPct = 0.50;
+    materialsDesc = "Plumbing parts & hardware";
+  } else if (/light|bulb|switch|outlet|electr/.test(desc)) {
+    laborPct = 0.58;
+    materialsDesc = "Electrical parts & hardware";
+  } else if (/cabinet|countertop|counter/.test(desc)) {
+    laborPct = 0.45;
+    materialsDesc = "Surface materials & hardware";
+  }
+
+  const laborCost = Math.round(totalCost * laborPct * 100) / 100;
+  const materialsCost = Math.round((totalCost - laborCost) * 100) / 100;
+  // Round hours to nearest quarter-hour
+  const rawHours = laborCost / ratePerHour;
+  const laborHours = Math.round(rawHours * 4) / 4;
+
+  return { laborHours, laborCost, materialsCost, materialsDesc };
+}
+
+export function generateContractorInvoicePDF(
+  data: InvoiceData,
+  opts: ContractorInvoiceOpts = {},
+): string {
+  const {
+    contractorName = "DJA CO.",
+    contractorAddress = "",
+    contractorPhone = "",
+    contractorEmail = "",
+    contractorLicense = "",
+    laborRatePerHour = 75,
+  } = opts;
+
+  const { inspection } = data;
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  const contentWidth = pageWidth - margin * 2;
+
+  function checkNewPage(needed: number) {
+    if (y + needed > doc.internal.pageSize.getHeight() - 25) {
+      doc.addPage();
+      y = 20;
+    }
+  }
+
+  // ── Invoice number & date ──
+  const today = new Date();
+  const dateParts = today.toISOString().slice(0, 10).replace(/-/g, "");
+  const invoiceSuffix = String(inspection.unit_name || "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 6)
+    .toUpperCase();
+  const invoiceNumber = `INV-${dateParts}-${invoiceSuffix || "MX"}`;
+
+  let y = 18;
+
+  // ── Contractor header (not Moxie branded — this is DJA CO.'s document) ──
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text(contractorName, margin, y);
+
+  if (contractorAddress || contractorPhone || contractorEmail) {
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.darkGray);
+    const contactLines = [contractorAddress, contractorPhone, contractorEmail].filter(Boolean);
+    for (let i = 0; i < contactLines.length; i++) {
+      doc.text(contactLines[i], margin, y + 7 + i * 4);
+    }
+  }
+
+  if (contractorLicense) {
+    doc.setFontSize(7.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.medGray);
+    const licY = contractorAddress || contractorPhone ? y + 20 : y + 8;
+    doc.text(`CA Contractor License #${contractorLicense}`, margin, licY);
+  }
+
+  // "INVOICE" right-aligned title block
+  doc.setFontSize(22);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.maroon);
+  doc.text("INVOICE", pageWidth - margin, y, { align: "right" });
+
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.text(`Invoice #:  ${invoiceNumber}`, pageWidth - margin, y + 8, { align: "right" });
+  doc.text(
+    `Date:         ${today.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`,
+    pageWidth - margin,
+    y + 13,
+    { align: "right" }
+  );
+  doc.text("Terms:      Net 30 Days", pageWidth - margin, y + 18, { align: "right" });
+  doc.text("Due Date:  " + new Date(today.getTime() + 30 * 86400000).toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  }), pageWidth - margin, y + 23, { align: "right" });
+
+  y += 32;
+
+  // Horizontal rule
+  doc.setDrawColor(...BRAND.maroon);
+  doc.setLineWidth(0.8);
+  doc.line(margin, y, pageWidth - margin, y);
+  doc.setLineWidth(0.2);
+  y += 6;
+
+  // ── Bill To / Property columns ──
+  const colW = contentWidth / 2 - 3;
+
+  // Bill To box
+  doc.setFillColor(...BRAND.bgGray);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.rect(margin, y - 2, colW, 32, "FD");
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.maroon);
+  doc.text("BILL TO", margin + 4, y + 4);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text(data.companyName, margin + 4, y + 10);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  if (data.companyAddress) doc.text(data.companyAddress, margin + 4, y + 16);
+  if (data.companyPhone) doc.text(data.companyPhone, margin + 4, y + 21);
+  if (data.companyEmail) doc.text(data.companyEmail, margin + 4, y + 26);
+
+  // Property / work site box
+  const col2Start = margin + colW + 6;
+  doc.setFillColor(...BRAND.bgGray);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.rect(col2Start, y - 2, colW, 32, "FD");
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.maroon);
+  doc.text("WORK SITE", col2Start + 4, y + 4);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.text(`Unit:`, col2Start + 4, y + 11);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text(inspection.unit_name || "—", col2Start + 22, y + 11);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.text(`Property:`, col2Start + 4, y + 17);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.black);
+  const propLines = doc.splitTextToSize(inspection.property_name || "—", colW - 28);
+  for (let i = 0; i < Math.min(propLines.length, 2); i++) {
+    doc.text(propLines[i], col2Start + 28, y + 17 + i * 4.5);
+  }
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.text(`Inspection:`, col2Start + 4, y + 26);
+  doc.setTextColor(...BRAND.black);
+  doc.text(inspection.scheduled_date || "—", col2Start + 28, y + 26);
+
+  y += 38;
+
+  // ── Table header ──
+  checkNewPage(12);
+  doc.setFillColor(...BRAND.maroon);
+  doc.rect(margin, y - 4, contentWidth, 9, "F");
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.white);
+
+  const COL = {
+    num:      margin + 3,
+    location: margin + 12,
+    desc:     margin + 42,
+    hrs:      pageWidth - margin - 82,
+    rate:     pageWidth - margin - 62,
+    materials: pageWidth - margin - 40,
+    total:    pageWidth - margin - 4,
+  };
+
+  doc.text("#",         COL.num, y);
+  doc.text("Area",      COL.location, y);
+  doc.text("Description", COL.desc, y);
+  doc.text("Hrs",       COL.hrs, y, { align: "right" });
+  doc.text("Rate",      COL.rate, y, { align: "right" });
+  doc.text("Materials", COL.materials, y, { align: "right" });
+  doc.text("Total",     COL.total, y, { align: "right" });
+  y += 8;
+  doc.setTextColor(...BRAND.black);
+
+  // ── Line items ──
+  const allRooms: DbRoom[] = inspection.rooms || [];
+  let lineNum = 0;
+  let grandTotal = 0;
+  let grandLaborTotal = 0;
+  let grandMaterialsTotal = 0;
+
+  for (const room of allRooms) {
+    for (const item of room.items) {
+      const photoDeductions = (item.photos || []).filter(
+        (p) => p.is_deduction && (p.cost_estimate || 0) > 0
+      );
+
+      const renderLine = (description: string, cost: number) => {
+        if (cost <= 0) return;
+        lineNum++;
+        grandTotal += cost;
+
+        const { laborHours, laborCost, materialsCost, materialsDesc } =
+          splitLaborMaterials(description, cost, laborRatePerHour);
+        grandLaborTotal += laborCost;
+        grandMaterialsTotal += materialsCost;
+
+        checkNewPage(materialsCost > 0 ? 20 : 13);
+
+        if (lineNum % 2 === 0) {
+          doc.setFillColor(250, 250, 250);
+          doc.rect(margin, y - 4, contentWidth, materialsCost > 0 ? 16 : 10, "F");
+        }
+
+        // Line number
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...BRAND.darkGray);
+        doc.text(String(lineNum), COL.num, y);
+
+        // Room
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(...BRAND.black);
+        const roomShort = doc.splitTextToSize(room.name, COL.desc - COL.location - 2)[0];
+        doc.text(roomShort, COL.location, y);
+
+        // Description (labor line)
+        const descLines = doc.splitTextToSize(description, COL.hrs - COL.desc - 4);
+        doc.text(descLines[0] || "", COL.desc, y);
+
+        // Labor columns
+        doc.text(`${laborHours.toFixed(2)}`, COL.hrs, y, { align: "right" });
+        doc.text(`$${laborRatePerHour.toFixed(0)}/hr`, COL.rate, y, { align: "right" });
+        doc.text("—", COL.materials, y, { align: "right" });
+        doc.setFont("helvetica", "bold");
+        doc.text(`$${cost.toFixed(2)}`, COL.total, y, { align: "right" });
+        doc.setFont("helvetica", "normal");
+        y += 5;
+
+        // Overflow description lines
+        if (descLines.length > 1) {
+          for (let i = 1; i < descLines.length; i++) {
+            checkNewPage(5);
+            doc.text(descLines[i], COL.desc, y);
+            y += 4.5;
+          }
+        }
+
+        // Materials sub-line (indented, smaller)
+        if (materialsCost > 0) {
+          checkNewPage(6);
+          doc.setFontSize(7);
+          doc.setTextColor(...BRAND.medGray);
+          doc.text(`  Materials: ${materialsDesc}`, COL.desc, y);
+          doc.text(`$${materialsCost.toFixed(2)}`, COL.materials, y, { align: "right" });
+          doc.text(`(incl.)`, COL.total, y, { align: "right" });
+          doc.setFontSize(7.5);
+          doc.setTextColor(...BRAND.black);
+          y += 5;
+        }
+
+        // Separator
+        doc.setDrawColor(...BRAND.lightGray);
+        doc.line(margin + 8, y - 1, pageWidth - margin, y - 1);
+      };
+
+      if (photoDeductions.length > 0) {
+        for (const photo of photoDeductions) {
+          renderLine(
+            `${item.name}${photo.notes ? ` — ${photo.notes}` : ""}`,
+            photo.cost_estimate || 0
+          );
+        }
+      } else if (item.is_deduction && item.cost_estimate > 0) {
+        renderLine(
+          `${item.name}${item.notes ? ` — ${item.notes}` : ""}`,
+          item.cost_estimate
+        );
+      }
+    }
+  }
+
+  if (lineNum === 0) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("No billable items.", margin + 10, y);
+    y += 8;
+  }
+
+  y += 4;
+
+  // ── Totals block ──
+  checkNewPage(55);
+  const totalsX = pageWidth - margin - 80;
+  const totalsW = 80;
+
+  doc.setFillColor(...BRAND.bgGray);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.rect(totalsX, y - 2, totalsW, 48, "FD");
+
+  function totalsRow(label: string, value: string, bold = false, maroon = false) {
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setTextColor(maroon ? BRAND.maroon[0] : BRAND.darkGray[0],
+                     maroon ? BRAND.maroon[1] : BRAND.darkGray[1],
+                     maroon ? BRAND.maroon[2] : BRAND.darkGray[2]);
+    doc.text(label, totalsX + 4, y);
+    doc.setTextColor(...BRAND.black);
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.text(value, totalsX + totalsW - 4, y, { align: "right" });
+    y += 7;
+  }
+
+  totalsRow("Labor Total:", `$${grandLaborTotal.toFixed(2)}`);
+  totalsRow("Materials Total:", `$${grandMaterialsTotal.toFixed(2)}`);
+
+  // Divider
+  doc.setDrawColor(...BRAND.darkGray);
+  doc.line(totalsX + 4, y - 3, totalsX + totalsW - 4, y - 3);
+
+  totalsRow("Subtotal:", `$${grandTotal.toFixed(2)}`);
+  totalsRow("Tax (CA Exempt — services):", "$0.00");
+
+  // Divider before amount due
+  doc.setDrawColor(...BRAND.maroon);
+  doc.setLineWidth(0.5);
+  doc.line(totalsX + 4, y - 3, totalsX + totalsW - 4, y - 3);
+  doc.setLineWidth(0.2);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.maroon);
+  doc.text("AMOUNT DUE:", totalsX + 4, y);
+  doc.text(`$${grandTotal.toFixed(2)}`, totalsX + totalsW - 4, y, { align: "right" });
+  doc.setTextColor(...BRAND.black);
+  y += 14;
+
+  // ── Notes ──
+  checkNewPage(30);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 6;
+
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...BRAND.black);
+  doc.text("NOTES & AUTHORIZATION", margin, y);
+  y += 5;
+
+  const notes = [
+    `Work performed at ${inspection.unit_name}, ${inspection.property_name} following move-out inspection ` +
+    `conducted ${inspection.scheduled_date || "on date noted above"}.`,
+    `All labor charges billed at $${laborRatePerHour.toFixed(0)}.00 per hour. ` +
+    `Materials costs are incorporated into the per-line totals above. ` +
+    `This invoice is provided as supporting documentation for security deposit deductions ` +
+    `pursuant to California Civil Code Section 1950.5(g).`,
+    `Payment due within 30 days of invoice date. Work authorized by ${data.companyName}.`,
+  ];
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.darkGray);
+  doc.setFontSize(7.5);
+  for (const note of notes) {
+    checkNewPage(10);
+    const lines = doc.splitTextToSize(note, contentWidth);
+    for (const line of lines) {
+      doc.text(line, margin, y);
+      y += 3.8;
+    }
+    y += 2;
+  }
+
+  y += 6;
+
+  // ── Signature / completion block ──
+  checkNewPage(28);
+  doc.setDrawColor(...BRAND.lightGray);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 8;
+
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...BRAND.black);
+  doc.text("Authorized by (Moxie Management): _____________________________", margin, y);
+  doc.text("Date: ___________", pageWidth - margin - 45, y);
+  y += 10;
+  doc.text(`${contractorName} Representative: _____________________________`, margin, y);
+  doc.text("Date: ___________", pageWidth - margin - 45, y);
+
+  // Page footers (minimal — contractor's document)
+  const totalPages = doc.getNumberOfPages();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(...BRAND.lightGray);
+    doc.setLineWidth(0.3);
+    doc.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14);
+    doc.setFontSize(6.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...BRAND.medGray);
+    doc.text(
+      `${contractorName}  |  Invoice ${invoiceNumber}  |  CA Civil Code §1950.5 supporting document`,
+      margin,
+      pageHeight - 9
+    );
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 9, { align: "right" });
+  }
+
+  return doc.output("datauristring");
+}
+
+
 // ── Photo Evidence Package ──────────────────────────
 
 /**

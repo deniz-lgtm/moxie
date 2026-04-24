@@ -232,6 +232,7 @@ export type DbVendor = {
   contact_name: string | null;
   license_number: string | null;
   insurance_expiry: string | null;
+  logo_url: string | null;
   status: string | null;
   rating: number | null;
   notes: string | null;
@@ -318,6 +319,8 @@ export type DbShowingSlot = {
   id: string;
   property_id: string | null;
   property_name: string | null;
+  unit_id: string | null;
+  unit_name: string | null;
   starts_at: string;
   ends_at: string;
   host_user_id: string | null;

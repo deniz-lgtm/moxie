@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       contactName: vendor.contactName,
       licenseNumber: vendor.licenseNumber,
       insuranceExpiry: vendor.insuranceExpiry,
+      logoUrl: vendor.logoUrl,
       status: vendor.status,
       rating: vendor.rating,
       notes: vendor.notes,
