@@ -24,13 +24,14 @@ export async function GET(request: Request) {
     // ?vacancies_on=YYYY-MM-DD (or ?vacancies_ay=2026-2027 to use the
     // academic-year start). Returns units that have NO lease covering that
     // date — the question the Monday meeting actually cares about.
+    const portfolioId = url.searchParams.get("portfolio_id") || undefined;
     const vacanciesOn = url.searchParams.get("vacancies_on");
     const vacanciesAy = url.searchParams.get("vacancies_ay") as AcademicYear | null;
     if (vacanciesOn || vacanciesAy) {
       const target = vacanciesOn
         ? vacanciesOn
         : academicYearDates(vacanciesAy as AcademicYear).leaseStart;
-      const { data, coveredUnitIds, source } = await fetchVacanciesOnDate(target);
+      const { data, coveredUnitIds, source } = await fetchVacanciesOnDate(target, portfolioId);
       return NextResponse.json({ vacancies: data, coveredUnitIds, target, source });
     }
     // Add ?debug=1 to see cross-reference diagnostics
@@ -60,13 +61,13 @@ export async function GET(request: Request) {
     }
     // Add ?withTenants=1 to get units with grouped tenants and emails
     if (url.searchParams.get("withTenants")) {
-      const { data, source } = await fetchUnitsWithTenants();
+      const { data, source } = await fetchUnitsWithTenants(portfolioId);
       return NextResponse.json({ units: data, source });
     }
     // Add ?address=<value> to find a specific unit by address
     const addressQuery = url.searchParams.get("address");
     if (addressQuery) {
-      const { data, source } = await fetchUnits();
+      const { data, source } = await fetchUnits(undefined, portfolioId);
       const match = data.filter((u) =>
         u.unitName.toLowerCase().includes(addressQuery.toLowerCase()) ||
         u.id.toLowerCase().includes(addressQuery.toLowerCase())
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ query: addressQuery, matches: match.length, units: match, source });
     }
     const academicYear = url.searchParams.get("academicYear") as AcademicYear | null;
-    const { data, source } = await fetchUnits(academicYear || undefined);
+    const { data, source } = await fetchUnits(academicYear || undefined, portfolioId);
     return NextResponse.json({ units: data, source });
   } catch (error: any) {
     return NextResponse.json(

@@ -16,6 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   CapitalProject,
   DashboardStats,
@@ -317,6 +318,7 @@ function daysBetween(fromIso: string, toIso: string): number {
 }
 
 export default function PortfolioPage() {
+  const { portfolioId } = usePortfolio();
   const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -411,9 +413,9 @@ export default function PortfolioPage() {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      fetch("/api/appfolio/properties").then((r) => r.json()).catch(() => ({})),
-      fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({})),
-      fetch("/api/appfolio/dashboard").then((r) => r.json()).catch(() => ({})),
+      fetch(`/api/appfolio/properties?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({})),
+      fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({})),
+      fetch(`/api/appfolio/dashboard?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({})),
       fetch("/api/maintenance/requests").then((r) => r.json()).catch(() => ({})),
       fetch("/api/capital-projects").then((r) => r.json()).catch(() => ({})),
       fetch("/api/properties/attributes").then((r) => r.json()).catch(() => ({})),
@@ -433,7 +435,7 @@ export default function PortfolioPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   // Vacancy set refetches when the as-of date changes. unit_vacancy_detail
   // accounts for future signed leases, so a future `asOfDate` answers
@@ -441,7 +443,7 @@ export default function PortfolioPage() {
   useEffect(() => {
     let cancelled = false;
     setVacancyLoading(true);
-    fetch(`/api/appfolio/units?vacancies_on=${asOfDate}`)
+    fetch(`/api/appfolio/units?vacancies_on=${asOfDate}&portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
@@ -462,7 +464,7 @@ export default function PortfolioPage() {
     return () => {
       cancelled = true;
     };
-  }, [asOfDate]);
+  }, [asOfDate, portfolioId]);
 
   const summaries: PropertySummary[] = useMemo(() => {
     const asOfMs = new Date(asOfDate).getTime();

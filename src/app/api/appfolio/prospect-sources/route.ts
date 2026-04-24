@@ -4,7 +4,7 @@ import { getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-const MOXIE_PORTFOLIO_ID = "24";
+const DEFAULT_PORTFOLIO_ID = "24";
 
 // Candidate field names AppFolio might use for the referral/lead source
 const LEAD_SOURCE_FIELDS = [
@@ -45,6 +45,7 @@ type ProspectSourcesResponse = {
 export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const propertyFilter = searchParams.get("property") ?? "all";
+  const portfolioId = searchParams.get("portfolio_id") ?? DEFAULT_PORTFOLIO_ID;
 
   try {
     // --- AppFolio: applications ---
@@ -53,15 +54,15 @@ export async function GET(request: Request): Promise<NextResponse> {
       getRentRoll().catch(() => [] as any[]),
     ]);
 
-    // Filter to Moxie portfolio
+    // Filter to the requested portfolio
     const apps = (rawApps || []).filter((r: any) => {
       const pid = String(r.portfolio_id ?? "").trim();
-      return pid === MOXIE_PORTFOLIO_ID;
+      return pid === portfolioId;
     });
 
     const rentRoll = (rawRentRoll || []).filter((r: any) => {
       const pid = String(r.portfolio_id ?? "").trim();
-      return pid === MOXIE_PORTFOLIO_ID;
+      return pid === portfolioId;
     });
 
     // Detect which lead_source field name AppFolio actually uses

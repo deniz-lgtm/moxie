@@ -3,6 +3,7 @@ import "./globals.css";
 import { AppShell } from "@/components/AppShell";
 import { AuthProvider } from "@/components/AuthProvider";
 import { AuthGate } from "@/components/AuthGate";
+import { PortfolioProvider } from "@/contexts/PortfolioContext";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -32,9 +33,11 @@ export default function RootLayout({
       <body className="antialiased">
         <AuthProvider>
           <AuthGate>
-            <AppShell>
-              {children}
-            </AppShell>
+            <PortfolioProvider>
+              <AppShell>
+                {children}
+              </AppShell>
+            </PortfolioProvider>
           </AuthGate>
         </AuthProvider>
       </body>
