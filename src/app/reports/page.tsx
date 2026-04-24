@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit, MaintenanceRequest } from "@/lib/types";
 
 type ReportType = "pnl" | "occupancy" | "maintenance_cost" | "rent_roll";
@@ -39,6 +40,7 @@ function getCurrentMonth() {
 }
 
 export default function ReportsPage() {
+  const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
   const [reports, setReports] = useState<Report[]>(() => loadFromStorage<Report[]>("reports", []));
@@ -55,12 +57,12 @@ export default function ReportsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/appfolio/units").then((r) => r.json()).then((d) => setUnits(d.units || [])),
-      fetch("/api/appfolio/work-orders").then((r) => r.json()).then((d) => setWorkOrders(d.workOrders || [])),
+      fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()).then((d) => setUnits(d.units || [])),
+      fetch(`/api/appfolio/work-orders?portfolio_id=${portfolioId}`).then((r) => r.json()).then((d) => setWorkOrders(d.workOrders || [])),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolioId]);
 
   // Persist reports
   useEffect(() => {

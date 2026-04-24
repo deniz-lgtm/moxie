@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { validateImage, compressImage, isHeicFile, convertHeicToJpeg } from "@/lib/image-utils";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit } from "@/lib/types";
 
 type FloorPlan = {
@@ -79,6 +80,7 @@ function matchUnitToFilename(
 }
 
 export default function FloorPlansPage() {
+  const { portfolioId } = usePortfolio();
   const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,7 +112,7 @@ export default function FloorPlansPage() {
       try {
         const [fpRes, unitsRes] = await Promise.all([
           fetch("/api/floor-plans").then((r) => r.json()),
-          fetch("/api/appfolio/units").then((r) => r.json()),
+          fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()),
         ]);
         setFloorPlans(fpRes.floor_plans || []);
         setUnits(unitsRes.units || []);
@@ -121,7 +123,7 @@ export default function FloorPlansPage() {
       }
     }
     load();
-  }, []);
+  }, [portfolioId]);
 
   // ── Single upload ──────────────────────────────────
 

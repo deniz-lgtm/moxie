@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Property } from "@/lib/types";
 
 type RentEntry = {
@@ -47,6 +48,7 @@ function calculateTrend(history: RentEntry[]): "up" | "down" | "stable" {
 }
 
 export default function CompWatchPage() {
+  const { portfolioId } = usePortfolio();
   const [comps, setComps] = useState<CompProperty[]>(() => loadFromStorage<CompProperty[]>("comps", []));
   const [ownProperties, setOwnProperties] = useState<Property[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -59,13 +61,13 @@ export default function CompWatchPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/properties")
+    fetch(`/api/appfolio/properties?portfolio_id=${portfolioId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.properties) setOwnProperties(data.properties);
       })
       .catch(() => {});
-  }, []);
+  }, [portfolioId]);
 
   // Persist comps to localStorage
   useEffect(() => {

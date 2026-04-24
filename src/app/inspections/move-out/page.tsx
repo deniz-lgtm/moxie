@@ -11,6 +11,7 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
 import { validateImage, compressImage, isHeicFile, convertHeicToJpeg, stampPhoto } from "@/lib/image-utils";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   Inspection,
   InspectionRoom,
@@ -158,6 +159,7 @@ export default function MoveOutInspectionPage() {
 }
 
 function MoveOutInspectionContent() {
+  const { portfolioId } = usePortfolio();
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [loadingInspections, setLoadingInspections] = useState(true);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -262,7 +264,7 @@ function MoveOutInspectionContent() {
         // Fetch inspections and units in parallel
         const [inspRes, unitsRes] = await Promise.all([
           fetch("/api/inspections/crud?type=move_out").then((r) => r.json()),
-          fetch("/api/appfolio/units").then((r) => r.json()),
+          fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()),
         ]);
 
         const existingInspections: Inspection[] = inspRes.inspections || [];
@@ -331,7 +333,7 @@ function MoveOutInspectionContent() {
       }
     }
     loadData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [portfolioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-load saved floor plan from library when entering the floor_plan step
   useEffect(() => {

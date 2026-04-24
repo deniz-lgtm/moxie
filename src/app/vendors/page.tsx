@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invalidateLogoCache } from "@/lib/pdf-logo";
 import { StatusBadge } from "@/components/StatusBadge";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { MaintenanceRequest, Vendor, VendorStatus } from "@/lib/types";
 
 const VENDOR_CATEGORIES = [
@@ -49,6 +50,7 @@ function formatPhone(phone: string | undefined | null): string {
 }
 
 export default function VendorsPage() {
+  const { portfolioId } = usePortfolio();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
   const [selected, setSelected] = useState<Vendor | null>(null);
@@ -102,7 +104,7 @@ export default function VendorsPage() {
       const [list] = await Promise.all([
         loadVendors(),
         loadSyncInfo(),
-        fetch("/api/appfolio/work-orders")
+        fetch(`/api/appfolio/work-orders?portfolio_id=${portfolioId}`)
           .then((r) => r.json())
           .then((d) => setWorkOrders(d.workOrders || []))
           .catch(() => {}),
@@ -110,7 +112,7 @@ export default function VendorsPage() {
       setVendors(list);
       setLoading(false);
     })();
-  }, []);
+  }, [portfolioId]);
 
   async function syncWithNotion() {
     setSyncing(true);

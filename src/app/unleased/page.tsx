@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { AcademicYearSelector } from "@/components/AcademicYearSelector";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { AcademicYear, VacantUnit } from "@/lib/types";
 
 function daysSinceIso(iso: string | null | undefined): number | null {
@@ -14,6 +15,7 @@ function daysSinceIso(iso: string | null | undefined): number | null {
 }
 
 export default function UnleasedPage() {
+  const { portfolioId } = usePortfolio();
   const [ay, setAy] = useState<AcademicYear>("2026-2027");
   const [unleased, setUnleased] = useState<VacantUnit[]>([]);
   const [target, setTarget] = useState<string>("");
@@ -21,7 +23,7 @@ export default function UnleasedPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/appfolio/units?vacancies_ay=${ay}`)
+    fetch(`/api/appfolio/units?vacancies_ay=${ay}&portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((j) => {
         setUnleased(Array.isArray(j.vacancies) ? j.vacancies : []);
@@ -29,7 +31,7 @@ export default function UnleasedPage() {
       })
       .catch(() => setUnleased([]))
       .finally(() => setLoading(false));
-  }, [ay]);
+  }, [ay, portfolioId]);
 
   const grouped = useMemo(() => {
     const byProperty = new Map<string, VacantUnit[]>();

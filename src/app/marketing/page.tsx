@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import {
   mockSeoMetrics,
   mockKeywordRankings,
@@ -343,6 +344,7 @@ function IdeasTab() {
 }
 
 function ProspectsTab() {
+  const { portfolioId } = usePortfolio();
   const [data, setData] = useState<ProspectSourcesData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -352,8 +354,9 @@ function ProspectsTab() {
   const load = (property: string) => {
     setLoading(true);
     setError(null);
-    const qs = property !== "all" ? `?property=${encodeURIComponent(property)}` : "";
-    fetch(`/api/appfolio/prospect-sources${qs}`)
+    const params = new URLSearchParams({ portfolio_id: portfolioId });
+    if (property !== "all") params.set("property", property);
+    fetch(`/api/appfolio/prospect-sources?${params.toString()}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -366,7 +369,8 @@ function ProspectsTab() {
 
   useEffect(() => {
     load("all");
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portfolioId]);
 
   const totalRow: ProspectSourceRow | null = data
     ? {

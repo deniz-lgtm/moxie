@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit } from "@/lib/types";
 import type { MeterMapping, MeterType, MeteringMethod, SplitMethod, PropertyAlias } from "@/lib/rubs-types";
 import { findDuplicateNameGroups } from "@/lib/rubs-property-resolver";
@@ -21,6 +22,7 @@ import {
 import { parseImportFile, transformRowsToMappings, type ImportResult } from "@/lib/rubs-csv-import";
 
 export default function RubsSettingsPage() {
+  const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [mappings, setMappings] = useState<MeterMapping[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,8 +45,9 @@ export default function RubsSettingsPage() {
   const [showAliases, setShowAliases] = useState(false);
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
+      const unitsRes = await fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
       const [loadedMappings, loadedAliases] = await Promise.all([
         getMeterMappings(),
@@ -57,7 +60,7 @@ export default function RubsSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [portfolioId]);
 
   useEffect(() => {
     loadData();

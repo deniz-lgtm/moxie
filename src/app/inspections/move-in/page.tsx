@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   Inspection,
   InspectionRoom,
@@ -36,6 +37,7 @@ function blankItem(name: string): InspectionItem {
 type View = "list" | "create" | "walking" | "completed";
 
 export default function MoveInInspectionPage() {
+  const { portfolioId } = usePortfolio();
   const [inspections, setInspections] = useState<Inspection[]>(() =>
     loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "move_in")
   );
@@ -51,11 +53,11 @@ export default function MoveInInspectionPage() {
   });
 
   useEffect(() => {
-    fetch("/api/appfolio/units")
+    fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`)
       .then((r) => r.json())
       .then((d) => setUnits(d.units || []))
       .catch(() => {});
-  }, []);
+  }, [portfolioId]);
 
   const persist = useCallback((updated: Inspection[]) => {
     const all = loadFromStorage<Inspection[]>("inspections_v2", []);

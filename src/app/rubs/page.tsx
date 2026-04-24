@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit } from "@/lib/types";
 import type {
   RubsBill,
@@ -41,6 +42,7 @@ import { uploadBillPdf, deleteAllBillPdfs } from "@/lib/rubs-storage";
 // ─── Main Page ─────────────────────────────────────────────────
 
 export default function RubsPage() {
+  const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [bills, setBills] = useState<RubsBill[]>([]);
   const [mappings, setMappings] = useState<MeterMapping[]>([]);
@@ -56,9 +58,10 @@ export default function RubsPage() {
   const templateInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
       // Units from AppFolio API; RUBS data from Supabase (or localStorage fallback)
-      const unitsRes = await fetch("/api/appfolio/units").then((r) => r.json()).catch(() => ({ units: [] }));
+      const unitsRes = await fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()).catch(() => ({ units: [] }));
       setUnits(unitsRes.units || []);
 
       // One-time migration of any existing localStorage data to Supabase
@@ -83,7 +86,7 @@ export default function RubsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [portfolioId]);
 
   useEffect(() => {
     loadData();

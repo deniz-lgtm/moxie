@@ -14,7 +14,8 @@ export async function GET(request: Request) {
       const diag = await diagnoseApplications();
       return NextResponse.json(diag);
     }
-    const { data, source } = await fetchApplications();
+    const portfolioId = url.searchParams.get("portfolio_id") || undefined;
+    const { data, source } = await fetchApplications(portfolioId);
     return NextResponse.json({ applications: data, source });
   } catch (error: any) {
     return NextResponse.json(
