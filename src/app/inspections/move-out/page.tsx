@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { SaveIndicator } from "@/components/SaveIndicator";
 import { InspectionErrorBoundary } from "@/components/InspectionErrorBoundary";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
+import { FloorPlanPreview, isPdfUrl } from "@/components/FloorPlanPreview";
 import { useSaveQueue } from "@/hooks/useSaveQueue";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
@@ -467,19 +468,25 @@ function MoveOutInspectionContent() {
   async function handleFloorPlanUpload(e: React.ChangeEvent<HTMLInputElement>) {
     if (!activeInspection || !e.target.files?.[0]) return;
     const file = e.target.files[0];
+    const isPdf =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 
-    // Validate file
-    const validation = validateImage(file);
-    if (!validation.valid) {
-      setUploadError(validation.error);
-      return;
+    // PDFs skip image validation; images go through the normal validator.
+    if (!isPdf) {
+      const validation = validateImage(file);
+      if (!validation.valid) {
+        setUploadError(validation.error);
+        return;
+      }
     }
     setUploadError(null);
 
     try {
-      // Convert HEIC if needed, then compress
+      // Produce a data URL: compress images, pass PDFs through untouched.
       let dataUrl: string;
-      if (isHeicFile(file)) {
+      if (isPdf) {
+        dataUrl = await fileToDataUrl(file);
+      } else if (isHeicFile(file)) {
         const converted = await convertHeicToJpeg(file);
         if (converted.startsWith("blob:")) {
           const resp = await fetch(converted);
@@ -493,18 +500,27 @@ function MoveOutInspectionContent() {
         dataUrl = await compressImage(file, 1920, 0.8);
       }
 
-      // Upload floor plan to storage
+      // Save to the Floor Plans Library (storage + DB record) so it's
+      // findable later and reusable for future inspections of this unit.
       let floorPlanUrl = dataUrl;
       try {
-        const uploadRes = await fetch("/api/inspections/upload", {
+        const libRes = await fetch("/api/floor-plans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dataUrl, inspectionId: activeInspection.id, type: "floor_plan" }),
+          body: JSON.stringify({
+            dataUrl,
+            propertyName: activeInspection.propertyName,
+            unitId: activeInspection.unitId,
+            unitName: activeInspection.unitNumber,
+            label: "Floor Plan",
+          }),
         });
-        const uploadData = await uploadRes.json();
-        if (uploadData.url) floorPlanUrl = uploadData.url;
+        const libData = await libRes.json();
+        if (libData.floor_plan?.storage_url) {
+          floorPlanUrl = libData.floor_plan.storage_url;
+        }
       } catch {
-        // Keep compressed data URL as fallback
+        // Keep compressed data URL as fallback if library write fails
       }
 
       const updated = {
@@ -513,28 +529,32 @@ function MoveOutInspectionContent() {
         updatedAt: new Date().toISOString(),
       };
 
-      // Try AI room detection
-      try {
-        const res = await fetch("/api/inspections/analyze-floor-plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: dataUrl }),
-        });
-        const data = await res.json();
-        if (data.rooms?.length > 0) {
-          const detectedRooms = data.rooms.map((name: string) => ({
-            id: newId(),
-            name,
-            items: itemsForRoom(name),
-          }));
-          // Always add Exterior if not detected
-          if (!data.rooms.some((n: string) => n.toLowerCase() === "exterior")) {
-            detectedRooms.push({ id: newId(), name: "Exterior", items: itemsForRoom("Exterior") });
+      // AI room detection only works on images. PDFs fall back to defaults
+      // (step 2 will handle PDF→image conversion at upload time).
+      if (!isPdf) {
+        try {
+          const res = await fetch("/api/inspections/analyze-floor-plan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64: dataUrl }),
+          });
+          const data = await res.json();
+          if (data.rooms?.length > 0) {
+            const detectedRooms = data.rooms.map((name: string) => ({
+              id: newId(),
+              name,
+              items: itemsForRoom(name),
+            }));
+            if (!data.rooms.some((n: string) => n.toLowerCase() === "exterior")) {
+              detectedRooms.push({ id: newId(), name: "Exterior", items: itemsForRoom("Exterior") });
+            }
+            updated.rooms = detectedRooms;
           }
-          updated.rooms = detectedRooms;
+        } catch {
+          // Fall through to default rooms below
         }
-      } catch {
-        // Fall back to default rooms
+      }
+      if (!updated.rooms || updated.rooms.length === 0) {
         updated.rooms = [
           "Living Room", "Kitchen", "Bedroom 1", "Bedroom 2",
           "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior",
@@ -547,9 +567,18 @@ function MoveOutInspectionContent() {
 
       saveInspection(updated);
     } catch (err) {
-      setUploadError("Failed to process image. Please try again.");
+      setUploadError("Failed to process file. Please try again.");
       console.error("[MoveOut] Floor plan processing failed:", err);
     }
+  }
+
+  function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
   }
 
   async function applySavedFloorPlan() {
@@ -1676,8 +1705,8 @@ function MoveOutInspectionContent() {
         )}
         {!loadingFloorPlan && savedFloorPlan && !activeInspection.floorPlanUrl && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
-            <img
-              src={savedFloorPlan.storage_url}
+            <FloorPlanPreview
+              url={savedFloorPlan.storage_url}
               alt="Saved floor plan"
               className="w-20 h-16 object-contain rounded-lg border border-blue-200 shrink-0 bg-white"
             />
@@ -1697,10 +1726,14 @@ function MoveOutInspectionContent() {
         <div className="bg-card rounded-xl border border-border p-4 sm:p-6 text-center space-y-4">
           {activeInspection.floorPlanUrl ? (
             <div>
-              <img
-                src={activeInspection.floorPlanUrl}
+              <FloorPlanPreview
+                url={activeInspection.floorPlanUrl}
                 alt="Floor plan"
-                className="max-h-96 mx-auto rounded-lg border border-border"
+                className={
+                  isPdfUrl(activeInspection.floorPlanUrl)
+                    ? "w-full h-96 mx-auto rounded-lg border border-border"
+                    : "max-h-96 mx-auto rounded-lg border border-border"
+                }
               />
               <p className="text-sm text-green-600 mt-3 font-medium">
                 Floor plan loaded — {activeInspection.rooms.length} rooms detected
@@ -1724,7 +1757,7 @@ function MoveOutInspectionContent() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,.heic,.heif"
+              accept="image/*,.heic,.heif,application/pdf,.pdf"
               className="hidden"
               onChange={handleFloorPlanUpload}
             />
@@ -1765,6 +1798,7 @@ function MoveOutInspectionContent() {
             onCancel={() => setShowCamera(false)}
             title={`Move-Out — ${activeInspection.unitNumber}`}
             enableAiAnalysis={true}
+            floorPlanUrl={activeInspection.floorPlanUrl}
           />
         )}
 
