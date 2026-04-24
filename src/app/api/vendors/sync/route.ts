@@ -121,6 +121,7 @@ export async function POST() {
           is_internal: fields.is_internal,
           notion_page_id: fields.notion_page_id,
           notion_last_synced_at: fields.notion_last_edited || nowIso,
+          logo_url: null,
           raw: fields.raw,
         });
         pulled++;
@@ -154,6 +155,7 @@ export async function POST() {
           is_internal: fields.is_internal,
           notion_page_id: fields.notion_page_id,
           notion_last_synced_at: fields.notion_last_edited || nowIso,
+          logo_url: existing.logoUrl ?? null,
           raw: fields.raw,
         });
         pulled++;
