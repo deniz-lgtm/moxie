@@ -124,6 +124,17 @@ export function useSaveQueue<T>({
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      // Flush any pending save synchronously on unmount. Fire-and-forget —
+      // the Promise continues in the background even after the component
+      // is gone. Without this, navigating away within the debounce window
+      // silently drops the last change.
+      if (pendingDataRef.current !== null && !isSavingRef.current) {
+        const data = pendingDataRef.current;
+        pendingDataRef.current = null;
+        saveFnRef.current(data).catch((err) => {
+          console.error("[SaveQueue] Flush on unmount failed:", err);
+        });
+      }
     };
   }, []);
 

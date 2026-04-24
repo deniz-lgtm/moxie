@@ -236,6 +236,10 @@ function MoveOutInspectionContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
+        // keepalive lets the request complete even if the tab/window is
+        // closing or the component unmounts mid-send. Critical for not
+        // losing the final "completed" save when the user navigates away.
+        keepalive: true,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Network error" }));
@@ -1075,6 +1079,9 @@ function MoveOutInspectionContent() {
         invoiceTotal: totalDed,
         updatedAt: new Date().toISOString(),
       });
+      // Skip the 500ms debounce for the final completion save — the user
+      // may navigate away immediately after hitting "complete".
+      flushSave();
       setStep("completed");
     } catch (err) {
       console.error("PDF generation failed:", err);
