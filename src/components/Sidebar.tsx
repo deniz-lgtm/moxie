@@ -211,6 +211,27 @@ export function Sidebar() {
         </Link>
       </div>
 
+      <div className="border-b border-white/5 px-3 py-3">
+        <p className="text-[10px] font-semibold text-sidebar-text uppercase tracking-wider mb-2 px-1">
+          Portfolio
+        </p>
+        <div className="inline-flex w-full rounded-lg border border-white/10 bg-white/5 p-0.5">
+          {(["24", "25"] as PortfolioId[]).map((id) => (
+            <button
+              key={id}
+              onClick={() => setPortfolioId(id)}
+              className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                portfolioId === id
+                  ? "bg-sidebar-active text-sidebar-text-active shadow-sm"
+                  : "text-sidebar-text hover:text-sidebar-text-active"
+              }`}
+            >
+              {PORTFOLIO_LABELS[id]}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <nav className="flex-1 overflow-y-auto py-4 px-3">
         {categoryOrder.map((cat) => {
           const items = sidebarItems.filter((i) => i.category === cat);
@@ -291,27 +312,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      <div className="border-t border-white/5 px-3 py-3">
-        <p className="text-[10px] font-semibold text-sidebar-text uppercase tracking-wider mb-2 px-1">
-          Portfolio
-        </p>
-        <div className="inline-flex w-full rounded-lg border border-white/10 bg-white/5 p-0.5">
-          {(["24", "25"] as PortfolioId[]).map((id) => (
-            <button
-              key={id}
-              onClick={() => setPortfolioId(id)}
-              className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                portfolioId === id
-                  ? "bg-sidebar-active text-sidebar-text-active shadow-sm"
-                  : "text-sidebar-text hover:text-sidebar-text-active"
-              }`}
-            >
-              {PORTFOLIO_LABELS[id]}
-            </button>
-          ))}
-        </div>
-      </div>
 
       <div className="border-t border-white/5 p-4">
         <div className="flex items-center gap-3">
