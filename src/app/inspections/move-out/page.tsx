@@ -275,29 +275,23 @@ function MoveOutInspectionContent() {
         const fetchedUnits: Unit[] = unitsRes.units || [];
         setUnits(fetchedUnits);
 
-        // Auto-populate for units moving out 2026-07-31
+        // Auto-populate a move-out inspection for every unit with a deposit
+        // on file. Even renewals need one when a roommate is leaving and we
+        // owe a partial deposit refund. Skips units that already have an
+        // inspection row so we don't duplicate.
         const existingUnitIds = new Set(existingInspections.map((i: Inspection) => i.unitId));
         const moveOutUnits = fetchedUnits.filter((u: Unit) => {
-          if (!u.leaseTo || existingUnitIds.has(u.id)) return false;
-          const raw = u.leaseTo.trim();
-          if (raw === "2026-07-31" || raw === "07/31/2026" || raw === "7/31/2026") return true;
-          const parts = raw.includes("/")
-            ? raw.split("/").map(Number)
-            : raw.split("-").map(Number);
-          if (raw.includes("/")) return parts[2] === 2026 && parts[0] === 7 && parts[1] === 31;
-          return parts[0] === 2026 && parts[1] === 7 && parts[2] === 31;
+          if (existingUnitIds.has(u.id)) return false;
+          return typeof u.deposit === "number" && u.deposit > 0;
         });
 
         if (moveOutUnits.length === 0) {
-          if (existingInspections.length === 0) {
-            const withLease = fetchedUnits.filter((u: Unit) => u.leaseTo);
-            const sampleDates = [...new Set(withLease.map((u: Unit) => u.leaseTo))].slice(0, 10);
-            console.log("[MoveOut] No units matched 2026-07-31. Sample leaseTo values:", sampleDates);
-          }
           setInspections(existingInspections);
           setLoadingInspections(false);
           return;
         }
+
+        const today = new Date().toISOString().split("T")[0];
 
         // Create new inspections for unmatched units
         const newInspections: Inspection[] = moveOutUnits.map((unit: Unit) => ({
@@ -308,7 +302,7 @@ function MoveOutInspectionContent() {
           propertyName: unit.propertyName,
           type: "move_out" as const,
           status: "not_started" as const,
-          scheduledDate: "2026-07-31",
+          scheduledDate: unit.leaseTo || today,
           inspector: "Moxie Management",
           rooms: [],
           floorPlanUrl: null,
