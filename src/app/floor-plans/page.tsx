@@ -317,6 +317,47 @@ export default function FloorPlansPage() {
     if (files.length) processBulkFiles(files);
   }
 
+  // Paste from clipboard — pastes a screenshot/snip into whichever upload
+  // panel is open. Bulk takes priority; falls back to single upload.
+  useEffect(() => {
+    if (!showBulk && !showUpload) return;
+    function onPaste(e: ClipboardEvent) {
+      const target = e.target as HTMLElement | null;
+      // Don't hijack pastes into text inputs (label, room editor, etc.)
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageFiles: File[] = [];
+      for (const item of items) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          // Clipboard images come in as "image.png" — give them a unique name.
+          const ext = file.type.split("/")[1] || "png";
+          const named = new File(
+            [file],
+            `pasted-floor-plan-${Date.now()}.${ext}`,
+            { type: file.type }
+          );
+          imageFiles.push(named);
+        }
+      }
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      if (showBulk) {
+        processBulkFiles(imageFiles);
+      } else if (showUpload) {
+        const synthetic = {
+          target: { files: imageFiles, value: "" },
+        } as unknown as React.ChangeEvent<HTMLInputElement>;
+        handleFileSelect(synthetic);
+      }
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [showBulk, showUpload, processBulkFiles]);
+
   async function uploadAll() {
     const toUpload = bulkFiles.filter(
       (bf) => bf.status === "pending" && bf.dataUrl && bf.selectedUnitId
@@ -468,10 +509,13 @@ export default function FloorPlansPage() {
               onChange={handleBulkFileInput}
             />
             <p className="text-sm font-medium">
-              {dragOver ? "Drop files here" : "Drag & drop files, or click to browse"}
+              {dragOver ? "Drop files here" : "Drag & drop, click to browse, or paste a screenshot"}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               JPG, PNG, HEIC, PDF — name files after the unit (e.g. "1234 Figueroa.pdf") for auto-matching
+            </p>
+            <p className="text-[11px] text-muted-foreground/80 mt-1">
+              Tip: snip a region (Win+Shift+S / Cmd+Ctrl+Shift+4) then press Ctrl+V / Cmd+V to paste
             </p>
           </div>
 
@@ -724,6 +768,9 @@ export default function FloorPlansPage() {
               >
                 {pendingDataUrl ? "Replace file" : "Choose image or PDF"}
               </button>
+              <p className="text-[11px] text-muted-foreground/80 mt-1.5">
+                or paste a screenshot with Ctrl+V / Cmd+V
+              </p>
             </div>
           </div>
 
