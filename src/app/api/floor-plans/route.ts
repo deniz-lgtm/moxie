@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { analyzeFloorPlan } from "@/lib/ai-analysis";
 
 const BUCKET = "inspection-files";
 
@@ -64,6 +65,18 @@ export async function POST(request: Request) {
 
     const { data: { publicUrl } } = sb.storage.from(BUCKET).getPublicUrl(path);
 
+    // Run AI room detection on raster uploads. PDFs can't be passed to
+    // Claude's image API so we leave rooms empty — the PM can fill them
+    // in via the Floor Plans Library room editor.
+    let rooms: string[] = [];
+    if (ext !== "pdf") {
+      try {
+        rooms = await analyzeFloorPlan(dataUrl);
+      } catch {
+        rooms = [];
+      }
+    }
+
     const { data, error } = await sb
       .from("floor_plans")
       .insert({
@@ -72,7 +85,41 @@ export async function POST(request: Request) {
         unit_name: unitName,
         label: label || "Floor Plan",
         storage_url: publicUrl,
+        rooms,
       })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ floor_plan: data });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, rooms, label } = body;
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+
+    const sb = getSupabase();
+    if (!sb) {
+      return NextResponse.json({ error: "Storage not configured" }, { status: 503 });
+    }
+
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (Array.isArray(rooms)) updates.rooms = rooms;
+    if (typeof label === "string") updates.label = label;
+
+    const { data, error } = await sb
+      .from("floor_plans")
+      .update(updates)
+      .eq("id", id)
       .select()
       .single();
 
