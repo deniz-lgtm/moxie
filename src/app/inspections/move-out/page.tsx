@@ -180,7 +180,7 @@ function MoveOutInspectionContent() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [pdfError, setPdfError] = useState<string | null>(null);
-  const [savedFloorPlan, setSavedFloorPlan] = useState<{ id: string; storage_url: string; label: string } | null>(null);
+  const [savedFloorPlan, setSavedFloorPlan] = useState<{ id: string; storage_url: string; label: string; rooms?: string[] } | null>(null);
   const [loadingFloorPlan, setLoadingFloorPlan] = useState(false);
 
   // ─── Network status & offline sync ─────────────────
@@ -583,40 +583,23 @@ function MoveOutInspectionContent() {
 
   async function applySavedFloorPlan() {
     if (!activeInspection || !savedFloorPlan) return;
-    const updated = {
+    const savedRooms = Array.isArray(savedFloorPlan.rooms) ? savedFloorPlan.rooms : [];
+    const roomNames = savedRooms.length > 0
+      ? (savedRooms.some((n) => n.toLowerCase() === "exterior")
+          ? savedRooms
+          : [...savedRooms, "Exterior"])
+      : ["Living Room", "Kitchen", "Bedroom 1", "Bedroom 2", "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior"];
+    const rooms = roomNames.map((name) => ({
+      id: newId(),
+      name,
+      items: itemsForRoom(name),
+    }));
+    saveInspection({
       ...activeInspection,
       floorPlanUrl: savedFloorPlan.storage_url,
+      rooms,
       updatedAt: new Date().toISOString(),
-    };
-    // Run AI room detection on the saved floor plan
-    try {
-      const res = await fetch("/api/inspections/analyze-floor-plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: savedFloorPlan.storage_url }),
-      });
-      const data = await res.json();
-      if (data.rooms?.length > 0) {
-        const detectedRooms = data.rooms.map((name: string) => ({
-          id: newId(),
-          name,
-          items: itemsForRoom(name),
-        }));
-        if (!data.rooms.some((n: string) => n.toLowerCase() === "exterior")) {
-          detectedRooms.push({ id: newId(), name: "Exterior", items: itemsForRoom("Exterior") });
-        }
-        updated.rooms = detectedRooms;
-      }
-    } catch {
-      // Fall back to default rooms if detection fails
-    }
-    if (!updated.rooms || updated.rooms.length === 0) {
-      updated.rooms = [
-        "Living Room", "Kitchen", "Bedroom 1", "Bedroom 2",
-        "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior",
-      ].map((name) => ({ id: newId(), name, items: itemsForRoom(name) }));
-    }
-    saveInspection(updated);
+    });
   }
 
   function skipFloorPlan() {
