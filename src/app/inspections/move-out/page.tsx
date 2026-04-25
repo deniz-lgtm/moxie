@@ -340,7 +340,9 @@ function MoveOutInspectionContent() {
     loadData();
   }, [portfolioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-load saved floor plan from library when entering the floor_plan step
+  // Auto-load — and auto-apply — the saved floor plan when entering
+  // the floor_plan step. The PM uploads + verifies plans at his desk;
+  // the inspector should walk in to a unit with rooms already wired up.
   useEffect(() => {
     if (step !== "floor_plan" || !activeInspection || activeInspection.floorPlanUrl) return;
     setLoadingFloorPlan(true);
@@ -351,19 +353,50 @@ function MoveOutInspectionContent() {
       .then((data) => {
         const plans = data.floor_plans || [];
         if (plans.length === 0) {
-          // fallback: try by unit name
           return fetch(`/api/floor-plans?unit_name=${unitName}`)
             .then((r) => r.json())
             .then((d) => d.floor_plans || []);
         }
         return plans;
       })
-      .then((plans: { id: string; storage_url: string; label: string }[]) => {
-        if (plans.length > 0) setSavedFloorPlan(plans[0]);
+      .then((plans: { id: string; storage_url: string; label: string; rooms?: string[] }[]) => {
+        if (plans.length === 0) return;
+        const plan = plans[0];
+        setSavedFloorPlan(plan);
+        // Auto-apply only if the inspection is still pristine (no rooms,
+        // no floor plan). Once the inspector has touched anything, leave
+        // their work alone.
+        if (
+          !activeInspection.floorPlanUrl &&
+          (!activeInspection.rooms || activeInspection.rooms.length === 0)
+        ) {
+          autoApplySavedFloorPlan(plan);
+        }
       })
       .catch(() => {})
       .finally(() => setLoadingFloorPlan(false));
   }, [step, activeInspection?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function autoApplySavedFloorPlan(plan: { id: string; storage_url: string; label: string; rooms?: string[] }) {
+    if (!activeInspection) return;
+    const savedRooms = Array.isArray(plan.rooms) ? plan.rooms : [];
+    const roomNames = savedRooms.length > 0
+      ? (savedRooms.some((n) => n.toLowerCase() === "exterior")
+          ? savedRooms
+          : [...savedRooms, "Exterior"])
+      : ["Living Room", "Kitchen", "Bedroom 1", "Bedroom 2", "Bathroom 1", "Bathroom 2", "Hallway", "Closet", "Exterior"];
+    const rooms = roomNames.map((name) => ({
+      id: newId(),
+      name,
+      items: itemsForRoom(name),
+    }));
+    saveInspection({
+      ...activeInspection,
+      floorPlanUrl: plan.storage_url,
+      rooms,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   // Fetch tenants when entering the completed step
   useEffect(() => {
@@ -500,9 +533,11 @@ function MoveOutInspectionContent() {
         dataUrl = await compressImage(file, 1920, 0.8);
       }
 
-      // Save to the Floor Plans Library (storage + DB record) so it's
-      // findable later and reusable for future inspections of this unit.
+      // Save to the Floor Plans Library (storage + DB record + AI room
+      // detection in one round trip). Library is the single source of
+      // truth — anything uploaded here is reusable for future inspections.
       let floorPlanUrl = dataUrl;
+      let detectedRoomNames: string[] = [];
       try {
         const libRes = await fetch("/api/floor-plans", {
           method: "POST",
@@ -519,6 +554,9 @@ function MoveOutInspectionContent() {
         if (libData.floor_plan?.storage_url) {
           floorPlanUrl = libData.floor_plan.storage_url;
         }
+        if (Array.isArray(libData.floor_plan?.rooms)) {
+          detectedRoomNames = libData.floor_plan.rooms;
+        }
       } catch {
         // Keep compressed data URL as fallback if library write fails
       }
@@ -529,30 +567,15 @@ function MoveOutInspectionContent() {
         updatedAt: new Date().toISOString(),
       };
 
-      // AI room detection only works on images. PDFs fall back to defaults
-      // (step 2 will handle PDF→image conversion at upload time).
-      if (!isPdf) {
-        try {
-          const res = await fetch("/api/inspections/analyze-floor-plan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ imageBase64: dataUrl }),
-          });
-          const data = await res.json();
-          if (data.rooms?.length > 0) {
-            const detectedRooms = data.rooms.map((name: string) => ({
-              id: newId(),
-              name,
-              items: itemsForRoom(name),
-            }));
-            if (!data.rooms.some((n: string) => n.toLowerCase() === "exterior")) {
-              detectedRooms.push({ id: newId(), name: "Exterior", items: itemsForRoom("Exterior") });
-            }
-            updated.rooms = detectedRooms;
-          }
-        } catch {
-          // Fall through to default rooms below
-        }
+      if (detectedRoomNames.length > 0) {
+        const withExterior = detectedRoomNames.some((n) => n.toLowerCase() === "exterior")
+          ? detectedRoomNames
+          : [...detectedRoomNames, "Exterior"];
+        updated.rooms = withExterior.map((name) => ({
+          id: newId(),
+          name,
+          items: itemsForRoom(name),
+        }));
       }
       if (!updated.rooms || updated.rooms.length === 0) {
         updated.rooms = [
