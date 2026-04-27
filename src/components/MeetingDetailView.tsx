@@ -927,12 +927,25 @@ export default function MeetingDetailView({
             attendees={meeting.attendees || []}
             allActionItems={allItemsForLinking}
             onClose={() => setOpenItemId(null)}
-            onChange={(updated) =>
-              setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
-            }
+            onChange={(updated) => {
+              setItems((prev) => {
+                const prior = prev.find((i) => i.id === updated.id);
+                const linksChanged =
+                  prior &&
+                  JSON.stringify(prior.linked_action_item_ids ?? []) !==
+                    JSON.stringify(updated.linked_action_item_ids ?? []);
+                if (linksChanged) {
+                  // Symmetric link bookkeeping happens server-side, so refetch
+                  // to pick up the back-reference on the other side.
+                  void loadItems();
+                }
+                return prev.map((i) => (i.id === updated.id ? updated : i));
+              });
+            }}
             onDelete={async () => {
               await removeItem(openItem.id);
               setOpenItemId(null);
+              void loadItems();
             }}
           />
         );
@@ -1026,13 +1039,20 @@ export default function MeetingDetailView({
           attendees={meeting.attendees || []}
           allActionItems={allItemsForLinking}
           onClose={() => setOpenCarryOverItem(null)}
-          onChange={(updated) => setOpenCarryOverItem(updated)}
+          onChange={(updated) => {
+            const linksChanged =
+              JSON.stringify(openCarryOverItem.linked_action_item_ids ?? []) !==
+              JSON.stringify(updated.linked_action_item_ids ?? []);
+            setOpenCarryOverItem(updated);
+            if (linksChanged) void loadItems();
+          }}
           onDelete={async () => {
             await fetch(
               `/api/meetings/action-items?id=${encodeURIComponent(openCarryOverItem.id)}`,
               { method: "DELETE" }
             );
             setOpenCarryOverItem(null);
+            void loadItems();
           }}
         />
       )}
