@@ -332,13 +332,36 @@ export interface Vendor {
 }
 
 // --- Contacts (internal team directory) ---
-export type ContactRole =
-  | "property_manager"
-  | "maintenance"
+// Common roles surfaced as suggestions in the UI; the role field is
+// free-text so any custom title (e.g. "Junior Analyst") is allowed.
+export type ContactRole = string;
+
+export const COMMON_CONTACT_ROLES = [
+  "Property Manager",
+  "Maintenance",
+  "Leasing",
+  "Asset Manager",
+  "Owner Rep",
+] as const;
+
+export type Department =
+  | "property_management"
   | "leasing"
-  | "asset_manager"
-  | "owner_rep"
-  | "other";
+  | "marketing"
+  | "developing"
+  | "leadership"
+  | "operations"
+  | "accounting";
+
+export const DEPARTMENTS: { value: Department; label: string }[] = [
+  { value: "property_management", label: "Property Management" },
+  { value: "leasing", label: "Leasing" },
+  { value: "marketing", label: "Marketing" },
+  { value: "developing", label: "Developing" },
+  { value: "leadership", label: "Leadership" },
+  { value: "operations", label: "Operations" },
+  { value: "accounting", label: "Accounting" },
+];
 
 export interface Contact {
   id: string;
@@ -346,7 +369,10 @@ export interface Contact {
   role?: ContactRole;
   email?: string;
   phone?: string;
+  /** Legacy single-department string. Preserved so old rows still render. */
   department?: string;
+  /** Multi-select departments. New writes go here. */
+  departments?: Department[];
   notes?: string;
   isActive: boolean;
   /** Supabase auth user id if this contact was created from a real login. */
