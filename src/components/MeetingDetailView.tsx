@@ -22,6 +22,7 @@ import InfoPopup, { type InfoRow } from "@/components/InfoPopup";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TeamCalendar } from "@/components/TeamCalendar";
 import type {
+  ActionItemCategory,
   ActionItemStatus,
   DbAgendaApplication,
   DbAgendaCarryOver,
@@ -239,6 +240,27 @@ export default function MeetingDetailView({
     if (j.item) setItems((prev) => [...prev, j.item]);
   };
 
+  const addCategoryItem = async (category: ActionItemCategory, label: string) => {
+    const title = prompt(`New ${label} item:`);
+    if (!title?.trim()) return;
+    const row = {
+      id: makeId("c"),
+      meeting_id: meeting.id,
+      property_id: meeting.property_id,
+      title: title.trim(),
+      status: "open" as ActionItemStatus,
+      source: "manual" as const,
+      category,
+    };
+    const r = await fetch("/api/meetings/action-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(row),
+    });
+    const j = await r.json();
+    if (j.item) setItems((prev) => [...prev, j.item]);
+  };
+
   const patchItem = async (id: string, patch: Partial<DbMeetingActionItem>) => {
     // optimistic
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -276,6 +298,24 @@ export default function MeetingDetailView({
   const agenda = meeting.agenda_snapshot || {};
   const carryOver: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions) ? agenda.carryOverActions : [];
 
+  // Items the user added directly into an agenda card during this meeting.
+  // Rendered alongside the AppFolio-pulled rows, and propagate to the next
+  // meeting's Review card automatically when left open.
+  const itemsByCategory = useMemo(() => {
+    const buckets: Record<ActionItemCategory, DbMeetingActionItem[]> = {
+      review: [],
+      leasing: [],
+      maintenance: [],
+      property_management: [],
+    };
+    for (const it of items) {
+      if (it.category && it.category in buckets) {
+        buckets[it.category as ActionItemCategory].push(it);
+      }
+    }
+    return buckets;
+  }, [items]);
+
   // Three-category view with legacy fallback. Old meetings only have
   // `workOrders` / `vacancies` at the top level; new meetings have the
   // structured `leasing` / `maintenance` / `propertyManagement` blocks.
@@ -283,7 +323,11 @@ export default function MeetingDetailView({
     agenda.leasing?.vacancies ?? (Array.isArray(agenda.vacancies) ? agenda.vacancies : []);
   const leasingApplications: DbAgendaApplication[] = agenda.leasing?.applications ?? [];
   const leasingMoves: DbAgendaMove[] = agenda.leasing?.upcomingMoves ?? [];
-  const leasingTotal = leasingVacancies.length + leasingApplications.length + leasingMoves.length;
+  const leasingTotal =
+    leasingVacancies.length +
+    leasingApplications.length +
+    leasingMoves.length +
+    itemsByCategory.leasing.length;
 
   const maintenanceOpen: DbAgendaWorkOrder[] =
     agenda.maintenance?.openWorkOrders ?? (Array.isArray(agenda.workOrders) ? agenda.workOrders : []);
@@ -386,8 +430,9 @@ export default function MeetingDetailView({
       <AgendaCard
         title="Review — open action items from prior meetings"
         icon={<ClipboardList className="w-4 h-4" />}
-        count={carryOver.length}
+        count={carryOver.length + itemsByCategory.review.length}
         empty="No open action items from prior meetings. Starting fresh."
+        onAdd={() => addCategoryItem("review", "review")}
       >
         {carryOver.map((c) => (
           <button
@@ -412,6 +457,19 @@ export default function MeetingDetailView({
             </div>
           </button>
         ))}
+        {itemsByCategory.review.map((it) => (
+          <AgendaRow
+            key={it.id}
+            onClick={() => setOpenItemId(it.id)}
+            title={it.title}
+            right={<StatusBadge value={it.status} />}
+            meta={[
+              it.assigned_to ? `Owner: ${it.assigned_to}` : null,
+              it.due_date ? `Due: ${it.due_date}` : null,
+              "Added this meeting",
+            ]}
+          />
+        ))}
       </AgendaCard>
 
       {/* Three category cards */}
@@ -422,6 +480,7 @@ export default function MeetingDetailView({
           icon={<FileText className="w-4 h-4" />}
           count={leasingTotal}
           empty="Nothing on the leasing side this week."
+          onAdd={() => addCategoryItem("leasing", "leasing")}
         >
           {leasingVacancies.length > 0 && (
             <AgendaSubsection label={`Unleased (${leasingVacancies.length})`}>
@@ -482,14 +541,31 @@ export default function MeetingDetailView({
               ))}
             </AgendaSubsection>
           )}
+          {itemsByCategory.leasing.length > 0 && (
+            <AgendaSubsection label={`Added (${itemsByCategory.leasing.length})`}>
+              {itemsByCategory.leasing.map((it) => (
+                <AgendaRow
+                  key={it.id}
+                  onClick={() => setOpenItemId(it.id)}
+                  title={it.title}
+                  right={<StatusBadge value={it.status} />}
+                  meta={[
+                    it.assigned_to ? `Owner: ${it.assigned_to}` : null,
+                    it.due_date ? `Due: ${it.due_date}` : null,
+                  ]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
         </AgendaCard>
 
         {/* ─── Maintenance ─────────────────────────────────── */}
         <AgendaCard
           title="Maintenance"
           icon={<Wrench className="w-4 h-4" />}
-          count={maintenanceOpen.length}
+          count={maintenanceOpen.length + itemsByCategory.maintenance.length}
           empty="No open work orders at meeting time."
+          onAdd={() => addCategoryItem("maintenance", "maintenance")}
         >
           {maintenanceOpen.map((wo) => (
             <AgendaRow
@@ -506,14 +582,31 @@ export default function MeetingDetailView({
               ]}
             />
           ))}
+          {itemsByCategory.maintenance.length > 0 && (
+            <AgendaSubsection label={`Added (${itemsByCategory.maintenance.length})`}>
+              {itemsByCategory.maintenance.map((it) => (
+                <AgendaRow
+                  key={it.id}
+                  onClick={() => setOpenItemId(it.id)}
+                  title={it.title}
+                  right={<StatusBadge value={it.status} />}
+                  meta={[
+                    it.assigned_to ? `Owner: ${it.assigned_to}` : null,
+                    it.due_date ? `Due: ${it.due_date}` : null,
+                  ]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
         </AgendaCard>
 
         {/* ─── Property Management ─────────────────────────── */}
         <AgendaCard
           title="Property Management"
           icon={<HomeIcon className="w-4 h-4" />}
-          count={pmInspections.length}
+          count={pmInspections.length + itemsByCategory.property_management.length}
           empty="No inspections on the calendar."
+          onAdd={() => addCategoryItem("property_management", "property management")}
         >
           {pmInspections.length > 0 && (
             <AgendaSubsection label={`Inspections (${pmInspections.length})`}>
@@ -526,6 +619,22 @@ export default function MeetingDetailView({
                   }`}
                   right={<StatusBadge value={i.status} />}
                   meta={[i.propertyName, i.scheduledDate, i.inspector]}
+                />
+              ))}
+            </AgendaSubsection>
+          )}
+          {itemsByCategory.property_management.length > 0 && (
+            <AgendaSubsection label={`Added (${itemsByCategory.property_management.length})`}>
+              {itemsByCategory.property_management.map((it) => (
+                <AgendaRow
+                  key={it.id}
+                  onClick={() => setOpenItemId(it.id)}
+                  title={it.title}
+                  right={<StatusBadge value={it.status} />}
+                  meta={[
+                    it.assigned_to ? `Owner: ${it.assigned_to}` : null,
+                    it.due_date ? `Due: ${it.due_date}` : null,
+                  ]}
                 />
               ))}
             </AgendaSubsection>
@@ -1008,12 +1117,14 @@ function AgendaCard({
   count,
   empty,
   children,
+  onAdd,
 }: {
   title: string;
   icon: React.ReactNode;
   count: number;
   empty: string;
   children: React.ReactNode;
+  onAdd?: () => void;
 }) {
   return (
     <div className="bg-card rounded-xl border border-border p-5 space-y-3">
@@ -1021,7 +1132,18 @@ function AgendaCard({
         <h3 className="font-semibold text-sm flex items-center gap-2">
           {icon} {title}
         </h3>
-        <span className="text-xs font-mono px-2 py-0.5 bg-muted rounded-full">{count}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono px-2 py-0.5 bg-muted rounded-full">{count}</span>
+          {onAdd && (
+            <button
+              type="button"
+              onClick={onAdd}
+              className="text-xs font-medium text-accent hover:underline inline-flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" /> Add
+            </button>
+          )}
+        </div>
       </div>
       {count === 0 ? (
         <p className="text-xs text-muted-foreground">{empty}</p>
