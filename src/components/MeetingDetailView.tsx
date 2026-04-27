@@ -8,12 +8,11 @@ import {
   ClipboardCheck,
   ClipboardList,
   FileText,
+  Link2,
   MessageSquare,
-  Mic,
   Paperclip,
   Plus,
   Sparkles,
-  Square,
   Truck,
   Wrench,
   Home as HomeIcon,
@@ -22,7 +21,6 @@ import ActionItemDetailModal from "@/components/ActionItemDetailModal";
 import InfoPopup, { type InfoRow } from "@/components/InfoPopup";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TeamCalendar } from "@/components/TeamCalendar";
-import { useMeetingRecorder } from "@/hooks/useMeetingRecorder";
 import type {
   ActionItemStatus,
   DbAgendaApplication,
@@ -34,7 +32,7 @@ import type {
   DbMeetingActionItem,
   DbPropertyMeeting,
 } from "@/lib/supabase";
-import type { MaintenanceRequest, Unit } from "@/lib/types";
+import type { Contact, MaintenanceRequest, Unit } from "@/lib/types";
 
 type Props = {
   meeting: DbPropertyMeeting;
@@ -51,12 +49,6 @@ type ExtractedItem = {
   dueDate: string | null;
   priority: string | null;
 };
-
-function fmtDuration(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
 
 function makeId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -89,11 +81,17 @@ export default function MeetingDetailView({
   } | null>(null);
   const [openInspectionId, setOpenInspectionId] = useState<string | null>(null);
   const [openCarryOverItem, setOpenCarryOverItem] = useState<DbMeetingActionItem | null>(null);
-  const [attendeesDraft, setAttendeesDraft] = useState<string>(
-    (initial.attendees || []).join(", ")
-  );
+  const [dateDraft, setDateDraft] = useState<string>(meeting.meeting_date);
+  const [meetingUrlDraft, setMeetingUrlDraft] = useState<string>(meeting.meeting_url || "");
+  const [contacts, setContacts] = useState<Contact[]>([]);
 
-  const recorder = useMeetingRecorder();
+  // Load active team contacts so the attendee picker can pull from them.
+  useEffect(() => {
+    fetch("/api/contacts")
+      .then((r) => r.json())
+      .then((j) => setContacts(Array.isArray(j.contacts) ? j.contacts : []))
+      .catch(() => setContacts([]));
+  }, []);
 
   const setMeeting = useCallback(
     (m: DbPropertyMeeting) => {
@@ -107,17 +105,9 @@ export default function MeetingDetailView({
     setMeetingState(initial);
     setTranscriptDraft(initial.transcript || "");
     setNotesDraft(initial.notes || "");
-    setAttendeesDraft((initial.attendees || []).join(", "));
+    setDateDraft(initial.meeting_date);
+    setMeetingUrlDraft(initial.meeting_url || "");
   }, [initial]);
-
-  useEffect(() => {
-    if (recorder.transcript) {
-      const base = meeting.transcript || "";
-      const sep = base.trim() ? "\n\n" : "";
-      setTranscriptDraft(base + sep + recorder.transcript);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recorder.transcript]);
 
   const loadItems = useCallback(async () => {
     setLoadingItems(true);
@@ -153,24 +143,6 @@ export default function MeetingDetailView({
     },
     [meeting.id, setMeeting]
   );
-
-  const handleStartRecording = async () => {
-    await recorder.start();
-    if (meeting.status !== "in_progress") {
-      persistMeeting({ status: "in_progress", recorded_at: new Date().toISOString() });
-    }
-  };
-
-  const handleStopRecording = async () => {
-    await recorder.stop();
-    // Persist transcript + duration
-    const finalTranscript = transcriptDraft;
-    const duration = recorder.durationSeconds || meeting.recording_duration_seconds || 0;
-    persistMeeting({
-      transcript: finalTranscript,
-      recording_duration_seconds: duration,
-    });
-  };
 
   const handleExtract = async () => {
     setExtracting(true);
@@ -332,15 +304,22 @@ export default function MeetingDetailView({
           <h2 className="text-2xl font-bold">
             {meeting.title || "Monday Morning Meeting"}
           </h2>
-          <p className="text-muted-foreground mt-1">
-            {new Date(meeting.meeting_date + "T00:00:00").toLocaleDateString(undefined, {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-            {meeting.property_name ? ` · ${meeting.property_name}` : ""}
-          </p>
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
+            <input
+              type="date"
+              value={dateDraft}
+              onChange={(e) => setDateDraft(e.target.value)}
+              onBlur={() => {
+                if (dateDraft && dateDraft !== meeting.meeting_date) {
+                  persistMeeting({ meeting_date: dateDraft });
+                }
+              }}
+              className="text-sm text-muted-foreground bg-transparent border border-transparent hover:border-border focus:border-border rounded px-2 py-1 -mx-2"
+            />
+            {meeting.property_name && (
+              <span className="text-sm text-muted-foreground">· {meeting.property_name}</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge value={meeting.status} />
@@ -356,32 +335,46 @@ export default function MeetingDetailView({
         </div>
       </div>
 
-      {/* Attendees */}
-      <div className="bg-card rounded-xl border border-border p-4 space-y-2">
+      {/* Attendees — pulled from the active team contacts. */}
+      <div className="bg-card rounded-xl border border-border p-4 space-y-3">
         <label className="text-sm font-semibold block">Attendees</label>
-        <input
-          type="text"
-          value={attendeesDraft}
-          onChange={(e) => setAttendeesDraft(e.target.value)}
-          onBlur={() => {
-            const parsed = attendeesDraft
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
-            const current = meeting.attendees || [];
-            const changed =
-              parsed.length !== current.length ||
-              parsed.some((a, i) => a !== current[i]);
-            if (changed) persistMeeting({ attendees: parsed });
-          }}
-          placeholder="Comma-separated: Deniz, Sarah, Marco…"
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-        />
-        <p className="text-xs text-muted-foreground">
-          Used as the allowlist of owners for extracted action items. The AI is told to leave an
-          action item unassigned rather than guess — so hybrid (conference room + dial-in) meetings
-          won&rsquo;t default everything to one person.
-        </p>
+        {(() => {
+          const teamContacts = contacts.filter((c) => c.isActive);
+          const selected = new Set(meeting.attendees || []);
+          if (teamContacts.length === 0) {
+            return (
+              <p className="text-sm text-muted-foreground">
+                No team contacts yet. Add team members on the Contacts page to pick attendees here.
+              </p>
+            );
+          }
+          return (
+            <div className="flex flex-wrap gap-2">
+              {teamContacts.map((c) => {
+                const isOn = selected.has(c.name);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      const next = new Set(selected);
+                      if (isOn) next.delete(c.name);
+                      else next.add(c.name);
+                      persistMeeting({ attendees: [...next] });
+                    }}
+                    className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
+                      isOn
+                        ? "bg-accent text-white border-accent"
+                        : "bg-card text-foreground border-border hover:bg-muted"
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Weekly at-a-glance — same Month/Week calendar as the dashboard,
@@ -621,65 +614,50 @@ export default function MeetingDetailView({
         />
       </div>
 
-      {/* Recorder */}
+      {/* Meeting link + transcript */}
       <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h3 className="font-semibold flex items-center gap-2">
-              <Mic className="w-4 h-4" /> Recording &amp; Transcript
-            </h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              {recorder.supportsLiveTranscription
-                ? "Live transcription runs in your browser while you record. You can also paste a Google Meet transcript."
-                : "Live transcription isn't supported in this browser — audio still records, and you can paste a transcript after."}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {recorder.state === "recording" && (
-              <span className="flex items-center gap-2 text-sm">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-                </span>
-                <span className="font-mono">{fmtDuration(recorder.durationSeconds)}</span>
-              </span>
-            )}
-            {recorder.state !== "recording" ? (
-              <button
-                onClick={handleStartRecording}
-                className="px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent/90 inline-flex items-center gap-2 text-sm font-medium"
+        <div>
+          <label className="text-sm font-semibold flex items-center gap-2 mb-1">
+            <Link2 className="w-4 h-4" /> Google Meet link
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={meetingUrlDraft}
+              onChange={(e) => setMeetingUrlDraft(e.target.value)}
+              onBlur={() => {
+                if (meetingUrlDraft !== (meeting.meeting_url || "")) {
+                  persistMeeting({ meeting_url: meetingUrlDraft.trim() || null });
+                }
+              }}
+              placeholder="https://meet.google.com/…"
+              className="flex-1 text-sm border border-border rounded-lg px-3 py-2 bg-card"
+            />
+            {meeting.meeting_url && (
+              <a
+                href={meeting.meeting_url}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted inline-flex items-center gap-1"
               >
-                <Mic className="w-4 h-4" /> Start Recording
-              </button>
-            ) : (
-              <button
-                onClick={handleStopRecording}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 inline-flex items-center gap-2 text-sm font-medium"
-              >
-                <Square className="w-4 h-4" /> Stop
-              </button>
+                Join
+              </a>
             )}
           </div>
         </div>
 
-        {recorder.error && (
-          <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {recorder.error}
-          </div>
-        )}
-
         <div>
-          <label className="text-xs text-muted-foreground block mb-1">Transcript</label>
+          <label className="text-sm font-semibold block mb-1">Transcript</label>
           <textarea
-            value={transcriptDraft + (recorder.interimTranscript ? ` ${recorder.interimTranscript}` : "")}
+            value={transcriptDraft}
             onChange={(e) => setTranscriptDraft(e.target.value)}
             onBlur={() => {
               if (transcriptDraft !== (meeting.transcript || "")) {
                 persistMeeting({ transcript: transcriptDraft });
               }
             }}
-            placeholder="Transcript will appear here as you speak. You can also paste or type it in manually."
-            rows={6}
+            placeholder="Paste the Google Meet transcript here once the call ends."
+            rows={8}
             className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card font-mono"
           />
         </div>

@@ -41,12 +41,14 @@ export type CreateMeetingInput = {
 export type UpdateMeetingInput = Partial<{
   status: MeetingStatus;
   title: string | null;
+  meeting_date: string;
   audio_url: string | null;
   transcript: string | null;
   summary: string | null;
   notes: string | null;
   agenda_snapshot: DbAgendaSnapshot;
   attendees: string[];
+  meeting_url: string | null;
   recorded_at: string | null;
   recording_duration_seconds: number | null;
 }>;
