@@ -85,6 +85,14 @@ export default function MeetingDetailView({
   const [dateDraft, setDateDraft] = useState<string>(meeting.meeting_date);
   const [meetingUrlDraft, setMeetingUrlDraft] = useState<string>(meeting.meeting_url || "");
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [woSummaries, setWoSummaries] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      return JSON.parse(window.localStorage.getItem("moxie:wo-summaries") || "{}") || {};
+    } catch {
+      return {};
+    }
+  });
 
   // Load active team contacts so the attendee picker can pull from them.
   useEffect(() => {
@@ -289,14 +297,79 @@ export default function MeetingDetailView({
     });
   };
 
+  const agenda = meeting.agenda_snapshot || {};
+  const carryOver: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions) ? agenda.carryOverActions : [];
+
+  // Hydrate carry-over snapshots into ActionItemRow-compatible stubs so the
+  // unified Action Items list can render them with the same UI as native
+  // items. Items already in `items` (re-fetched by id) take precedence.
+  const carryOverStubs = useMemo<DbMeetingActionItem[]>(() => {
+    const existingIds = new Set(items.map((i) => i.id));
+    return carryOver
+      .filter((c) => !existingIds.has(c.id))
+      .map((c) => ({
+        id: c.id,
+        meeting_id: meeting.id,
+        property_id: meeting.property_id ?? null,
+        title: c.title,
+        description: c.description ?? null,
+        assigned_to: c.assignedTo ?? null,
+        due_date: c.dueDate ?? null,
+        status: c.status,
+        priority: null,
+        source: "manual",
+        category: "review",
+        completed_at: null,
+        completed_by: null,
+        linked_work_order_id: null,
+        linked_unit_id: null,
+        linked_action_item_ids: [],
+        comments: [],
+        attachments: [],
+        created_at: c.fromMeetingDate ?? new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+  }, [carryOver, items, meeting.id, meeting.property_id]);
+
   const openItems = useMemo(
     () => items.filter((i) => i.status === "open" || i.status === "in_progress"),
     [items]
   );
   const doneItems = useMemo(() => items.filter((i) => i.status === "completed"), [items]);
+  // Carry-overs are by definition still open in prior meetings, so they
+  // belong with the open items.
+  const openItemsCombined = useMemo(
+    () => [...openItems, ...carryOverStubs],
+    [openItems, carryOverStubs]
+  );
+  const allItemsForLinking = useMemo(
+    () => [...items, ...carryOverStubs],
+    [items, carryOverStubs]
+  );
 
-  const agenda = meeting.agenda_snapshot || {};
-  const carryOver: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions) ? agenda.carryOverActions : [];
+  // Click handler for ActionItemRow — routes through the lazy-fetch flow
+  // for carry-over stubs (which aren't in `items`) and the direct flow for
+  // this meeting's own items.
+  const openActionItem = useCallback(
+    async (item: DbMeetingActionItem, isCarryOver: boolean) => {
+      if (!isCarryOver) {
+        setOpenItemId(item.id);
+        return;
+      }
+      // Optimistic: open the modal with the stub immediately, then enrich
+      // with fresh data from the API if the id resolves.
+      setOpenCarryOverItem(item);
+      try {
+        const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(item.id)}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j.item) setOpenCarryOverItem(j.item);
+      } catch {
+        // Keep the stub if fetch fails.
+      }
+    },
+    []
+  );
 
   // Items the user added directly into an agenda card during this meeting.
   // Rendered alongside the AppFolio-pulled rows, and propagate to the next
@@ -333,6 +406,56 @@ export default function MeetingDetailView({
     agenda.maintenance?.openWorkOrders ?? (Array.isArray(agenda.workOrders) ? agenda.workOrders : []);
 
   const pmInspections: DbAgendaInspection[] = agenda.propertyManagement?.upcomingInspections ?? [];
+
+  // Best long-form text we have for each open work order, used to ask
+  // the AI for a short readable summary. Prefer the live description
+  // (full tenant text) over the snapshot title (already truncated).
+  const workOrderSourceText = useCallback(
+    (wo: DbAgendaWorkOrder) => {
+      const live = workOrders.find((w) => w.id === wo.id);
+      const text = (live?.description || wo.title || "").trim();
+      return text;
+    },
+    [workOrders]
+  );
+
+  // Summarize any open work order whose source text isn't cached yet.
+  // Persisted in localStorage so the AI call only happens once per WO.
+  useEffect(() => {
+    const missing = maintenanceOpen
+      .map((wo) => ({ id: wo.id, text: workOrderSourceText(wo) }))
+      .filter((x) => x.text.length > 25 && !woSummaries[x.id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/maintenance/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: missing }),
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        const incoming: { id: string; summary: string }[] = j.summaries || [];
+        if (cancelled || incoming.length === 0) return;
+        setWoSummaries((prev) => {
+          const next = { ...prev };
+          for (const s of incoming) next[s.id] = s.summary;
+          try {
+            window.localStorage.setItem("moxie:wo-summaries", JSON.stringify(next));
+          } catch {
+            /* ignore quota errors */
+          }
+          return next;
+        });
+      } catch {
+        // Leave missing entries blank — UI falls back to wo.title.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [maintenanceOpen, woSummaries, workOrderSourceText]);
 
   return (
     <div className="space-y-6">
@@ -377,6 +500,78 @@ export default function MeetingDetailView({
             </button>
           )}
         </div>
+      </div>
+
+      {/* Action Items — unified board at the top (combines this meeting's
+          items with open carry-overs from prior meetings). */}
+      <div className="bg-card rounded-2xl border border-border p-5 sm:p-6 space-y-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-base flex items-center gap-2 tracking-tight">
+            <ClipboardList className="w-4 h-4" /> Action Items
+            <span className="text-xs font-mono px-2 py-0.5 bg-muted rounded-full ml-1">
+              {openItemsCombined.length + doneItems.length}
+            </span>
+          </h3>
+          <button
+            onClick={addManualItem}
+            className="text-sm font-medium text-accent hover:underline inline-flex items-center gap-1"
+          >
+            <Plus className="w-4 h-4" /> Add item
+          </button>
+        </div>
+
+        {loadingItems ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : openItemsCombined.length === 0 && doneItems.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No action items yet. Record the meeting and click &ldquo;Extract Action Items&rdquo;, or add one manually.
+          </p>
+        ) : (
+          <div className="space-y-6">
+            {openItemsCombined.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Open</p>
+                <div className="space-y-2">
+                  {openItemsCombined.map((it) => {
+                    const isCarryOver = !items.some((x) => x.id === it.id);
+                    return (
+                      <ActionItemRow
+                        key={it.id}
+                        item={it}
+                        carryOver={isCarryOver}
+                        onOpen={() => openActionItem(it, isCarryOver)}
+                        onToggleDone={() =>
+                          patchItem(it.id, {
+                            status: it.status === "completed" ? "open" : "completed",
+                          })
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {doneItems.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Completed</p>
+                <div className="space-y-2 opacity-70">
+                  {doneItems.map((it) => (
+                    <ActionItemRow
+                      key={it.id}
+                      item={it}
+                      onOpen={() => setOpenItemId(it.id)}
+                      onToggleDone={() =>
+                        patchItem(it.id, {
+                          status: it.status === "completed" ? "open" : "completed",
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Attendees — pulled from the active team contacts. */}
@@ -426,80 +621,8 @@ export default function MeetingDetailView({
           discusses the upcoming 7 days together. */}
       <TeamCalendar anchorDate={meeting.meeting_date} defaultView="week" />
 
-      {/* Review: carry-over action items from prior meetings */}
-      <AgendaCard
-        title="Review — open action items from prior meetings"
-        icon={<ClipboardList className="w-4 h-4" />}
-        count={carryOver.length + itemsByCategory.review.length}
-        empty="No open action items from prior meetings. Starting fresh."
-        onAdd={() => addCategoryItem("review", "review")}
-      >
-        {carryOver.map((c) => (
-          <button
-            type="button"
-            key={c.id}
-            onClick={async () => {
-              // Optimistic open: build a stub from the snapshot so the modal
-              // is responsive even if the carry-over id is stale or the
-              // fetch fails. Fresh data replaces the stub if available.
-              const stub: DbMeetingActionItem = {
-                id: c.id,
-                meeting_id: meeting.id,
-                property_id: meeting.property_id ?? null,
-                title: c.title,
-                description: c.description ?? null,
-                assigned_to: c.assignedTo ?? null,
-                due_date: c.dueDate ?? null,
-                status: c.status,
-                priority: null,
-                source: "manual",
-                category: "review",
-                completed_at: null,
-                completed_by: null,
-                linked_work_order_id: null,
-                linked_unit_id: null,
-                comments: [],
-                attachments: [],
-                created_at: c.fromMeetingDate ?? new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              };
-              setOpenCarryOverItem(stub);
-              try {
-                const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(c.id)}`);
-                if (!r.ok) return;
-                const j = await r.json();
-                if (j.item) setOpenCarryOverItem(j.item);
-              } catch {
-                // Keep the stub if fetch fails.
-              }
-            }}
-            className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
-          >
-            <p className="font-medium">{c.title}</p>
-            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
-              <StatusBadge value={c.status} />
-              {c.assignedTo && <span>Owner: {c.assignedTo}</span>}
-              {c.dueDate && <span>Due: {c.dueDate}</span>}
-            </div>
-          </button>
-        ))}
-        {itemsByCategory.review.map((it) => (
-          <AgendaRow
-            key={it.id}
-            onClick={() => setOpenItemId(it.id)}
-            title={it.title}
-            right={<StatusBadge value={it.status} />}
-            meta={[
-              it.assigned_to ? `Owner: ${it.assigned_to}` : null,
-              it.due_date ? `Due: ${it.due_date}` : null,
-              "Added this meeting",
-            ]}
-          />
-        ))}
-      </AgendaCard>
-
-      {/* Three category cards */}
-      <div className="grid lg:grid-cols-3 gap-4">
+      {/* Three category cards — stacked vertically so each row breathes */}
+      <div className="space-y-4">
         {/* ─── Leasing ─────────────────────────────────────── */}
         <AgendaCard
           title="Leasing"
@@ -595,7 +718,7 @@ export default function MeetingDetailView({
             <AgendaRow
               key={wo.id}
               onClick={() => setOpenWorkOrderId(wo.id)}
-              title={wo.title}
+              title={woSummaries[wo.id] || wo.title}
               right={wo.priority ? <StatusBadge value={wo.priority} /> : null}
               meta={[
                 wo.workOrderNumber ? `#${wo.workOrderNumber}` : null,
@@ -664,70 +787,6 @@ export default function MeetingDetailView({
             </AgendaSubsection>
           )}
         </AgendaCard>
-      </div>
-
-      {/* Action items board */}
-      <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold flex items-center gap-2">
-            <ClipboardList className="w-4 h-4" /> Action Items ({items.length})
-          </h3>
-          <button
-            onClick={addManualItem}
-            className="text-sm font-medium text-accent hover:underline inline-flex items-center gap-1"
-          >
-            <Plus className="w-4 h-4" /> Add item
-          </button>
-        </div>
-
-        {loadingItems ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No action items yet. Record the meeting and click &ldquo;Extract Action Items&rdquo;, or add one manually.
-          </p>
-        ) : (
-          <div className="space-y-6">
-            {openItems.length > 0 && (
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Open</p>
-                <div className="space-y-2">
-                  {openItems.map((it) => (
-                    <ActionItemRow
-                      key={it.id}
-                      item={it}
-                      onOpen={() => setOpenItemId(it.id)}
-                      onToggleDone={() =>
-                        patchItem(it.id, {
-                          status: it.status === "completed" ? "open" : "completed",
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-            {doneItems.length > 0 && (
-              <div>
-                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Completed</p>
-                <div className="space-y-2 opacity-70">
-                  {doneItems.map((it) => (
-                    <ActionItemRow
-                      key={it.id}
-                      item={it}
-                      onOpen={() => setOpenItemId(it.id)}
-                      onToggleDone={() =>
-                        patchItem(it.id, {
-                          status: it.status === "completed" ? "open" : "completed",
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Notes */}
@@ -866,6 +925,7 @@ export default function MeetingDetailView({
             units={units}
             workOrders={workOrders}
             attendees={meeting.attendees || []}
+            allActionItems={allItemsForLinking}
             onClose={() => setOpenItemId(null)}
             onChange={(updated) =>
               setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
@@ -964,6 +1024,7 @@ export default function MeetingDetailView({
           units={units}
           workOrders={workOrders}
           attendees={meeting.attendees || []}
+          allActionItems={allItemsForLinking}
           onClose={() => setOpenCarryOverItem(null)}
           onChange={(updated) => setOpenCarryOverItem(updated)}
           onDelete={async () => {
@@ -1179,11 +1240,14 @@ function ActionItemRow({
   item,
   onOpen,
   onToggleDone,
+  carryOver = false,
 }: {
   item: DbMeetingActionItem;
   onOpen: () => void;
   onToggleDone: () => void;
+  carryOver?: boolean;
 }) {
+  const linkedCount = item.linked_action_item_ids?.length ?? 0;
   const commentCount = item.comments?.length ?? 0;
   const attachmentCount = item.attachments?.length ?? 0;
   const overdue =
@@ -1259,9 +1323,19 @@ function ActionItemRow({
                 <Paperclip className="w-3 h-3" /> {attachmentCount}
               </span>
             )}
+            {linkedCount > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Link2 className="w-3 h-3" /> {linkedCount}
+              </span>
+            )}
             {item.source === "transcript" && (
               <span className="text-[10px] uppercase tracking-wide text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">
                 AI
+              </span>
+            )}
+            {carryOver && (
+              <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                From last meeting
               </span>
             )}
           </div>

@@ -25,6 +25,8 @@ type Props = {
   units: Unit[];
   workOrders: MaintenanceRequest[];
   attendees: string[];
+  /** Other action items the user can link this one to. */
+  allActionItems?: DbMeetingActionItem[];
   onClose: () => void;
   onChange: (item: DbMeetingActionItem) => void;
   onDelete: () => void;
@@ -65,6 +67,7 @@ export default function ActionItemDetailModal({
   units,
   workOrders,
   attendees,
+  allActionItems = [],
   onClose,
   onChange,
   onDelete,
@@ -405,6 +408,63 @@ export default function ActionItemDetailModal({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Linked action items — many-to-many */}
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Linked items</label>
+              {(item.linked_action_item_ids || []).length > 0 && (
+                <div className="space-y-1.5 mb-2">
+                  {(item.linked_action_item_ids || []).map((linkedId) => {
+                    const linked = allActionItems.find((a) => a.id === linkedId);
+                    return (
+                      <div
+                        key={linkedId}
+                        className="text-xs bg-muted rounded-lg px-2.5 py-1.5 flex items-center gap-2"
+                      >
+                        <span className="flex-1 min-w-0 truncate">
+                          {linked?.title || "(linked item not found)"}
+                          {linked?.status && linked.status !== "open" && (
+                            <span className="ml-2 text-muted-foreground capitalize">· {linked.status}</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = (item.linked_action_item_ids || []).filter((id) => id !== linkedId);
+                            patch({ linked_action_item_ids: next });
+                          }}
+                          className="text-muted-foreground hover:text-red-600"
+                          aria-label="Unlink"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <select
+                value=""
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  const cur = item.linked_action_item_ids || [];
+                  if (cur.includes(id)) return;
+                  patch({ linked_action_item_ids: [...cur, id] });
+                }}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              >
+                <option value="">Link another action item…</option>
+                {allActionItems
+                  .filter((a) => a.id !== item.id && !(item.linked_action_item_ids || []).includes(a.id))
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.title}
+                      {a.status !== "open" ? ` (${a.status})` : ""}
+                    </option>
+                  ))}
+              </select>
             </div>
           </div>
 
