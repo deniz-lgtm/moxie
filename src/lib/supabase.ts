@@ -491,6 +491,13 @@ export type DbActionItemAttachment = {
   storage_path?: string | null;
 };
 
+/** Which agenda card a manually-added action item belongs in. */
+export type ActionItemCategory =
+  | "review"
+  | "leasing"
+  | "maintenance"
+  | "property_management";
+
 export type DbMeetingActionItem = {
   id: string;
   meeting_id: string;
@@ -502,6 +509,7 @@ export type DbMeetingActionItem = {
   status: ActionItemStatus;
   priority: string | null;
   source: ActionItemSource;
+  category: ActionItemCategory | null;
   completed_at: string | null;
   completed_by: string | null;
   linked_work_order_id: string | null;

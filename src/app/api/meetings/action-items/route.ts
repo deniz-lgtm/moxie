@@ -11,7 +11,7 @@ import {
   type CreateActionItemInput,
   type UpdateActionItemInput,
 } from "@/lib/meetings-db";
-import type { ActionItemSource, ActionItemStatus } from "@/lib/supabase";
+import type { ActionItemCategory, ActionItemSource, ActionItemStatus } from "@/lib/supabase";
 
 /**
  * GET /api/meetings/action-items
@@ -102,6 +102,7 @@ export async function PATCH(request: Request) {
     if ("status" in body) update.status = body.status;
     if ("priority" in body) update.priority = body.priority ?? null;
     if ("source" in body) update.source = body.source;
+    if ("category" in body) update.category = body.category ?? null;
     if ("completed_by" in body) update.completed_by = body.completed_by ?? null;
     if ("linked_work_order_id" in body) update.linked_work_order_id = body.linked_work_order_id ?? null;
     if ("linked_unit_id" in body) update.linked_unit_id = body.linked_unit_id ?? null;
@@ -141,6 +142,7 @@ function normalizeCreate(r: any): CreateActionItemInput {
     status: (r.status as ActionItemStatus) ?? "open",
     priority: r.priority ?? null,
     source: (r.source as ActionItemSource) ?? "manual",
+    category: (r.category as ActionItemCategory) ?? null,
     completed_at: r.completed_at ?? null,
     completed_by: r.completed_by ?? null,
     linked_work_order_id: r.linked_work_order_id ?? null,
