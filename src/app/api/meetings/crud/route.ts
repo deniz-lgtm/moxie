@@ -104,12 +104,16 @@ export async function PATCH(request: Request) {
     const update: UpdateMeetingInput = {};
     if ("status" in body) update.status = body.status;
     if ("title" in body) update.title = body.title ?? null;
+    if ("meeting_date" in body && typeof body.meeting_date === "string") {
+      update.meeting_date = body.meeting_date;
+    }
     if ("audio_url" in body) update.audio_url = body.audio_url ?? null;
     if ("transcript" in body) update.transcript = body.transcript ?? null;
     if ("summary" in body) update.summary = body.summary ?? null;
     if ("notes" in body) update.notes = body.notes ?? null;
     if ("agenda_snapshot" in body) update.agenda_snapshot = body.agenda_snapshot ?? {};
     if ("attendees" in body && Array.isArray(body.attendees)) update.attendees = body.attendees;
+    if ("meeting_url" in body) update.meeting_url = body.meeting_url ?? null;
     if ("recorded_at" in body) update.recorded_at = body.recorded_at ?? null;
     if ("recording_duration_seconds" in body) {
       update.recording_duration_seconds = body.recording_duration_seconds ?? null;

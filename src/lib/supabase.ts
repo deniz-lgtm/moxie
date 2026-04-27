@@ -466,6 +466,7 @@ export type DbPropertyMeeting = {
   notes: string | null;
   agenda_snapshot: DbAgendaSnapshot;
   attendees: string[];
+  meeting_url: string | null;
   recorded_at: string | null;
   recording_duration_seconds: number | null;
   created_at: string;
