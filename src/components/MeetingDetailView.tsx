@@ -520,7 +520,6 @@ export default function MeetingDetailView({
                     v.propertyName,
                     v.bedrooms != null ? `${v.bedrooms}bd / ${v.bathrooms ?? "—"}ba` : null,
                     v.rent ? `$${Number(v.rent).toLocaleString()}/mo` : null,
-                    v.daysVacant != null ? `${v.daysVacant}d vacant` : null,
                   ]}
                 />
               ))}
