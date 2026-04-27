@@ -537,7 +537,6 @@ export default function MeetingDetailView({
                     a.propertyName,
                     a.unitNumber ? `Unit ${a.unitNumber}` : null,
                     a.applicantCount > 1 ? `${a.applicantCount} applicants` : null,
-                    a.daysInReview != null ? `${a.daysInReview}d in review` : null,
                   ]}
                 />
               ))}
@@ -941,7 +940,6 @@ export default function MeetingDetailView({
             value: `$${Number(live?.rent ?? snap?.rent).toLocaleString()}/mo`,
           });
         }
-        if (snap?.daysVacant != null) rows.push({ label: "Days vacant", value: `${snap.daysVacant}` });
         if (live?.tenant) rows.push({ label: "Last tenant", value: live.tenant });
         if (live?.moveOut || snap?.leaseEnded) {
           rows.push({ label: "Move-out", value: live?.moveOut || snap?.leaseEnded });
@@ -988,8 +986,6 @@ export default function MeetingDetailView({
         if (a.unitNumber) rows.push({ label: "Unit", value: a.unitNumber });
         if (a.primaryApplicant) rows.push({ label: "Primary applicant", value: a.primaryApplicant });
         if (a.applicantCount) rows.push({ label: "Applicants", value: `${a.applicantCount}` });
-        if (a.daysInReview != null)
-          rows.push({ label: "Days in review", value: `${a.daysInReview}` });
         return (
           <InfoPopup
             title={a.primaryApplicant || "Application"}
