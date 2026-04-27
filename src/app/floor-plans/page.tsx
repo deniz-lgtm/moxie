@@ -13,6 +13,7 @@ type FloorPlan = {
   unit_name: string;
   label: string;
   storage_url: string;
+  rooms: string[];
   created_at: string;
 };
 
@@ -107,6 +108,43 @@ export default function FloorPlansPage() {
   const [bulkProgress, setBulkProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const bulkInputRef = useRef<HTMLInputElement>(null);
+
+  // Room editor state
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [editingRooms, setEditingRooms] = useState<string[]>([]);
+  const [savingRooms, setSavingRooms] = useState(false);
+
+  function openRoomEditor(fp: FloorPlan) {
+    setEditingPlanId(fp.id);
+    setEditingRooms(Array.isArray(fp.rooms) ? [...fp.rooms] : []);
+  }
+  function closeRoomEditor() {
+    setEditingPlanId(null);
+    setEditingRooms([]);
+    setSavingRooms(false);
+  }
+  async function saveRoomEditor() {
+    if (!editingPlanId) return;
+    setSavingRooms(true);
+    const cleaned = editingRooms.map((r) => r.trim()).filter(Boolean);
+    try {
+      const res = await fetch("/api/floor-plans", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingPlanId, rooms: cleaned }),
+      });
+      const data = await res.json();
+      if (data.floor_plan) {
+        setFloorPlans((prev) =>
+          prev.map((fp) => (fp.id === editingPlanId ? { ...fp, rooms: data.floor_plan.rooms || cleaned } : fp))
+        );
+      }
+      closeRoomEditor();
+    } catch (err) {
+      console.error("[FloorPlans] Failed to save rooms:", err);
+      setSavingRooms(false);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -279,6 +317,47 @@ export default function FloorPlansPage() {
     if (files.length) processBulkFiles(files);
   }
 
+  // Paste from clipboard — pastes a screenshot/snip into whichever upload
+  // panel is open. Bulk takes priority; falls back to single upload.
+  useEffect(() => {
+    if (!showBulk && !showUpload) return;
+    function onPaste(e: ClipboardEvent) {
+      const target = e.target as HTMLElement | null;
+      // Don't hijack pastes into text inputs (label, room editor, etc.)
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageFiles: File[] = [];
+      for (const item of items) {
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (!file) continue;
+          // Clipboard images come in as "image.png" — give them a unique name.
+          const ext = file.type.split("/")[1] || "png";
+          const named = new File(
+            [file],
+            `pasted-floor-plan-${Date.now()}.${ext}`,
+            { type: file.type }
+          );
+          imageFiles.push(named);
+        }
+      }
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      if (showBulk) {
+        processBulkFiles(imageFiles);
+      } else if (showUpload) {
+        const synthetic = {
+          target: { files: imageFiles, value: "" },
+        } as unknown as React.ChangeEvent<HTMLInputElement>;
+        handleFileSelect(synthetic);
+      }
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [showBulk, showUpload, processBulkFiles]);
+
   async function uploadAll() {
     const toUpload = bulkFiles.filter(
       (bf) => bf.status === "pending" && bf.dataUrl && bf.selectedUnitId
@@ -430,10 +509,13 @@ export default function FloorPlansPage() {
               onChange={handleBulkFileInput}
             />
             <p className="text-sm font-medium">
-              {dragOver ? "Drop files here" : "Drag & drop files, or click to browse"}
+              {dragOver ? "Drop files here" : "Drag & drop, click to browse, or paste a screenshot"}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               JPG, PNG, HEIC, PDF — name files after the unit (e.g. "1234 Figueroa.pdf") for auto-matching
+            </p>
+            <p className="text-[11px] text-muted-foreground/80 mt-1">
+              Tip: snip a region (Win+Shift+S / Cmd+Ctrl+Shift+4) then press Ctrl+V / Cmd+V to paste
             </p>
           </div>
 
@@ -686,6 +768,9 @@ export default function FloorPlansPage() {
               >
                 {pendingDataUrl ? "Replace file" : "Choose image or PDF"}
               </button>
+              <p className="text-[11px] text-muted-foreground/80 mt-1.5">
+                or paste a screenshot with Ctrl+V / Cmd+V
+              </p>
             </div>
           </div>
 
@@ -800,6 +885,29 @@ export default function FloorPlansPage() {
                     <div className="p-3">
                       <p className="text-sm font-medium truncate">{fp.unit_name}</p>
                       <p className="text-xs text-muted-foreground truncate">{fp.label}</p>
+                      <div className="mt-2 flex items-start justify-between gap-2">
+                        <div className="flex flex-wrap gap-1 min-h-[18px]">
+                          {(fp.rooms || []).slice(0, 4).map((r, i) => (
+                            <span key={i} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-foreground/80">
+                              {r}
+                            </span>
+                          ))}
+                          {(fp.rooms || []).length > 4 && (
+                            <span className="text-[10px] text-muted-foreground px-1">
+                              +{fp.rooms.length - 4}
+                            </span>
+                          )}
+                          {(!fp.rooms || fp.rooms.length === 0) && (
+                            <span className="text-[10px] text-amber-600">No rooms yet</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => openRoomEditor(fp)}
+                          className="text-[11px] font-medium text-accent hover:underline shrink-0 min-h-[28px] px-1"
+                        >
+                          Edit
+                        </button>
+                      </div>
                       <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-border/50">
                         <p className="text-[10px] text-muted-foreground">
                           {new Date(fp.created_at).toLocaleDateString()}
@@ -824,6 +932,117 @@ export default function FloorPlansPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {editingPlanId && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={closeRoomEditor}
+        >
+          <div
+            className="bg-card w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-border max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold">Edit Rooms</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {floorPlans.find((fp) => fp.id === editingPlanId)?.unit_name}
+                </p>
+              </div>
+              <button
+                onClick={closeRoomEditor}
+                className="text-muted-foreground hover:text-foreground min-h-[40px] px-2 text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="px-5 py-4 overflow-y-auto flex-1 space-y-2">
+              {editingRooms.length === 0 && (
+                <p className="text-xs text-muted-foreground py-2">
+                  No rooms yet. Add the rooms you want inspectors to walk through.
+                </p>
+              )}
+              {editingRooms.map((room, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={room}
+                    onChange={(e) =>
+                      setEditingRooms((prev) =>
+                        prev.map((r, i) => (i === idx ? e.target.value : r))
+                      )
+                    }
+                    className="flex-1 text-sm border border-border rounded-lg px-3 py-2 min-h-[40px] bg-card"
+                    placeholder="Room name (e.g. Bedroom 1)"
+                  />
+                  <button
+                    onClick={() =>
+                      setEditingRooms((prev) => {
+                        if (idx === 0) return prev;
+                        const next = [...prev];
+                        [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                        return next;
+                      })
+                    }
+                    disabled={idx === 0}
+                    aria-label="Move up"
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed p-1.5"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() =>
+                      setEditingRooms((prev) => {
+                        if (idx === prev.length - 1) return prev;
+                        const next = [...prev];
+                        [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+                        return next;
+                      })
+                    }
+                    disabled={idx === editingRooms.length - 1}
+                    aria-label="Move down"
+                    className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed p-1.5"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={() =>
+                      setEditingRooms((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    aria-label="Remove room"
+                    className="text-muted-foreground hover:text-red-600 p-1.5"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => setEditingRooms((prev) => [...prev, ""])}
+                className="text-xs font-medium text-accent hover:underline mt-2 min-h-[36px] px-1"
+              >
+                + Add room
+              </button>
+            </div>
+
+            <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2">
+              <button
+                onClick={closeRoomEditor}
+                className="min-h-[40px] px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveRoomEditor}
+                disabled={savingRooms}
+                className="min-h-[40px] px-4 py-2 text-sm bg-accent text-white font-medium rounded-lg hover:bg-accent/90 disabled:opacity-50"
+              >
+                {savingRooms ? "Saving…" : "Save Rooms"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
