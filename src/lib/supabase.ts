@@ -514,6 +514,7 @@ export type DbMeetingActionItem = {
   completed_by: string | null;
   linked_work_order_id: string | null;
   linked_unit_id: string | null;
+  linked_action_item_ids: string[];
   comments: DbActionItemComment[];
   attachments: DbActionItemAttachment[];
   created_at: string;

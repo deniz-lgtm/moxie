@@ -137,12 +137,19 @@ export async function deleteMeeting(id: string): Promise<void> {
 
 export type CreateActionItemInput = Omit<
   DbMeetingActionItem,
-  "created_at" | "updated_at" | "completed_at" | "completed_by" | "comments" | "attachments"
+  | "created_at"
+  | "updated_at"
+  | "completed_at"
+  | "completed_by"
+  | "comments"
+  | "attachments"
+  | "linked_action_item_ids"
 > & {
   completed_at?: string | null;
   completed_by?: string | null;
   comments?: DbActionItemComment[];
   attachments?: DbActionItemAttachment[];
+  linked_action_item_ids?: string[];
 };
 
 export type UpdateActionItemInput = Partial<

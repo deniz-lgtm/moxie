@@ -106,6 +106,10 @@ export async function PATCH(request: Request) {
     if ("completed_by" in body) update.completed_by = body.completed_by ?? null;
     if ("linked_work_order_id" in body) update.linked_work_order_id = body.linked_work_order_id ?? null;
     if ("linked_unit_id" in body) update.linked_unit_id = body.linked_unit_id ?? null;
+    if ("linked_action_item_ids" in body)
+      update.linked_action_item_ids = Array.isArray(body.linked_action_item_ids)
+        ? body.linked_action_item_ids.map((s: unknown) => String(s))
+        : [];
 
     const item = await updateActionItem(id, update);
     return NextResponse.json({ item });
@@ -147,5 +151,8 @@ function normalizeCreate(r: any): CreateActionItemInput {
     completed_by: r.completed_by ?? null,
     linked_work_order_id: r.linked_work_order_id ?? null,
     linked_unit_id: r.linked_unit_id ?? null,
+    linked_action_item_ids: Array.isArray(r.linked_action_item_ids)
+      ? r.linked_action_item_ids.map((s: unknown) => String(s))
+      : [],
   };
 }
