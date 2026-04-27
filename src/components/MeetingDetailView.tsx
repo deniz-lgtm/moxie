@@ -345,10 +345,10 @@ export default function MeetingDetailView({
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-2xl font-bold">
+          <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">
             {meeting.title || "Monday Morning Meeting"}
           </h2>
-          <div className="mt-1 flex items-center gap-2 flex-wrap">
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
             <input
               type="date"
               value={dateDraft}
@@ -380,8 +380,8 @@ export default function MeetingDetailView({
       </div>
 
       {/* Attendees — pulled from the active team contacts. */}
-      <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-        <label className="text-sm font-semibold block">Attendees</label>
+      <div className="bg-card rounded-2xl border border-border p-5 sm:p-6 space-y-3 shadow-sm">
+        <label className="text-base font-semibold block tracking-tight">Attendees</label>
         {(() => {
           const teamContacts = contacts.filter((c) => c.isActive);
           const selected = new Set(meeting.attendees || []);
@@ -439,12 +439,38 @@ export default function MeetingDetailView({
             type="button"
             key={c.id}
             onClick={async () => {
+              // Optimistic open: build a stub from the snapshot so the modal
+              // is responsive even if the carry-over id is stale or the
+              // fetch fails. Fresh data replaces the stub if available.
+              const stub: DbMeetingActionItem = {
+                id: c.id,
+                meeting_id: meeting.id,
+                property_id: meeting.property_id ?? null,
+                title: c.title,
+                description: c.description ?? null,
+                assigned_to: c.assignedTo ?? null,
+                due_date: c.dueDate ?? null,
+                status: c.status,
+                priority: null,
+                source: "manual",
+                category: "review",
+                completed_at: null,
+                completed_by: null,
+                linked_work_order_id: null,
+                linked_unit_id: null,
+                comments: [],
+                attachments: [],
+                created_at: c.fromMeetingDate ?? new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+              setOpenCarryOverItem(stub);
               try {
                 const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(c.id)}`);
+                if (!r.ok) return;
                 const j = await r.json();
                 if (j.item) setOpenCarryOverItem(j.item);
               } catch {
-                /* ignore */
+                // Keep the stub if fetch fails.
               }
             }}
             className="w-full text-left text-sm border-b border-border last:border-0 pb-2 last:pb-0 hover:bg-muted/50 rounded px-1 -mx-1 transition-colors"
@@ -1127,9 +1153,9 @@ function AgendaCard({
   onAdd?: () => void;
 }) {
   return (
-    <div className="bg-card rounded-xl border border-border p-5 space-y-3">
+    <div className="bg-card rounded-2xl border border-border p-5 sm:p-6 space-y-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm flex items-center gap-2">
+        <h3 className="font-semibold text-base flex items-center gap-2 tracking-tight">
           {icon} {title}
         </h3>
         <div className="flex items-center gap-2">
@@ -1146,7 +1172,7 @@ function AgendaCard({
         </div>
       </div>
       {count === 0 ? (
-        <p className="text-xs text-muted-foreground">{empty}</p>
+        <p className="text-sm text-muted-foreground">{empty}</p>
       ) : (
         <div className="space-y-3 max-h-80 overflow-y-auto">{children}</div>
       )}
