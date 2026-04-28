@@ -10,6 +10,7 @@ import type { Inspection, InspectionType } from "./types";
 import { loadFromStorage, saveToStorage } from "./storage";
 
 const STORAGE_KEY = "inspections_v2";
+const MIGRATION_DONE_KEY = "inspections_supabase_migrated";
 const BUCKET = "inspection-files";
 
 // ─── Conversion helpers ─────────────────────────────────────────
@@ -306,4 +307,80 @@ export async function getExistingUnitIds(type: InspectionType): Promise<Set<stri
   }
 
   return new Set((data || []).map((r: { unit_id: string }) => r.unit_id));
+}
+
+/** Fetch all inspections (every type). Used by the /inspections hub page. */
+export async function fetchAllInspections(): Promise<Inspection[]> {
+  const sb = getSupabase();
+  if (!sb) {
+    return loadFromStorage<Inspection[]>(STORAGE_KEY, []);
+  }
+
+  const { data, error } = await sb
+    .from("inspections")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.error("[Moxie] fetchAllInspections error:", error.message);
+    return [];
+  }
+
+  return (data || []).map(fromDb);
+}
+
+// ─── One-time localStorage → Supabase migration ────────────────
+// The /inspections sub-pages used to write directly to localStorage,
+// bypassing this module. On first authenticated load after the page
+// rewire, lift any local rows into Supabase so users don't lose
+// inspections they captured before the migration.
+
+export async function migrateLocalToSupabaseIfNeeded(): Promise<{
+  migrated: boolean;
+  count?: number;
+}> {
+  if (typeof window === "undefined") return { migrated: false };
+  if (loadFromStorage<boolean>(MIGRATION_DONE_KEY, false)) return { migrated: false };
+  if (!isSupabaseConfigured()) return { migrated: false };
+
+  const sb = getSupabase();
+  if (!sb) return { migrated: false };
+
+  const local = loadFromStorage<Inspection[]>(STORAGE_KEY, []);
+
+  // Confirm the table exists and check whether Supabase already has data
+  const { data: existing, error: checkError } = await sb
+    .from("inspections")
+    .select("id")
+    .limit(1);
+
+  if (checkError) {
+    // Table probably doesn't exist yet; user hasn't run the migration SQL.
+    return { migrated: false };
+  }
+
+  if ((existing || []).length > 0) {
+    // Supabase already has data — skip migration, mark done so we don't
+    // keep checking (other devices will have already populated it).
+    saveToStorage(MIGRATION_DONE_KEY, true);
+    return { migrated: false };
+  }
+
+  if (local.length > 0) {
+    const rows = local.map((insp) => ({
+      ...toDb(insp),
+      created_at: insp.createdAt,
+      updated_at: insp.updatedAt,
+    }));
+    const { error: upsertError } = await sb
+      .from("inspections")
+      .upsert(rows, { onConflict: "id" });
+    if (upsertError) {
+      console.warn("[inspections-db] migration upsert failed:", upsertError.message);
+      return { migrated: false };
+    }
+  }
+
+  saveToStorage(MIGRATION_DONE_KEY, true);
+  return { migrated: true, count: local.length };
 }
