@@ -572,6 +572,73 @@ export default function MaintenancePage() {
     setFilterAging(keep.aging ?? "all");
     setFilterQuery(keep.query ?? "");
   }
+  function clearAllFilters() {
+    resetFiltersExcept({});
+  }
+
+  const STATUS_LABELS: Record<string, string> = {
+    open: "Open (any)",
+    submitted: "Submitted",
+    assigned: "Assigned",
+    in_progress: "In Progress",
+    awaiting_parts: "Awaiting Parts",
+    completed: "Completed",
+    closed: "Closed",
+  };
+  const CATEGORY_LABEL_MAP = Object.fromEntries(
+    CATEGORY_OPTIONS.map((c) => [c.value, c.label])
+  ) as Record<string, string>;
+  const AGING_LABELS: Record<string, string> = {
+    "0-7": "0–7 days",
+    "8-30": "8–30 days",
+    "31+": "31+ days",
+  };
+  const activeFilterChips: Array<{
+    key: string;
+    field: string;
+    value: string;
+    onClear: () => void;
+  }> = [];
+  if (filterQuery) {
+    activeFilterChips.push({
+      key: "query",
+      field: "Search",
+      value: `"${filterQuery}"`,
+      onClear: () => setFilterQuery(""),
+    });
+  }
+  if (filterStatus !== "all") {
+    activeFilterChips.push({
+      key: "status",
+      field: "Status",
+      value: STATUS_LABELS[filterStatus] ?? filterStatus,
+      onClear: () => setFilterStatus("all"),
+    });
+  }
+  if (filterPriority !== "all") {
+    activeFilterChips.push({
+      key: "priority",
+      field: "Priority",
+      value: filterPriority.charAt(0).toUpperCase() + filterPriority.slice(1),
+      onClear: () => setFilterPriority("all"),
+    });
+  }
+  if (filterCategory !== "all") {
+    activeFilterChips.push({
+      key: "category",
+      field: "Category",
+      value: CATEGORY_LABEL_MAP[filterCategory] ?? filterCategory,
+      onClear: () => setFilterCategory("all"),
+    });
+  }
+  if (filterAging !== "all") {
+    activeFilterChips.push({
+      key: "aging",
+      field: "Aging",
+      value: AGING_LABELS[filterAging] ?? filterAging,
+      onClear: () => setFilterAging("all"),
+    });
+  }
 
   async function saveAnnotation(body: Record<string, unknown>) {
     if (!selected) return;
@@ -1321,7 +1388,9 @@ export default function MaintenancePage() {
           value={filterQuery}
           onChange={(e) => setFilterQuery(e.target.value)}
           placeholder="Search title, description, unit, tenant, vendor…"
-          className="w-full text-sm border border-border rounded-lg pl-3 pr-9 py-2 bg-card"
+          className={`w-full text-sm border rounded-lg pl-3 pr-9 py-2 bg-card transition-colors ${
+            filterQuery ? "border-accent" : "border-border"
+          }`}
         />
         {filterQuery && (
           <button
@@ -1337,7 +1406,11 @@ export default function MaintenancePage() {
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          className={`w-full text-sm border rounded-lg px-3 py-2 transition-colors ${
+            filterStatus !== "all"
+              ? "border-accent bg-accent/10 font-medium"
+              : "border-border bg-card"
+          }`}
         >
           <option value="all">All Statuses</option>
           <option value="open">Open (any)</option>
@@ -1350,7 +1423,11 @@ export default function MaintenancePage() {
         <select
           value={filterPriority}
           onChange={(e) => setFilterPriority(e.target.value)}
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+          className={`w-full text-sm border rounded-lg px-3 py-2 transition-colors ${
+            filterPriority !== "all"
+              ? "border-accent bg-accent/10 font-medium"
+              : "border-border bg-card"
+          }`}
         >
           <option value="all">All Priorities</option>
           <option value="emergency">Emergency</option>
@@ -1361,7 +1438,11 @@ export default function MaintenancePage() {
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
-          className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card col-span-2 sm:col-span-1"
+          className={`w-full text-sm border rounded-lg px-3 py-2 col-span-2 sm:col-span-1 transition-colors ${
+            filterCategory !== "all"
+              ? "border-accent bg-accent/10 font-medium"
+              : "border-border bg-card"
+          }`}
         >
           <option value="all">All Categories</option>
           {CATEGORY_OPTIONS.map((c) => (
@@ -1377,20 +1458,36 @@ export default function MaintenancePage() {
         </div>
       )}
 
-      {/* Active filter chips (for filters that don't have their own visible UI) */}
-      {filterAging !== "all" && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">Aging:</span>
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 text-red-700">
-            {filterAging} days
-            <button
-              onClick={() => setFilterAging("all")}
-              aria-label="Clear aging filter"
-              className="ml-1 leading-none"
-            >
-              ×
-            </button>
+      {/* Active filters bar — single, unmissable summary of which filters
+          are on. Each chip clears its own filter; "Clear all" wipes them. */}
+      {!loading && activeFilterChips.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap rounded-lg border border-accent/30 bg-accent/5 px-3 py-2">
+          <span className="text-xs font-medium text-muted-foreground shrink-0">
+            Showing {filtered.length} of {allRequests.length}
+            {" · "}Filters:
           </span>
+          {activeFilterChips.map((chip) => (
+            <span
+              key={chip.key}
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-full bg-accent text-white"
+            >
+              <span className="text-white/80">{chip.field}:</span>
+              <span>{chip.value}</span>
+              <button
+                onClick={chip.onClear}
+                aria-label={`Clear ${chip.field} filter`}
+                className="ml-0.5 leading-none hover:bg-white/20 rounded-full w-4 h-4 inline-flex items-center justify-center"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <button
+            onClick={clearAllFilters}
+            className="ml-auto text-xs font-medium text-accent hover:underline shrink-0"
+          >
+            Clear all
+          </button>
         </div>
       )}
 
