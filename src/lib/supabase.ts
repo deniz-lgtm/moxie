@@ -327,6 +327,40 @@ export type DbNotice = {
   updated_at: string;
 };
 
+// ─── Tours (open-house leasing) ────────────────────────────────
+// Mirrors supabase/migrations/20260428_tours.sql.
+
+export type DbTourSlot = {
+  id: string;
+  property_id: string | null;
+  property_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  host: string;
+  capacity: number;
+  pre_reminder_status: string;
+  post_follow_up_status: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbTourRegistration = {
+  id: string;
+  slot_id: string;
+  prospect_name: string;
+  prospect_email: string;
+  prospect_phone: string | null;
+  status: string;
+  registered_at: string;
+  source: string | null;
+  notes: string | null;
+  follow_up_sent: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Showings (open-house scheduling) ──────────────────────────
 // Mirrors supabase/migrations/20260424_showings.sql.
 

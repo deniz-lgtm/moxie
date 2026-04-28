@@ -1,14 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import {
+  listTourSlots,
+  upsertTourSlot,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/tours-db";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { TourSlot, TourRegistrationStatus, Unit } from "@/lib/types";
 
 export default function ToursPage() {
   const { portfolioId } = usePortfolio();
-  const [allTours, setAllTours] = useState<TourSlot[]>(() => loadFromStorage<TourSlot[]>("tours", []));
+  const [allTours, setAllTours] = useState<TourSlot[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [selected, setSelected] = useState<TourSlot | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -31,15 +35,22 @@ export default function ToursPage() {
       .catch(() => {});
   }, [portfolioId]);
 
-  // Persist tours to localStorage whenever they change
   useEffect(() => {
-    saveToStorage("tours", allTours);
-  }, [allTours]);
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await listTourSlots();
+      if (!cancelled) setAllTours(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Get unique property names from units for location options
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))];
 
-  function createTour() {
+  async function createTour() {
     if (!newTour.propertyName || !newTour.date) return;
 
     const tour: TourSlot = {
@@ -57,7 +68,8 @@ export default function ToursPage() {
       notes: newTour.notes,
       createdAt: new Date().toISOString(),
     };
-    setAllTours((prev) => [tour, ...prev]);
+    const saved = await upsertTourSlot(tour);
+    setAllTours((prev) => [saved, ...prev]);
     setShowCreateForm(false);
     setNewTour({ propertyName: "", date: "", startTime: "10:00", endTime: "12:00", host: "", capacity: 10, notes: "" });
   }
@@ -65,6 +77,12 @@ export default function ToursPage() {
   const today = new Date().toISOString().split("T")[0];
   const upcoming = allTours.filter((t) => t.date >= today);
   const past = allTours.filter((t) => t.date < today);
+
+  async function persistSlotChange(updated: TourSlot) {
+    const saved = await upsertTourSlot(updated);
+    setSelected(saved);
+    setAllTours((prev) => prev.map((t) => (t.id === saved.id ? saved : t)));
+  }
 
   function updateRegistrationStatus(regId: string, status: TourRegistrationStatus) {
     if (!selected) return;
@@ -74,8 +92,7 @@ export default function ToursPage() {
         r.id === regId ? { ...r, status } : r
       ),
     };
-    setSelected(updated);
-    setAllTours((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    void persistSlotChange(updated);
   }
 
   function toggleFollowUp(regId: string) {
@@ -86,8 +103,7 @@ export default function ToursPage() {
         r.id === regId ? { ...r, followUpSent: !r.followUpSent } : r
       ),
     };
-    setSelected(updated);
-    setAllTours((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    void persistSlotChange(updated);
   }
 
   if (selected) {
