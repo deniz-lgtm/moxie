@@ -213,6 +213,12 @@ export type DbWorkOrderAnnotation = {
   scheduled_date_override: string | null;
   tags: string[];
   follow_up_on: string | null;
+  // Cached output of /api/maintenance/classify — see
+  // 20260428_work_order_ai_classification.sql.
+  ai_category: string | null;
+  ai_priority: string | null;
+  ai_title: string | null;
+  ai_classified_at: string | null;
   created_at: string;
   updated_at: string;
 };

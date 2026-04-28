@@ -36,6 +36,10 @@ export async function POST(request: NextRequest) {
     if ("scheduled_date_override" in body) update.scheduled_date_override = body.scheduled_date_override ?? null;
     if ("tags" in body && Array.isArray(body.tags)) update.tags = body.tags;
     if ("follow_up_on" in body) update.follow_up_on = body.follow_up_on ?? null;
+    if ("ai_category" in body) update.ai_category = body.ai_category ?? null;
+    if ("ai_priority" in body) update.ai_priority = body.ai_priority ?? null;
+    if ("ai_title" in body) update.ai_title = body.ai_title ?? null;
+    if ("ai_classified_at" in body) update.ai_classified_at = body.ai_classified_at ?? null;
 
     const appendNote = body.appendNote?.text
       ? { text: String(body.appendNote.text), author: body.appendNote.author }

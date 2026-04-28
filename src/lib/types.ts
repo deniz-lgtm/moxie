@@ -302,6 +302,14 @@ export interface MaintenanceRequest {
   appfolioWorkOrderId?: string;
   /** Moxie-side follow-up date from work_order_annotations.follow_up_on. */
   followUpOn?: string;
+  /** AI-classified category from work_order_annotations.ai_category. */
+  aiCategory?: MaintenanceCategory;
+  /** AI-classified priority from work_order_annotations.ai_priority. */
+  aiPriority?: MaintenancePriority;
+  /** AI-summarized title from work_order_annotations.ai_title. */
+  aiTitle?: string;
+  /** ISO timestamp of the AI classification, if any. */
+  aiClassifiedAt?: string;
 }
 
 // --- Tenant Notices ---

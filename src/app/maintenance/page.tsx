@@ -19,7 +19,6 @@ type Classification = {
   title: string;
 };
 
-const CLASSIFICATION_CACHE_KEY = "moxie:wo-classifications";
 const PRIORITY_RANK: Record<MaintenancePriority, number> = {
   emergency: 0,
   high: 1,
@@ -63,6 +62,8 @@ const CATEGORY_COLORS: Record<MaintenanceCategory, string> = {
 type Metrics = {
   openCount: number;
   openEmergencies: number;
+  /** Open work orders the AI bumped up to "emergency" when the tenant didn't. */
+  openEmergenciesAiElevated: number;
   avgResolutionDays: number | null;
   resolvedSample: number;
   aging: { bucket: string; count: number; color: string }[];
@@ -84,14 +85,11 @@ type Metrics = {
   };
 };
 
-function computeMetrics(
-  requests: MaintenanceRequest[],
-  classifications: Record<string, Classification> = {}
-): Metrics {
-  const cat = (r: MaintenanceRequest): MaintenanceCategory =>
-    classifications[r.id]?.category ?? r.category;
-  const pri = (r: MaintenanceRequest): MaintenancePriority =>
-    classifications[r.id]?.priority ?? r.priority;
+function computeMetrics(requests: MaintenanceRequest[]): Metrics {
+  const cat = (r: MaintenanceRequest): MaintenanceCategory => r.aiCategory ?? r.category;
+  const pri = (r: MaintenanceRequest): MaintenancePriority => r.aiPriority ?? r.priority;
+  const aiElevatedToEmergency = (r: MaintenanceRequest): boolean =>
+    pri(r) === "emergency" && r.priority !== "emergency";
   const now = Date.now();
   const d30 = now - 30 * DAY_MS;
   const d90 = now - 90 * DAY_MS;
@@ -217,6 +215,7 @@ function computeMetrics(
   return {
     openCount: open.length,
     openEmergencies: open.filter((r) => pri(r) === "emergency").length,
+    openEmergenciesAiElevated: open.filter((r) => aiElevatedToEmergency(r)).length,
     avgResolutionDays,
     resolvedSample: resolvedRecently.length,
     aging: [
@@ -284,20 +283,13 @@ export default function MaintenancePage() {
     category: "general" as MaintenanceCategory,
     priority: "medium" as MaintenancePriority,
   });
-  const [classifications, setClassifications] = useState<Record<string, Classification>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const raw = window.localStorage.getItem(CLASSIFICATION_CACHE_KEY);
-      return raw ? (JSON.parse(raw) as Record<string, Classification>) : {};
-    } catch {
-      return {};
-    }
-  });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [translateOpen, setTranslateOpen] = useState(false);
+  const [translateIds, setTranslateIds] = useState<string[]>([]);
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translating, setTranslating] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [reclassifying, setReclassifying] = useState(false);
 
   async function loadRequests() {
     // Portfolio 25: no Supabase cache, go live to AppFolio
@@ -378,13 +370,50 @@ export default function MaintenancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portfolioId]);
 
-  // Background-classify any work order we don't already have a cached AI
-  // category/priority/title for. Persists to localStorage so the AI call
-  // only happens once per work order across sessions.
+  // Apply a fresh batch of classifications onto the in-memory work orders.
+  // Server already wrote them to work_order_annotations, so the next reload
+  // will see them too.
+  const mergeClassifications = useCallback(
+    (incoming: Array<{ id: string } & Classification>) => {
+      if (incoming.length === 0) return;
+      const byId = new Map(incoming.map((c) => [c.id, c]));
+      const now = new Date().toISOString();
+      setAllRequests((prev) =>
+        prev.map((r) => {
+          const c = byId.get(r.id);
+          if (!c) return r;
+          return {
+            ...r,
+            aiCategory: c.category,
+            aiPriority: c.priority,
+            aiTitle: c.title,
+            aiClassifiedAt: now,
+          };
+        })
+      );
+      setSelected((prev) => {
+        if (!prev) return prev;
+        const c = byId.get(prev.id);
+        if (!c) return prev;
+        return {
+          ...prev,
+          aiCategory: c.category,
+          aiPriority: c.priority,
+          aiTitle: c.title,
+          aiClassifiedAt: now,
+        };
+      });
+    },
+    []
+  );
+
+  // Background-classify any work order the server doesn't already have an
+  // AI classification for. Server-side cache lives in
+  // work_order_annotations so it survives across browsers and sessions.
   useEffect(() => {
     if (allRequests.length === 0) return;
     const missing = allRequests
-      .filter((r) => !classifications[r.id])
+      .filter((r) => !r.aiPriority)
       .filter((r) => (r.description || r.title || "").trim().length > 0)
       .slice(0, 30)
       .map((r) => ({ id: r.id, title: r.title, description: r.description }));
@@ -400,19 +429,8 @@ export default function MaintenancePage() {
         if (!res.ok) return;
         const j = await res.json();
         const incoming: Array<{ id: string } & Classification> = j.classifications || [];
-        if (cancelled || incoming.length === 0) return;
-        setClassifications((prev) => {
-          const next = { ...prev };
-          for (const c of incoming) {
-            next[c.id] = { category: c.category, priority: c.priority, title: c.title };
-          }
-          try {
-            window.localStorage.setItem(CLASSIFICATION_CACHE_KEY, JSON.stringify(next));
-          } catch {
-            /* ignore quota errors */
-          }
-          return next;
-        });
+        if (cancelled) return;
+        mergeClassifications(incoming);
       } catch {
         /* leave entries unclassified — UI falls back to AppFolio values */
       }
@@ -420,7 +438,29 @@ export default function MaintenancePage() {
     return () => {
       cancelled = true;
     };
-  }, [allRequests, classifications]);
+  }, [allRequests, mergeClassifications]);
+
+  const reclassifyOne = useCallback(
+    async (req: MaintenanceRequest) => {
+      setReclassifying(true);
+      try {
+        const res = await fetch("/api/maintenance/classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: [{ id: req.id, title: req.title, description: req.description }],
+          }),
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        const incoming: Array<{ id: string } & Classification> = j.classifications || [];
+        mergeClassifications(incoming);
+      } finally {
+        setReclassifying(false);
+      }
+    },
+    [mergeClassifications]
+  );
 
   // Tenant submission counts across the visible portfolio. Excludes blanks
   // and "Vacant" placeholders so we don't badge those.
@@ -473,9 +513,9 @@ export default function MaintenancePage() {
   // sorting and filtering when present. The original tenant-submitted value
   // is still rendered alongside so the difference is visible.
   const effectiveCategory = (r: MaintenanceRequest): MaintenanceCategory =>
-    classifications[r.id]?.category ?? r.category;
+    r.aiCategory ?? r.category;
   const effectivePriority = (r: MaintenanceRequest): MaintenancePriority =>
-    classifications[r.id]?.priority ?? r.priority;
+    r.aiPriority ?? r.priority;
 
   const filtered = allRequests
     .filter((r) => {
@@ -515,10 +555,7 @@ export default function MaintenancePage() {
     })
     .sort((a, b) => PRIORITY_RANK[effectivePriority(a)] - PRIORITY_RANK[effectivePriority(b)]);
 
-  const metrics = useMemo(
-    () => computeMetrics(allRequests, classifications),
-    [allRequests, classifications]
-  );
+  const metrics = useMemo(() => computeMetrics(allRequests), [allRequests]);
   const maxAging = Math.max(1, ...metrics.aging.map((a) => a.count));
   const maxCategory = Math.max(1, ...metrics.categoryBreakdown.map((c) => c.count));
 
@@ -622,6 +659,7 @@ export default function MaintenancePage() {
   const openTranslateModal = useCallback(
     async (ids: string[]) => {
       if (ids.length === 0) return;
+      setTranslateIds(ids);
       setTranslateOpen(true);
       setCopiedAll(false);
       const items = ids
@@ -698,17 +736,16 @@ export default function MaintenancePage() {
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold break-words">
-                {classifications[selected.id]?.title || selected.title}
+                {selected.aiTitle || selected.title}
               </h1>
-              {classifications[selected.id]?.title &&
-                classifications[selected.id]!.title !== selected.title && (
-                  <span
-                    title={`AI summary. Tenant title: ${selected.title}`}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5"
-                  >
-                    <Sparkles className="w-3 h-3" /> AI
-                  </span>
-                )}
+              {selected.aiTitle && selected.aiTitle !== selected.title && (
+                <span
+                  title={`AI summary. Tenant title: ${selected.title}`}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5"
+                >
+                  <Sparkles className="w-3 h-3" /> AI
+                </span>
+              )}
             </div>
             <p className="text-muted-foreground mt-1 break-words">
               {selected.propertyName} #{selected.unitNumber} &middot; {selected.tenantName}
@@ -724,17 +761,25 @@ export default function MaintenancePage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap shrink-0">
-            {classifications[selected.id]?.priority &&
-              classifications[selected.id]!.priority !== selected.priority && (
-                <span
-                  title={`AI priority — tenant submitted "${selected.priority}"`}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5"
-                >
-                  <Sparkles className="w-3 h-3" />
-                </span>
-              )}
-            <StatusBadge value={classifications[selected.id]?.priority ?? selected.priority} />
+            {selected.aiPriority && selected.aiPriority !== selected.priority && (
+              <span
+                title={`AI priority — tenant submitted "${selected.priority}"`}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5"
+              >
+                <Sparkles className="w-3 h-3" />
+              </span>
+            )}
+            <StatusBadge value={selected.aiPriority ?? selected.priority} />
             <StatusBadge value={selected.status} />
+            <button
+              onClick={() => reclassifyOne(selected)}
+              disabled={reclassifying}
+              title="Re-run AI classification"
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {reclassifying ? "Re-classifying…" : "Re-classify"}
+            </button>
           </div>
         </div>
 
@@ -750,16 +795,15 @@ export default function MaintenancePage() {
               <div>
                 <p className="text-sm text-muted-foreground">Category</p>
                 <p className="text-sm mt-1 capitalize flex items-center gap-1.5">
-                  {classifications[selected.id]?.category ?? selected.category}
-                  {classifications[selected.id]?.category &&
-                    classifications[selected.id]!.category !== selected.category && (
-                      <span
-                        title={`AI-classified — original: ${selected.category}`}
-                        className="inline-flex items-center gap-0.5 text-[10px] font-medium text-indigo-700"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                      </span>
-                    )}
+                  {selected.aiCategory ?? selected.category}
+                  {selected.aiCategory && selected.aiCategory !== selected.category && (
+                    <span
+                      title={`AI-classified — original: ${selected.category}`}
+                      className="inline-flex items-center gap-0.5 text-[10px] font-medium text-indigo-700"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                    </span>
+                  )}
                 </p>
               </div>
               <div>
@@ -1020,6 +1064,15 @@ export default function MaintenancePage() {
               {metrics.openEmergencies > 0 && (
                 <p className="text-xs text-red-600 mt-1">
                   {metrics.openEmergencies} emergency
+                  {metrics.openEmergenciesAiElevated > 0 && (
+                    <span
+                      title="Tenant didn't mark these as emergency — AI did"
+                      className="ml-1 inline-flex items-center gap-0.5 text-indigo-700"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      {metrics.openEmergenciesAiElevated} AI-elevated
+                    </span>
+                  )}
                 </p>
               )}
             </button>
@@ -1369,13 +1422,12 @@ export default function MaintenancePage() {
       {!loading && (
         <div ref={listRef} className="space-y-3">
           {filtered.map((req) => {
-            const cls = classifications[req.id];
-            const cat = cls?.category ?? req.category;
-            const pri = cls?.priority ?? req.priority;
-            const titleText = cls?.title || req.title;
-            const aiTitle = cls?.title && cls.title !== req.title;
-            const aiCategory = cls?.category && cls.category !== req.category;
-            const aiPriority = cls?.priority && cls.priority !== req.priority;
+            const cat = req.aiCategory ?? req.category;
+            const pri = req.aiPriority ?? req.priority;
+            const titleText = req.aiTitle || req.title;
+            const aiTitle = Boolean(req.aiTitle && req.aiTitle !== req.title);
+            const aiCategory = Boolean(req.aiCategory && req.aiCategory !== req.category);
+            const aiPriority = Boolean(req.aiPriority && req.aiPriority !== req.priority);
             const tenantCount = tenantOrderCounts.get(req.tenantName) ?? 0;
             const isSelected = selectedIds.has(req.id);
             return (
@@ -1398,8 +1450,20 @@ export default function MaintenancePage() {
                   />
                 </label>
                 <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void openTranslateModal([req.id]);
+                  }}
+                  title="Translate to Spanish"
+                  aria-label="Translate to Spanish"
+                  className="absolute top-3 right-3 z-10 inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <Languages className="w-4 h-4" />
+                </button>
+                <button
                   onClick={() => setSelected(req)}
-                  className="block w-full text-left pl-7"
+                  className="block w-full text-left pl-7 pr-7"
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className="inline-flex items-center gap-1">
@@ -1478,12 +1542,12 @@ export default function MaintenancePage() {
 
       {translateOpen && (
         <TranslateModal
-          ids={Array.from(selectedIds)}
+          ids={translateIds}
           requests={allRequests}
           translations={translations}
           loading={translating}
           copiedAll={copiedAll}
-          onCopyAll={() => copyAllTranslations(Array.from(selectedIds))}
+          onCopyAll={() => copyAllTranslations(translateIds)}
           onCopyOne={copyOne}
           onClose={closeTranslateModal}
         />

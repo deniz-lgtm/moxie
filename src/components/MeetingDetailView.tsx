@@ -117,18 +117,13 @@ export default function MeetingDetailView({
       return {};
     }
   });
+  // Session-only overlay of fresh classifications that just came back from
+  // the API. The persistent cache lives server-side in
+  // work_order_annotations; the next /api/maintenance/requests fetch
+  // surfaces them via wo.aiCategory / aiPriority / aiTitle.
   const [woClassifications, setWoClassifications] = useState<
     Record<string, WoClassification>
-  >(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      return (
-        JSON.parse(window.localStorage.getItem("moxie:wo-classifications") || "{}") || {}
-      );
-    } catch {
-      return {};
-    }
-  });
+  >({});
 
   // Load active team contacts so the attendee picker can pull from them.
   useEffect(() => {
@@ -493,8 +488,29 @@ export default function MeetingDetailView({
     };
   }, [maintenanceOpen, woSummaries, workOrderSourceText]);
 
-  // Classify open work orders for AI category + priority. Same cache key
-  // as the maintenance page so both screens share results.
+  // Resolve the AI classification for a work order id, preferring a
+  // session-overlay value (from a classify call this session) and falling
+  // back to fields persisted on the live workOrders prop.
+  const classificationFor = useCallback(
+    (id: string): WoClassification | null => {
+      const overlay = woClassifications[id];
+      if (overlay) return overlay;
+      const live = workOrders.find((w) => w.id === id);
+      if (live?.aiPriority) {
+        return {
+          category: live.aiCategory ?? live.category ?? "general",
+          priority: live.aiPriority,
+          title: live.aiTitle ?? live.title,
+        };
+      }
+      return null;
+    },
+    [woClassifications, workOrders]
+  );
+
+  // Classify open work orders that don't already have AI fields server-side
+  // or in the in-session overlay. The classify endpoint persists results to
+  // work_order_annotations so they survive across browsers and users.
   useEffect(() => {
     const missing = maintenanceOpen
       .map((wo) => {
@@ -503,11 +519,14 @@ export default function MeetingDetailView({
           id: wo.id,
           title: wo.title,
           description: live?.description || wo.title || "",
+          alreadyClassified: Boolean(live?.aiPriority),
         };
       })
+      .filter((x) => !x.alreadyClassified)
       .filter((x) => !woClassifications[x.id])
       .filter((x) => (x.description || x.title).trim().length > 0)
-      .slice(0, 30);
+      .slice(0, 30)
+      .map(({ id, title, description }) => ({ id, title, description }));
     if (missing.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -525,11 +544,6 @@ export default function MeetingDetailView({
           const next = { ...prev };
           for (const c of incoming) {
             next[c.id] = { category: c.category, priority: c.priority, title: c.title };
-          }
-          try {
-            window.localStorage.setItem("moxie:wo-classifications", JSON.stringify(next));
-          } catch {
-            /* ignore quota errors */
           }
           return next;
         });
@@ -558,14 +572,14 @@ export default function MeetingDetailView({
   const sortedMaintenanceOpen = useMemo(() => {
     const ranked = [...maintenanceOpen];
     ranked.sort((a, b) => {
-      const pa = woClassifications[a.id]?.priority || a.priority || "medium";
-      const pb = woClassifications[b.id]?.priority || b.priority || "medium";
+      const pa = classificationFor(a.id)?.priority || a.priority || "medium";
+      const pb = classificationFor(b.id)?.priority || b.priority || "medium";
       const ra = WO_PRIORITY_RANK[pa] ?? 2;
       const rb = WO_PRIORITY_RANK[pb] ?? 2;
       return ra - rb;
     });
     return ranked;
-  }, [maintenanceOpen, woClassifications]);
+  }, [maintenanceOpen, classificationFor]);
 
   return (
     <div className="space-y-6">
@@ -826,7 +840,7 @@ export default function MeetingDetailView({
         >
           {sortedMaintenanceOpen.map((wo) => {
             const live = workOrders.find((w) => w.id === wo.id);
-            const cls = woClassifications[wo.id];
+            const cls = classificationFor(wo.id);
             const aiSummary = woSummaries[wo.id];
             const titleText = cls?.title || aiSummary || wo.title;
             const aiTitle = Boolean(

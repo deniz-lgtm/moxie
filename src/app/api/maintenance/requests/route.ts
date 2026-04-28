@@ -5,8 +5,30 @@ import {
   getAllAnnotations,
 } from "@/lib/work-orders-db";
 import { mapWorkOrderRow } from "@/lib/data";
-import type { MaintenanceRequest, MaintenanceStatus } from "@/lib/types";
+import type {
+  MaintenanceCategory,
+  MaintenancePriority,
+  MaintenanceRequest,
+  MaintenanceStatus,
+} from "@/lib/types";
 import type { DbWorkOrderAnnotation } from "@/lib/supabase";
+
+const VALID_CATEGORIES: ReadonlySet<string> = new Set([
+  "plumbing",
+  "electrical",
+  "hvac",
+  "appliance",
+  "structural",
+  "pest",
+  "locksmith",
+  "general",
+]);
+const VALID_PRIORITIES: ReadonlySet<string> = new Set([
+  "emergency",
+  "high",
+  "medium",
+  "low",
+]);
 
 function applyAnnotation(
   req: MaintenanceRequest,
@@ -15,6 +37,14 @@ function applyAnnotation(
   if (!ann) return req;
   // AppFolio status_notes come first, then Moxie-added notes in chronological order.
   const moxieNotes = (ann.notes || []).map((n) => n.text).filter(Boolean);
+  const aiCategory =
+    ann.ai_category && VALID_CATEGORIES.has(ann.ai_category)
+      ? (ann.ai_category as MaintenanceCategory)
+      : undefined;
+  const aiPriority =
+    ann.ai_priority && VALID_PRIORITIES.has(ann.ai_priority)
+      ? (ann.ai_priority as MaintenancePriority)
+      : undefined;
   return {
     ...req,
     status: ann.internal_status ? (ann.internal_status as MaintenanceStatus) : req.status,
@@ -23,6 +53,10 @@ function applyAnnotation(
     scheduledDate: ann.scheduled_date_override ?? req.scheduledDate,
     followUpOn: ann.follow_up_on ?? req.followUpOn,
     notes: [...req.notes, ...moxieNotes],
+    aiCategory,
+    aiPriority,
+    aiTitle: ann.ai_title ?? undefined,
+    aiClassifiedAt: ann.ai_classified_at ?? undefined,
   };
 }
 
