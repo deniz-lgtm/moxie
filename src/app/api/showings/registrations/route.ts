@@ -8,7 +8,8 @@ import {
   updateRegistrationStatus,
   upsertRegistration,
 } from "@/lib/showings-db";
-import type { ShowingRegistration, ShowingRegistrationStatus } from "@/lib/types";
+import { createGuestCard } from "@/lib/appfolio";
+import type { ShowingRegistration, ShowingRegistrationStatus, ShowingSlot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -94,10 +95,57 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     };
-    const saved = await upsertRegistration(registration);
+    let saved = await upsertRegistration(registration);
+
+    // Wire the registration into AppFolio's showing schedule. Best-effort:
+    // if AppFolio creds aren't configured or the call fails, the registration
+    // still saves successfully — the user can retry via the "→AF" button.
+    if (!saved.guestCardId) {
+      const guestCardId = await pushRegistrationToAppFolio(saved, slot);
+      if (guestCardId) {
+        saved = await upsertRegistration({ ...saved, guestCardId });
+      }
+    }
+
     return NextResponse.json({ registration: saved });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Failed" }, { status: 500 });
+  }
+}
+
+async function pushRegistrationToAppFolio(
+  reg: ShowingRegistration,
+  slot: ShowingSlot
+): Promise<string | null> {
+  if (!process.env.APPFOLIO_CLIENT_ID || !process.env.APPFOLIO_CLIENT_SECRET) {
+    return null;
+  }
+  try {
+    const nameParts = reg.prospectName.trim().split(/\s+/);
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(" ") || "-";
+    const noteLines = [
+      slot.unitName ? `Unit: ${slot.unitName}` : null,
+      reg.partySize > 1 ? `Party size: ${reg.partySize}` : null,
+      reg.notes ? `Notes: ${reg.notes}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n") || undefined;
+    const result = await createGuestCard({
+      firstName,
+      lastName,
+      email: reg.prospectEmail,
+      phone: reg.prospectPhone,
+      propertyId: slot.propertyId,
+      unitId: slot.unitId,
+      showingAt: slot.startsAt,
+      source: "Moxie Showings",
+      notes: noteLines,
+    });
+    return String(result.id ?? result);
+  } catch (err: any) {
+    console.warn("[showings] AppFolio auto-push failed:", err?.message ?? err);
+    return null;
   }
 }
 

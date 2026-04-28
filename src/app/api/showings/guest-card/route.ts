@@ -43,14 +43,12 @@ export async function POST(request: Request) {
     const lastName = nameParts.slice(1).join(" ") || "-";
 
     const noteLines = [
-      `Open house sign-up via Moxie Showings`,
-      slot?.propertyName ? `Property: ${slot.propertyName}` : null,
-      slot?.startsAt ? `Showing: ${new Date(slot.startsAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}` : null,
+      slot?.unitName ? `Unit: ${slot.unitName}` : null,
       reg.partySize > 1 ? `Party size: ${reg.partySize}` : null,
       reg.notes ? `Notes: ${reg.notes}` : null,
     ]
       .filter(Boolean)
-      .join("\n");
+      .join("\n") || undefined;
 
     const result = await createGuestCard({
       firstName,
@@ -58,6 +56,9 @@ export async function POST(request: Request) {
       email: reg.prospectEmail,
       phone: reg.prospectPhone,
       propertyId: slot?.propertyId,
+      unitId: slot?.unitId,
+      showingAt: slot?.startsAt,
+      source: "Moxie Showings",
       notes: noteLines,
     });
 

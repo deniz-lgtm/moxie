@@ -8,7 +8,7 @@
 ### Leasing Parent Page (was 70% → now 95%)
 - [x] Tours section wired up — reads from localStorage via TourStats client component
 - [x] Tour counts and registration counts shown dynamically on parent page
-- [ ] Connect tour data to AppFolio if/when API supports it
+- [x] Connect tour/showing data to AppFolio — registrations auto-create guest cards with structured `unit_id` + `showing_date`/`showing_time` so they land on AppFolio's showing schedule
 
 ### Maintenance Analytics (was "Resident Pulse", 40% → now 80%)
 - [x] Renamed from "Resident Pulse" to "Maintenance Analytics"
