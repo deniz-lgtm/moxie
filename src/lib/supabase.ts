@@ -327,6 +327,45 @@ export type DbNotice = {
   updated_at: string;
 };
 
+// ─── Unit Turns ────────────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_unit_turns.sql.
+
+export type DbUnitTurn = {
+  id: string;
+  unit_id: string;
+  property_id: string | null;
+  unit_number: string;
+  property_name: string;
+  move_out_date: string | null;
+  target_ready_date: string | null;
+  move_in_date: string | null;
+  status: string;
+  outgoing_tenant: string | null;
+  incoming_tenant: string | null;
+  total_budget: number | null;
+  total_spent: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbUnitTurnTask = {
+  id: string;
+  turn_id: string;
+  name: string;
+  category: string;
+  status: string;
+  assigned_to: string | null;
+  vendor: string | null;
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  notes: string;
+  due_date: string | null;
+  completed_date: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Comp Watch ────────────────────────────────────────────────
 // Mirrors supabase/migrations/20260428_comp_watch.sql.
 
