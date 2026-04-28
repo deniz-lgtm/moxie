@@ -84,7 +84,10 @@ export function TeamCalendar({ anchorDate, defaultView = "month" }: TeamCalendar
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null); // YYYY-MM-DD
   const [loading, setLoading] = useState(true);
-  const [hidden, setHidden] = useState<Set<CalEventType>>(new Set());
+  // Work orders are off by default — they overwhelm the calendar with
+  // high-volume maintenance noise. Users can still toggle them on via the
+  // filter chip.
+  const [hidden, setHidden] = useState<Set<CalEventType>>(new Set(["work_order"]));
 
   const visibleEvents = useMemo(
     () => events.filter((e) => !hidden.has(e.type)),

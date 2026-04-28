@@ -123,11 +123,12 @@ export async function loadCalendarEvents(window?: {
   const fromIso = window?.fromIso ?? isoDate(defaultCutoff);
   const toIso = window?.toIso ?? isoDate(defaultCeiling);
 
-  const [showingsRes, unitsRes, meetingsRes, workOrdersRes] = await Promise.allSettled([
+  const [showingsRes, unitsRes, meetingsRes, workOrdersRes, appfolioShowingsRes] = await Promise.allSettled([
     fetch("/api/showings/slots?include_regs=1").then((r) => r.json()),
     fetch("/api/appfolio/units").then((r) => r.json()),
     fetch("/api/meetings/crud").then((r) => r.json()),
     fetch("/api/maintenance/requests").then((r) => r.json()),
+    fetch("/api/appfolio/showings").then((r) => r.json()),
   ]);
 
   const collected: CalEvent[] = [];
@@ -137,7 +138,10 @@ export async function loadCalendarEvents(window?: {
     collected.push({ id: `ac-${ad.date}`, date: ad.date, label: ad.label, type: "academic" });
   }
 
-  // Showings
+  // Showings (Moxie-side slots) — track which AppFolio guest_card_ids are
+  // already represented so we don't double-count when merging with the
+  // AppFolio prospect feed below.
+  const seenGuestCardIds = new Set<string>();
   if (showingsRes.status === "fulfilled" && Array.isArray(showingsRes.value.slots)) {
     for (const s of showingsRes.value.slots) {
       if (s.status === "cancelled") continue;
@@ -152,6 +156,34 @@ export async function loadCalendarEvents(window?: {
         label,
         type: "showing",
         href: "/showings",
+        startMinutes: startDate.getHours() * 60 + startDate.getMinutes(),
+      });
+      for (const r of s.registrations ?? []) {
+        if (r.guestCardId) seenGuestCardIds.add(String(r.guestCardId));
+      }
+    }
+  }
+
+  // Showings (AppFolio-side prospects with a scheduled showing). These are
+  // showings booked directly in AppFolio (or by other systems); the Moxie
+  // showings page only knows about its own slots.
+  if (appfolioShowingsRes.status === "fulfilled" && Array.isArray(appfolioShowingsRes.value.showings)) {
+    for (const ps of appfolioShowingsRes.value.showings) {
+      if (!ps.showingAt || seenGuestCardIds.has(String(ps.guestCardId))) continue;
+      const startDate = new Date(ps.showingAt);
+      if (Number.isNaN(startDate.getTime())) continue;
+      const date = isoDate(startDate);
+      const time = startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      const who = [ps.firstName, ps.lastName].filter(Boolean).join(" ").trim();
+      const where = ps.propertyName || ps.unitName;
+      const label = where
+        ? `Showing: ${where}${who ? ` — ${who}` : ""} @ ${time}`
+        : `Showing${who ? `: ${who}` : ""} @ ${time}`;
+      collected.push({
+        id: `af-show-${ps.guestCardId}`,
+        date,
+        label,
+        type: "showing",
         startMinutes: startDate.getHours() * 60 + startDate.getMinutes(),
       });
     }

@@ -273,6 +273,94 @@ export interface GuestCardResult {
   [key: string]: unknown;
 }
 
+// --- Prospect Showings (read from AppFolio) ---
+// AppFolio's `guest_card_detail` v2 report exposes guest cards (prospects)
+// with their scheduled showing. Field names vary between AppFolio tenants
+// — we probe a few candidates to be resilient.
+//
+// If the report 404s or returns an unexpected shape, this returns an empty
+// array so callers can degrade gracefully (e.g. team calendar simply
+// omits AppFolio-side showings).
+export interface ProspectShowing {
+  guestCardId: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  propertyName?: string;
+  unitName?: string;
+  /** ISO 8601 datetime of the scheduled showing. */
+  showingAt: string;
+}
+
+const SHOWING_DATE_FIELDS = [
+  "showing_date", "showingDate", "ShowingDate",
+  "scheduled_showing_date", "next_showing_date",
+];
+const SHOWING_TIME_FIELDS = [
+  "showing_time", "showingTime", "ShowingTime",
+  "scheduled_showing_time", "next_showing_time",
+];
+const FIRST_NAME_FIELDS = ["first_name", "firstName", "FirstName", "applicant_first_name"];
+const LAST_NAME_FIELDS = ["last_name", "lastName", "LastName", "applicant_last_name"];
+const PROPERTY_NAME_FIELDS = ["property_name", "PropertyName", "property"];
+const UNIT_NAME_FIELDS = ["unit_name", "UnitName", "unit", "unit_number"];
+const EMAIL_FIELDS = ["email", "Email", "applicant_email"];
+const PHONE_FIELDS = ["phone", "Phone", "phone_number", "PhoneNumber"];
+const GUEST_CARD_ID_FIELDS = ["guest_card_id", "GuestCardId", "id", "Id"];
+
+function pickStr(row: Record<string, unknown>, candidates: string[]): string | undefined {
+  for (const k of candidates) {
+    const v = row[k];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return undefined;
+}
+
+export async function getProspectShowings(): Promise<ProspectShowing[]> {
+  // Try guest_card_detail first; fall back to prospect_summary.
+  const reports = ["/reports/guest_card_detail.json", "/reports/prospect_summary.json"];
+  let rows: any[] = [];
+  for (const endpoint of reports) {
+    try {
+      rows = await appfolioFetchAll(endpoint);
+      if (rows.length > 0) break;
+    } catch (err: any) {
+      console.warn(`[AppFolio] ${endpoint} unavailable: ${err?.message ?? err}`);
+    }
+  }
+
+  const out: ProspectShowing[] = [];
+  for (const row of rows) {
+    const dateStr = pickStr(row, SHOWING_DATE_FIELDS);
+    if (!dateStr) continue;
+    const timeStr = pickStr(row, SHOWING_TIME_FIELDS) ?? "00:00";
+    // Normalize date — AppFolio sometimes returns MM/DD/YYYY.
+    const isoDate = (() => {
+      const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+      return dateStr.slice(0, 10);
+    })();
+    const time = /^\d{1,2}:\d{2}/.test(timeStr) ? timeStr : "00:00";
+    const showingAt = `${isoDate}T${time.length === 4 ? "0" + time : time}:00`;
+    if (Number.isNaN(new Date(showingAt).getTime())) continue;
+
+    const id = pickStr(row, GUEST_CARD_ID_FIELDS);
+    if (!id) continue;
+    out.push({
+      guestCardId: id,
+      firstName: pickStr(row, FIRST_NAME_FIELDS),
+      lastName: pickStr(row, LAST_NAME_FIELDS),
+      email: pickStr(row, EMAIL_FIELDS),
+      phone: pickStr(row, PHONE_FIELDS),
+      propertyName: pickStr(row, PROPERTY_NAME_FIELDS),
+      unitName: pickStr(row, UNIT_NAME_FIELDS),
+      showingAt,
+    });
+  }
+  return out;
+}
+
 export async function createGuestCard(input: GuestCardInput): Promise<GuestCardResult> {
   const url = `${getBaseUrl()}/guest_cards`;
   const headers = getAuthHeaders();
