@@ -48,7 +48,7 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
  * Get the set of property_ids that belong to a given portfolio.
  * Scans both property_directory and rent_roll.
  */
-async function getPortfolioPropertyIds(portfolioId: string): Promise<Set<string>> {
+export async function getPortfolioPropertyIds(portfolioId: string): Promise<Set<string>> {
   const now = Date.now();
   const cached = _portfolioPropertyIdCache.get(portfolioId);
   if (cached && now - (_portfolioPropertyIdCacheTime.get(portfolioId) ?? 0) < CACHE_TTL) {

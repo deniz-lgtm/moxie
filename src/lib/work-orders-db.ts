@@ -65,6 +65,73 @@ function rawToDbRow(raw: Record<string, any>): Omit<DbWorkOrder, "created_at" | 
   };
 }
 
+/**
+ * Reconcile stored rows against the live AppFolio fetch: any stored row
+ * whose property is in `portfolioPropertyIds` but whose id is NOT in
+ * `liveIds` is presumed closed (AppFolio either dropped it from the
+ * 12-month window or completed it since the last sync, and we just
+ * upserted everything still present). We mark its `status='closed'`
+ * and stamp `synced_at` so the cache stops counting it as open.
+ *
+ * History is preserved — we never DELETE. Operator-set
+ * work_order_annotations.internal_status still wins on the maintenance
+ * page if the operator wants to keep an old row visible.
+ *
+ * Scoped strictly to property_ids belonging to the synced portfolio so
+ * that other portfolios (e.g. portfolio 25 that doesn't sync to
+ * Supabase, or older portfolios) aren't clobbered.
+ *
+ * Returns the number of rows whose status was flipped to closed.
+ */
+export async function reconcileClosedWorkOrders(
+  liveIds: Set<string>,
+  portfolioPropertyIds: Set<string>
+): Promise<number> {
+  const sb = getSupabase();
+  if (!sb) return 0;
+  if (portfolioPropertyIds.size === 0) return 0;
+
+  const now = new Date().toISOString();
+  const propertyIdList = Array.from(portfolioPropertyIds);
+
+  // Pull just id/status/property_id for the in-portfolio rows so we know
+  // which ones need flipping. Status=closed already? skip.
+  const { data, error } = await sb
+    .from("work_orders")
+    .select("id, status, property_id")
+    .in("property_id", propertyIdList);
+  if (error) {
+    if (!isMissingTableError(error)) {
+      console.warn("[work-orders-db] reconcileClosedWorkOrders read:", error.message);
+    }
+    return 0;
+  }
+
+  const stale = (data ?? [])
+    .filter((row) => !liveIds.has(row.id))
+    .filter((row) => (row.status ?? "").toLowerCase() !== "closed")
+    .map((row) => row.id);
+
+  if (stale.length === 0) return 0;
+
+  // Update in chunks to stay under Supabase's IN-list cap.
+  let total = 0;
+  const CHUNK = 200;
+  for (let i = 0; i < stale.length; i += CHUNK) {
+    const batch = stale.slice(i, i + CHUNK);
+    const { error: updErr } = await sb
+      .from("work_orders")
+      .update({ status: "closed", synced_at: now })
+      .in("id", batch);
+    if (updErr) {
+      console.warn("[work-orders-db] reconcileClosedWorkOrders update:", updErr.message);
+      continue;
+    }
+    total += batch.length;
+  }
+  return total;
+}
+
 /** Upsert raw AppFolio rows into Supabase. Returns how many rows were written. */
 export async function upsertWorkOrders(rawRows: Record<string, any>[]): Promise<number> {
   const sb = getSupabase();
