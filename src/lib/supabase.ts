@@ -305,6 +305,28 @@ export type DbCapitalProject = {
   updated_at: string;
 };
 
+// ─── Tenant Notices ────────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_notices.sql.
+
+export type DbNotice = {
+  id: string;
+  type: string;
+  status: string;
+  subject: string;
+  body: string;
+  recipient_type: string;
+  property_id: string | null;
+  unit_id: string | null;
+  unit_name: string;
+  tenant_name: string;
+  delivery_method: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  acknowledged_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Showings (open-house scheduling) ──────────────────────────
 // Mirrors supabase/migrations/20260424_showings.sql.
 

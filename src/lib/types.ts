@@ -304,6 +304,35 @@ export interface MaintenanceRequest {
   followUpOn?: string;
 }
 
+// --- Tenant Notices ---
+export type NoticeType =
+  | "violation"
+  | "rent_reminder"
+  | "building_announcement"
+  | "lease_renewal"
+  | "maintenance_notice";
+export type NoticeStatus = "draft" | "sent" | "delivered" | "acknowledged";
+export type NoticeDeliveryMethod = "email" | "sms" | "portal" | "mail";
+export type NoticeRecipientType = "individual" | "all";
+
+export interface Notice {
+  id: string;
+  type: NoticeType;
+  status: NoticeStatus;
+  subject: string;
+  body: string;
+  recipientType: NoticeRecipientType;
+  propertyId?: string;
+  unitId?: string;
+  unitName: string;
+  tenantName: string;
+  deliveryMethod: NoticeDeliveryMethod;
+  createdAt: string;
+  sentAt: string;
+  deliveredAt?: string;
+  acknowledgedAt?: string;
+}
+
 // --- Vendors ---
 export type VendorStatus = "active" | "inactive" | "preferred";
 
