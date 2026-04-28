@@ -299,7 +299,7 @@ export default function MaintenancePage() {
       const json = await res.json();
       return { workOrders: (json.workOrders || []) as MaintenanceRequest[], syncedAt: null };
     }
-    const res = await fetch("/api/maintenance/requests");
+    const res = await fetch(`/api/maintenance/requests?portfolio_id=${encodeURIComponent(portfolioId)}`);
     if (!res.ok) return { workOrders: [] as MaintenanceRequest[], syncedAt: null };
     const json = await res.json();
     return {

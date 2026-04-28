@@ -114,7 +114,7 @@ export default function MeetingsPage() {
     try {
       const [unitsR, woR] = await Promise.all([
         fetch(`/api/appfolio/units?portfolio_id=${portfolioId}`).then((r) => r.json()),
-        fetch(`/api/maintenance/requests`).then((r) => r.json()),
+        fetch(`/api/maintenance/requests?portfolio_id=${encodeURIComponent(portfolioId)}`).then((r) => r.json()),
       ]);
       const nextUnits: Unit[] = Array.isArray(unitsR.units) ? unitsR.units : [];
       const nextWO: MaintenanceRequest[] = Array.isArray(woR.workOrders) ? woR.workOrders : [];
