@@ -95,17 +95,23 @@ export async function POST(request: Request) {
 For each numbered request below, output ONE JSON object with:
 - "category": one of ${CATEGORIES.map((c) => `"${c}"`).join(", ")}.
   Pick the most specific category. Only use "general" when nothing else fits.
-- "priority": one of ${PRIORITIES.map((p) => `"${p}"`).join(", ")}. Use:
-  • "emergency" — RESERVED for the four operator-defined emergency scenarios (and their direct equivalents):
-      (1) Flooding / active major water intrusion (burst pipe, ceiling collapse from water, pooling water).
-          A dripping or slow leak is NOT an emergency — that's "high".
-      (2) Fire, smoke, gas leak, or carbon monoxide alarm — anything life-safety from fire/gas.
-      (3) No power to the entire unit (whole-unit outage). A single dead outlet or one tripped breaker is NOT emergency — that's "high".
-      (4) Locked out, OR the unit cannot be secured (broken exterior door / deadbolt / window that won't close).
-    Nothing else is "emergency". When in doubt, choose "high".
-  • "high" — urgent but not in the four emergency scenarios above. Examples: dripping or persistent leak, no hot water, no heat, broken AC, broken refrigerator/stove/oven, pest infestation, sewage backup, single dead outlet/circuit, security concern that doesn't prevent securing the unit.
-  • "medium" — slow drain, intermittent issue, cosmetic damage causing inconvenience, minor leak, things that need attention this week.
-  • "low" — cosmetic, paint, scuffs, minor request, preference, "when you have time".
+
+- "priority": one of ${PRIORITIES.map((p) => `"${p}"`).join(", ")}. Use the response-time rule:
+
+  • "emergency" — Someone has to be dispatched RIGHT NOW. If we wait, people get hurt or property gets damaged. ONLY these scenarios qualify (and their direct equivalents):
+      (1) Active flooding or major water intrusion that's spreading damage right now — burst pipe, water pouring through the ceiling, pooling water. A drip, a slow leak, a stain, or a contained leak under a sink is NOT emergency.
+      (2) Active fire, visible smoke from a non-cooking source, gas leak, smell of gas, or carbon monoxide alarm currently sounding for a real CO event. CRITICAL: a smoke/fire/CO alarm that is BEEPING, CHIRPING, or has a LOW BATTERY is NOT an emergency — that's a battery swap (classify as "low"). Only treat alarms as emergency when the tenant describes an actual fire, smoke, or gas event.
+      (3) Whole-unit power outage — the entire apartment has no electricity. CRITICAL: a single dead outlet, one tripped breaker, one room with no power, or "outlets in the bedroom don't work" are NOT emergency — those are "medium" unless the tenant says it affects the whole unit.
+      (4) Tenant is locked out, OR the unit cannot be secured (broken exterior door / deadbolt, exterior window won't close or lock, broken lock).
+      (5) Active sewage backup overflowing into the unit.
+    Nothing outside this list is "emergency". When in doubt, choose lower.
+
+  • "high" — The kind of thing right below an emergency. Can wait a day but NOT overnight without real impact on the tenant's habitability or causing property damage. Examples: no heat in cold weather, no AC in hot weather, no hot water, refrigerator not cooling (food will spoil), persistent active leak (not flooding), only-toilet-in-the-unit not flushing, security concern that doesn't yet prevent securing the unit, infestation discovered today.
+
+  • "medium" — Affects function or comfort but the tenant can wait a few days. This is the DEFAULT for most broken-but-not-urgent stuff. Examples: toilet won't flush (when there are multiple bathrooms), washer/dryer broken, dishwasher broken, stove or oven broken, garbage disposal broken, single dead outlet, one room's outlets out, slow drain, ceiling fan broken, intermittent issues, smoke or fire alarm beeping for battery, light fixture out, minor leak that's contained, drip from a faucet, pest sighting (not infestation).
+
+  • "low" — Cosmetic or convenience only, "when you have time" stuff. Examples: paint touch-up, scuffs, drawer alignment, minor stains, replacing dead bulbs, doorbell, anything the tenant frames as a preference or non-urgent request.
+
 - "title": a SHORT plain-English summary, max 8 words, captures what's broken and where (e.g. "Kitchen sink leaking under cabinet"). Title-case first word only. Drop greetings and politeness.
 
 Return a JSON array of objects in the SAME order and length as the inputs. No keys outside the array, no commentary.
@@ -201,22 +207,58 @@ function fallbackCategory(i: { title: string; description: string }): Maintenanc
 
 function fallbackPriority(i: { title: string; description: string }): MaintenancePriority {
   const t = `${i.title} ${i.description}`.toLowerCase();
-  // Emergency: flooding, fire, no power (whole unit), locked out — plus
-  // direct equivalents (gas leak, CO, smoke, burst pipe, can't secure unit).
-  if (
-    /flood|burst pipe|water (pouring|gushing|everywhere)|ceiling (collapsed|caving)|fire\b|smoke|gas (leak|smell)|carbon monoxide|no power|power.?(out|outage)|locked out|can'?t lock|won'?t lock|door (won'?t|can'?t) (close|lock|secure)/.test(t)
-  ) {
+
+  // Smoke/fire/CO alarm beeping for a low battery is the most common false
+  // emergency — catch it before any other rule and downgrade to low.
+  const isAlarmBatteryChirp =
+    /\b(smoke|fire|carbon\s+monoxide|co)\s+(alarm|detector)\b/.test(t) &&
+    /\b(beep|chirp|low\s*batt|needs?\s+(a\s+)?batter|replace\s+batter)/.test(t);
+  if (isAlarmBatteryChirp) return "low";
+
+  // Emergency: only the five operator-defined scenarios. Each pattern is
+  // worded so that single-room or contained problems don't trigger.
+  const isFlooding =
+    /\bflood(ing|ed)?\b|\bburst\s+pipe\b|water\s+(pouring|gushing|everywhere)|ceiling\s+(collapsed|caving)/.test(
+      t
+    );
+  const isFireOrGas =
+    /\bgas\s+(leak|smell)\b|\bsmell\s+of\s+gas\b|\bcarbon\s+monoxide\b|\bactive\s+fire\b|\bhouse\s+is\s+on\s+fire\b|\bvisible\s+smoke\b/.test(
+      t
+    );
+  const isWholeUnitNoPower =
+    /(no\s+power|power\s+is\s+out|no\s+electricity|whole\s+unit\s+(is\s+)?(no|out|without)\s+power|entire\s+(unit|apartment)\s+(no|out|without)\s+power)/.test(
+      t
+    ) &&
+    !/(outlet|one\s+room|bedroom|kitchen\s+only|breaker\s+tripped|single)/.test(t);
+  const isSewageBackup = /sewage\s+(backup|overflow|coming\s+up)|sewer\s+backup/.test(t);
+  const isLockoutOrUnsecured =
+    /\block(ed)?\s+out\b|can'?t\s+(lock|secure|close)\s+(the\s+)?(door|window)|won'?t\s+(lock|secure|close)|broken\s+(front\s+door|back\s+door|exterior\s+door|deadbolt|exterior\s+lock)/.test(
+      t
+    );
+  if (isFlooding || isFireOrGas || isWholeUnitNoPower || isSewageBackup || isLockoutOrUnsecured) {
     return "emergency";
   }
-  // High: urgent but not one of the four emergency scenarios. Note dripping
-  // and persistent leaks live here, not emergency.
+
+  // High: livability / property-loss issues that can't wait overnight.
   if (
-    /no hot water|no heat|broken|won'?t (work|turn|start)|not working|infest|leak|drip|sewage|burst|electrical hazard|sparking|fridge|refrigerator|stove|oven/.test(t)
+    /no\s+hot\s+water|no\s+heat\b|no\s+a\/?c\b|no\s+air\s+condition|refrigerator\s+(not|won'?t).*(cool|work)|fridge\s+(broken|not\s+cool|won'?t\s+cool)|persistent(ly)?\s+leak|continuously\s+leak|leak.*through\s+ceiling|infestation/.test(
+      t
+    )
   ) {
     return "high";
   }
-  if (/slow|intermittent|sometimes|stain|clog/.test(t)) return "medium";
-  if (/paint|cosmetic|scuff|when you (get a chance|have time)|whenever|small|minor/.test(t)) return "low";
+
+  // Low: cosmetic / convenience.
+  if (
+    /paint|cosmetic|scuff|when\s+you\s+(get\s+a\s+chance|have\s+time)|whenever|small\s+request|minor\s+request/.test(
+      t
+    )
+  ) {
+    return "low";
+  }
+
+  // Default to medium for everything else (toilet, washer, single outlet,
+  // dishwasher, stove, slow drain, intermittent…).
   return "medium";
 }
 

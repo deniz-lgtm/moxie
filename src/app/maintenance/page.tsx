@@ -462,6 +462,46 @@ export default function MaintenancePage() {
     [mergeClassifications]
   );
 
+  // Re-run AI classification across every work order in the portfolio. The
+  // classify endpoint caps each request at 30 items, so we chunk and walk.
+  // Useful when the operator-defined priority rules change and existing
+  // rows in work_order_annotations are stale.
+  const reclassifyAll = useCallback(async () => {
+    const items = allRequests
+      .map((r) => ({ id: r.id, title: r.title, description: r.description }))
+      .filter((x) => (x.description || x.title || "").trim().length > 0);
+    if (items.length === 0) return;
+    if (
+      !window.confirm(
+        `Re-classify ${items.length} work orders? This re-runs the AI rating for every record and overwrites the cached values.`
+      )
+    ) {
+      return;
+    }
+    setReclassifying(true);
+    try {
+      const CHUNK = 30;
+      for (let i = 0; i < items.length; i += CHUNK) {
+        const batch = items.slice(i, i + CHUNK);
+        try {
+          const res = await fetch("/api/maintenance/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items: batch }),
+          });
+          if (!res.ok) continue;
+          const j = await res.json();
+          const incoming: Array<{ id: string } & Classification> = j.classifications || [];
+          mergeClassifications(incoming);
+        } catch {
+          /* skip a failed chunk and keep going */
+        }
+      }
+    } finally {
+      setReclassifying(false);
+    }
+  }, [allRequests, mergeClassifications]);
+
   // Tenant submission counts across the visible portfolio. Excludes blanks
   // and "Vacant" placeholders so we don't badge those.
   const tenantOrderCounts = useMemo(() => {
@@ -1018,6 +1058,15 @@ export default function MaintenancePage() {
             className="px-3 py-2 bg-card border border-border text-sm rounded-lg hover:bg-muted transition-colors whitespace-nowrap disabled:opacity-50"
           >
             {syncing ? "Loading…" : portfolioId === "25" ? "Refresh" : "Sync now"}
+          </button>
+          <button
+            onClick={reclassifyAll}
+            disabled={reclassifying || allRequests.length === 0}
+            title="Re-run AI category + priority on every work order"
+            className="px-3 py-2 bg-card border border-border text-sm rounded-lg hover:bg-muted transition-colors whitespace-nowrap disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {reclassifying ? "Re-classifying…" : "Re-classify all"}
           </button>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
