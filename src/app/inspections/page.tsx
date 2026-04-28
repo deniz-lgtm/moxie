@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage } from "@/lib/storage";
+import {
+  fetchAllInspections,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/inspections-db";
 import type { Inspection, InspectionType } from "@/lib/types";
 import {
   ClipboardCheck,
@@ -91,7 +94,15 @@ export default function InspectionsHub() {
   const [inspections, setInspections] = useState<Inspection[]>([]);
 
   useEffect(() => {
-    setInspections(loadFromStorage<Inspection[]>("inspections_v2", []));
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await fetchAllInspections();
+      if (!cancelled) setInspections(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function countByType(type: InspectionType) {

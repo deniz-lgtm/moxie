@@ -1,9 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import {
+  fetchInspections,
+  saveInspectionToDb,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/inspections-db";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import type {
   Inspection,
@@ -38,9 +42,7 @@ type View = "list" | "create" | "walking" | "completed";
 
 export default function QuarterlyInspectionPage() {
   const { portfolioId } = usePortfolio();
-  const [inspections, setInspections] = useState<Inspection[]>(() =>
-    loadFromStorage<Inspection[]>("inspections_v2", []).filter((i) => i.type === "quarterly")
-  );
+  const [inspections, setInspections] = useState<Inspection[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [active, setActive] = useState<Inspection | null>(null);
   const [view, setView] = useState<View>("list");
@@ -58,10 +60,16 @@ export default function QuarterlyInspectionPage() {
       .catch(() => {});
   }, [portfolioId]);
 
-  const persist = useCallback((updated: Inspection[]) => {
-    const all = loadFromStorage<Inspection[]>("inspections_v2", []);
-    const others = all.filter((i) => i.type !== "quarterly");
-    saveToStorage("inspections_v2", [...others, ...updated]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await fetchInspections("quarterly");
+      if (!cancelled) setInspections(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function save(insp: Inspection) {
@@ -69,7 +77,7 @@ export default function QuarterlyInspectionPage() {
     if (!inspections.find((i) => i.id === insp.id)) updated.push(insp);
     setInspections(updated);
     setActive(insp);
-    persist(updated);
+    void saveInspectionToDb(insp);
   }
 
   function createInspection() {

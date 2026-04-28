@@ -305,6 +305,147 @@ export type DbCapitalProject = {
   updated_at: string;
 };
 
+// ─── Tenant Notices ────────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_notices.sql.
+
+export type DbNotice = {
+  id: string;
+  type: string;
+  status: string;
+  subject: string;
+  body: string;
+  recipient_type: string;
+  property_id: string | null;
+  unit_id: string | null;
+  unit_name: string;
+  tenant_name: string;
+  delivery_method: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  acknowledged_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// ─── Monthly Reports ───────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_reports.sql.
+
+export type DbReport = {
+  id: string;
+  property_id: string | null;
+  property_name: string;
+  type: string;
+  month: string;
+  status: string;
+  notes: string;
+  data: unknown; // jsonb — shape varies by report type
+  created_at: string;
+  updated_at: string;
+};
+
+// ─── Unit Turns ────────────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_unit_turns.sql.
+
+export type DbUnitTurn = {
+  id: string;
+  unit_id: string;
+  property_id: string | null;
+  unit_number: string;
+  property_name: string;
+  move_out_date: string | null;
+  target_ready_date: string | null;
+  move_in_date: string | null;
+  status: string;
+  outgoing_tenant: string | null;
+  incoming_tenant: string | null;
+  total_budget: number | null;
+  total_spent: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbUnitTurnTask = {
+  id: string;
+  turn_id: string;
+  name: string;
+  category: string;
+  status: string;
+  assigned_to: string | null;
+  vendor: string | null;
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  notes: string;
+  due_date: string | null;
+  completed_date: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+// ─── Comp Watch ────────────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_comp_watch.sql.
+
+export type DbCompProperty = {
+  id: string;
+  name: string;
+  address: string;
+  distance: string;
+  avg_rent_1bed: number | null;
+  avg_rent_2bed: number | null;
+  avg_rent_4bed: number | null;
+  concessions: string;
+  occupancy: string;
+  last_updated: string;
+  trend: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbCompRentHistory = {
+  id: number;
+  comp_id: string;
+  recorded_on: string;
+  avg_rent_1bed: number | null;
+  avg_rent_2bed: number | null;
+  avg_rent_4bed: number | null;
+  created_at: string;
+};
+
+// ─── Tours (open-house leasing) ────────────────────────────────
+// Mirrors supabase/migrations/20260428_tours.sql.
+
+export type DbTourSlot = {
+  id: string;
+  property_id: string | null;
+  property_name: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  host: string;
+  capacity: number;
+  pre_reminder_status: string;
+  post_follow_up_status: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbTourRegistration = {
+  id: string;
+  slot_id: string;
+  prospect_name: string;
+  prospect_email: string;
+  prospect_phone: string | null;
+  status: string;
+  registered_at: string;
+  source: string | null;
+  notes: string | null;
+  follow_up_sent: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Showings (open-house scheduling) ──────────────────────────
 // Mirrors supabase/migrations/20260424_showings.sql.
 

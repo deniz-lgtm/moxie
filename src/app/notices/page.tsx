@@ -2,27 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
 import { usePortfolio } from "@/contexts/PortfolioContext";
-import type { Unit } from "@/lib/types";
-
-type NoticeType = "violation" | "rent_reminder" | "building_announcement" | "lease_renewal" | "maintenance_notice";
-type NoticeStatus = "draft" | "sent" | "delivered" | "acknowledged";
-type DeliveryMethod = "email" | "sms" | "portal" | "mail";
-
-type Notice = {
-  id: string;
-  type: NoticeType;
-  status: NoticeStatus;
-  subject: string;
-  body: string;
-  recipientType: "individual" | "all";
-  unitName: string;
-  tenantName: string;
-  deliveryMethod: DeliveryMethod;
-  createdAt: string;
-  sentAt: string;
-};
+import {
+  listNotices,
+  upsertNotice,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/notices-db";
+import type {
+  Notice,
+  NoticeDeliveryMethod as DeliveryMethod,
+  NoticeType,
+  Unit,
+} from "@/lib/types";
 
 const NOTICE_TYPES: { value: NoticeType; label: string }[] = [
   { value: "violation", label: "Lease Violation" },
@@ -35,7 +26,7 @@ const NOTICE_TYPES: { value: NoticeType; label: string }[] = [
 export default function NoticesPage() {
   const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
-  const [notices, setNotices] = useState<Notice[]>(() => loadFromStorage<Notice[]>("notices", []));
+  const [notices, setNotices] = useState<Notice[]>([]);
   const [selected, setSelected] = useState<Notice | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filterType, setFilterType] = useState<string>("all");
@@ -59,8 +50,16 @@ export default function NoticesPage() {
   }, [portfolioId]);
 
   useEffect(() => {
-    saveToStorage("notices", notices);
-  }, [notices]);
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await listNotices();
+      if (!cancelled) setNotices(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filtered = notices.filter((n) => {
     if (filterType !== "all" && n.type !== filterType) return false;
@@ -72,36 +71,41 @@ export default function NoticesPage() {
     ? occupiedUnits.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
     : occupiedUnits;
 
-  function createNotice() {
-    if (!newNotice.subject.trim()) return;
+  async function createNotice(opts?: { send?: boolean }): Promise<Notice | null> {
+    if (!newNotice.subject.trim()) return null;
     const unit = units.find((u) => u.id === newNotice.unitId);
+    const now = new Date().toISOString();
 
-    const notice: Notice = {
+    const draft: Notice = {
       id: `notice-${Date.now()}`,
       type: newNotice.type,
-      status: "draft",
+      status: opts?.send ? "sent" : "draft",
       subject: newNotice.subject,
       body: newNotice.body,
       recipientType: newNotice.unitId ? "individual" : "all",
+      unitId: newNotice.unitId || undefined,
       unitName: unit?.unitName || "All Units",
       tenantName: unit?.tenant || "",
       deliveryMethod: newNotice.deliveryMethod,
-      createdAt: new Date().toISOString(),
-      sentAt: "",
+      createdAt: now,
+      sentAt: opts?.send ? now : "",
     };
-    setNotices((prev) => [notice, ...prev]);
+
+    const saved = await upsertNotice(draft);
+    setNotices((prev) => [saved, ...prev]);
     setShowCreateForm(false);
     setNewNotice({ type: "building_announcement", subject: "", body: "", unitId: "", deliveryMethod: "email" });
+    return saved;
   }
 
-  function sendNotice(id: string) {
-    setNotices((prev) =>
-      prev.map((n) =>
-        n.id === id ? { ...n, status: "sent" as NoticeStatus, sentAt: new Date().toISOString() } : n
-      )
-    );
+  async function sendNotice(id: string) {
+    const target = notices.find((n) => n.id === id);
+    if (!target) return;
+    const updated: Notice = { ...target, status: "sent", sentAt: new Date().toISOString() };
+    const saved = await upsertNotice(updated);
+    setNotices((prev) => prev.map((n) => (n.id === id ? saved : n)));
     if (selected?.id === id) {
-      setSelected({ ...selected, status: "sent", sentAt: new Date().toISOString() });
+      setSelected(saved);
     }
   }
 
@@ -238,23 +242,13 @@ export default function NoticesPage() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={createNotice}
+              onClick={() => createNotice()}
               className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
             >
               Save as Draft
             </button>
             <button
-              onClick={() => {
-                createNotice();
-                setTimeout(() => {
-                  setNotices((prev) => {
-                    if (prev.length > 0 && prev[0].status === "draft") {
-                      return [{ ...prev[0], status: "sent" as NoticeStatus, sentAt: new Date().toISOString() }, ...prev.slice(1)];
-                    }
-                    return prev;
-                  });
-                }, 100);
-              }}
+              onClick={() => createNotice({ send: true })}
               className="px-4 py-2 bg-card border border-border text-sm rounded-lg hover:bg-muted transition-colors"
             >
               Save & Send

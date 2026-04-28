@@ -1,28 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { loadFromStorage } from "@/lib/storage";
-import type { TourSlot } from "@/lib/types";
+import { listTourSlots } from "@/lib/tours-db";
 
-export function TourStats() {
+function useTourCounts() {
   const [upcoming, setUpcoming] = useState(0);
   const [registrations, setRegistrations] = useState(0);
 
   useEffect(() => {
-    const tours = loadFromStorage<TourSlot[]>("tours", []);
-    const today = new Date().toISOString().split("T")[0];
-    const upcomingTours = tours.filter((t) => t.date >= today);
-    const totalRegs = upcomingTours.reduce(
-      (sum, t) =>
-        sum +
-        t.registrations.filter(
-          (r) => r.status !== "cancelled" && r.status !== "rescheduled"
-        ).length,
-      0
-    );
-    setUpcoming(upcomingTours.length);
-    setRegistrations(totalRegs);
+    let cancelled = false;
+    (async () => {
+      const tours = await listTourSlots();
+      if (cancelled) return;
+      const today = new Date().toISOString().split("T")[0];
+      const upcomingTours = tours.filter((t) => t.date >= today);
+      const totalRegs = upcomingTours.reduce(
+        (sum, t) =>
+          sum +
+          t.registrations.filter(
+            (r) => r.status !== "cancelled" && r.status !== "rescheduled"
+          ).length,
+        0
+      );
+      setUpcoming(upcomingTours.length);
+      setRegistrations(totalRegs);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  return { upcoming, registrations };
+}
+
+export function TourStats() {
+  const { upcoming, registrations } = useTourCounts();
 
   return (
     <>
@@ -38,24 +50,7 @@ export function TourStats() {
 }
 
 export function TourStatsFooter() {
-  const [upcoming, setUpcoming] = useState(0);
-  const [registrations, setRegistrations] = useState(0);
-
-  useEffect(() => {
-    const tours = loadFromStorage<TourSlot[]>("tours", []);
-    const today = new Date().toISOString().split("T")[0];
-    const upcomingTours = tours.filter((t) => t.date >= today);
-    const totalRegs = upcomingTours.reduce(
-      (sum, t) =>
-        sum +
-        t.registrations.filter(
-          (r) => r.status !== "cancelled" && r.status !== "rescheduled"
-        ).length,
-      0
-    );
-    setUpcoming(upcomingTours.length);
-    setRegistrations(totalRegs);
-  }, []);
+  const { upcoming, registrations } = useTourCounts();
 
   return (
     <span className="text-sm font-medium text-accent">

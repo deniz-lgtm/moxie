@@ -2,30 +2,21 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import {
+  listReports,
+  upsertReport,
+  deleteReport as deleteReportFromDb,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/reports-db";
 import { usePortfolio } from "@/contexts/PortfolioContext";
-import type { Unit, MaintenanceRequest } from "@/lib/types";
-
-type ReportType = "pnl" | "occupancy" | "maintenance_cost" | "rent_roll";
-type ReportStatus = "draft" | "generated" | "reviewed" | "sent";
-
-type ReportData = {
-  occupancy?: { total: number; occupied: number; vacant: number; notice: number; future: number; rate: string };
-  rentRoll?: { units: { name: string; tenant: string | null; rent: string | number | null; status: string; leaseEnd: string | null }[] };
-  maintenanceCost?: { categories: { category: string; count: number; totalCost: number }[]; totalSpend: number };
-};
-
-type Report = {
-  id: string;
-  propertyId: string;
-  propertyName: string;
-  type: ReportType;
-  month: string;
-  status: ReportStatus;
-  createdAt: string;
-  notes: string;
-  data: ReportData;
-};
+import type {
+  Unit,
+  MaintenanceRequest,
+  Report,
+  ReportData,
+  ReportStatus,
+  ReportType,
+} from "@/lib/types";
 
 const REPORT_TYPES: { value: ReportType; label: string; description: string }[] = [
   { value: "pnl", label: "P&L Statement", description: "Income vs expenses for the month" },
@@ -43,7 +34,7 @@ export default function ReportsPage() {
   const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
   const [workOrders, setWorkOrders] = useState<MaintenanceRequest[]>([]);
-  const [reports, setReports] = useState<Report[]>(() => loadFromStorage<Report[]>("reports", []));
+  const [reports, setReports] = useState<Report[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filterType, setFilterType] = useState<string>("all");
   const [loading, setLoading] = useState(true);
@@ -64,10 +55,17 @@ export default function ReportsPage() {
       .finally(() => setLoading(false));
   }, [portfolioId]);
 
-  // Persist reports
   useEffect(() => {
-    saveToStorage("reports", reports);
-  }, [reports]);
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await listReports();
+      if (!cancelled) setReports(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const propertyNames = useMemo(
     () => [...new Set(units.map((u) => u.propertyName).filter(Boolean))],
@@ -148,7 +146,7 @@ export default function ReportsPage() {
     }
   }
 
-  function createReport() {
+  async function createReport() {
     if (!newReport.propertyName) return;
 
     const data = generateReportData(newReport.propertyName, newReport.type);
@@ -164,17 +162,23 @@ export default function ReportsPage() {
       notes: "",
       data,
     };
-    setReports((prev) => [...prev, report]);
+    const saved = await upsertReport(report);
+    setReports((prev) => [saved, ...prev]);
     setShowCreateForm(false);
   }
 
-  function updateStatus(id: string, status: ReportStatus) {
-    setReports((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+  async function updateStatus(id: string, status: ReportStatus) {
+    const target = reports.find((r) => r.id === id);
+    if (!target) return;
+    const saved = await upsertReport({ ...target, status });
+    setReports((prev) => prev.map((r) => (r.id === id ? saved : r)));
+    if (viewingReport?.id === id) setViewingReport(saved);
   }
 
-  function deleteReport(id: string) {
+  async function deleteReport(id: string) {
     setReports((prev) => prev.filter((r) => r.id !== id));
     if (viewingReport?.id === id) setViewingReport(null);
+    await deleteReportFromDb(id);
   }
 
   function exportCSV(report: Report) {
@@ -235,8 +239,7 @@ export default function ReportsPage() {
             <select
               value={viewingReport.status}
               onChange={(e) => {
-                updateStatus(viewingReport.id, e.target.value as ReportStatus);
-                setViewingReport((r) => r ? { ...r, status: e.target.value as ReportStatus } : null);
+                void updateStatus(viewingReport.id, e.target.value as ReportStatus);
               }}
               className="text-xs border border-border rounded-md px-2 py-1.5 bg-card"
             >

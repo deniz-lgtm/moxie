@@ -304,6 +304,35 @@ export interface MaintenanceRequest {
   followUpOn?: string;
 }
 
+// --- Tenant Notices ---
+export type NoticeType =
+  | "violation"
+  | "rent_reminder"
+  | "building_announcement"
+  | "lease_renewal"
+  | "maintenance_notice";
+export type NoticeStatus = "draft" | "sent" | "delivered" | "acknowledged";
+export type NoticeDeliveryMethod = "email" | "sms" | "portal" | "mail";
+export type NoticeRecipientType = "individual" | "all";
+
+export interface Notice {
+  id: string;
+  type: NoticeType;
+  status: NoticeStatus;
+  subject: string;
+  body: string;
+  recipientType: NoticeRecipientType;
+  propertyId?: string;
+  unitId?: string;
+  unitName: string;
+  tenantName: string;
+  deliveryMethod: NoticeDeliveryMethod;
+  createdAt: string;
+  sentAt: string;
+  deliveredAt?: string;
+  acknowledgedAt?: string;
+}
+
 // --- Vendors ---
 export type VendorStatus = "active" | "inactive" | "preferred";
 
@@ -466,6 +495,62 @@ export interface ShowingSlot {
   registrations?: ShowingRegistration[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+// --- Monthly Reports ---
+export type ReportType = "pnl" | "occupancy" | "maintenance_cost" | "rent_roll";
+export type ReportStatus = "draft" | "generated" | "reviewed" | "sent";
+
+export interface ReportRentRollUnit {
+  name: string;
+  tenant: string | null;
+  rent: string | number | null;
+  status: string;
+  leaseEnd: string | null;
+}
+
+export interface ReportData {
+  occupancy?: { total: number; occupied: number; vacant: number; notice: number; future: number; rate: string };
+  rentRoll?: { units: ReportRentRollUnit[] };
+  maintenanceCost?: { categories: { category: string; count: number; totalCost: number }[]; totalSpend: number };
+}
+
+export interface Report {
+  id: string;
+  propertyId: string;
+  propertyName: string;
+  type: ReportType;
+  month: string;
+  status: ReportStatus;
+  createdAt: string;
+  notes: string;
+  data: ReportData;
+}
+
+// --- Comp Watch ---
+export type CompTrend = "up" | "down" | "stable";
+
+export interface CompRentEntry {
+  date: string;
+  avgRent1Bed: number | null;
+  avgRent2Bed: number | null;
+  avgRent4Bed: number | null;
+}
+
+export interface CompProperty {
+  id: string;
+  name: string;
+  address: string;
+  distance: string;
+  avgRent1Bed: number | null;
+  avgRent2Bed: number | null;
+  avgRent4Bed: number | null;
+  concessions: string;
+  occupancy: string;
+  lastUpdated: string;
+  trend: CompTrend;
+  notes: string;
+  rentHistory: CompRentEntry[];
 }
 
 // --- Leasing: Tours ---

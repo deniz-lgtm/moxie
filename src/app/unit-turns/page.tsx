@@ -2,7 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import {
+  listUnitTurns,
+  upsertUnitTurn,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/unit-turns-db";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { UnitTurn, TurnTask, TurnTaskStatus, Unit } from "@/lib/types";
 
@@ -28,7 +32,7 @@ const DEFAULT_TASKS: { name: string; category: string }[] = [
 
 export default function UnitTurnsPage() {
   const { portfolioId } = usePortfolio();
-  const [allTurns, setAllTurns] = useState<UnitTurn[]>(() => loadFromStorage<UnitTurn[]>("unit_turns", []));
+  const [allTurns, setAllTurns] = useState<UnitTurn[]>([]);
   const [selected, setSelected] = useState<UnitTurn | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -48,14 +52,22 @@ export default function UnitTurnsPage() {
   }, [portfolioId]);
 
   useEffect(() => {
-    saveToStorage("unit_turns", allTurns);
-  }, [allTurns]);
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await listUnitTurns();
+      if (!cancelled) setAllTurns(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredUnits = unitSearch
     ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
     : units;
 
-  function createTurn() {
+  async function createTurn() {
     if (!newTurn.unitId || !newTurn.moveOutDate || !newTurn.targetReadyDate) return;
     const unit = units.find((u) => u.id === newTurn.unitId);
     if (!unit) return;
@@ -86,10 +98,17 @@ export default function UnitTurnsPage() {
       createdAt: now,
       updatedAt: now,
     };
-    setAllTurns((prev) => [turn, ...prev]);
+    const saved = await upsertUnitTurn(turn);
+    setAllTurns((prev) => [saved, ...prev]);
     setShowCreateForm(false);
-    setSelected(turn);
+    setSelected(saved);
     setNewTurn({ unitId: "", moveOutDate: "", targetReadyDate: "", totalBudget: 0 });
+  }
+
+  async function persistTurn(updated: UnitTurn) {
+    const saved = await upsertUnitTurn(updated);
+    setSelected(saved);
+    setAllTurns((prev) => prev.map((t) => (t.id === saved.id ? saved : t)));
   }
 
   function updateTaskStatus(taskId: string, status: TurnTaskStatus) {
@@ -113,8 +132,7 @@ export default function UnitTurnsPage() {
     if (allDone) updated.status = "completed";
     else if (anyInProgress) updated.status = "in_progress";
 
-    setSelected(updated);
-    setAllTurns((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    void persistTurn(updated);
   }
 
   function updateTaskCost(taskId: string, actualCost: number) {
@@ -125,8 +143,7 @@ export default function UnitTurnsPage() {
       updatedAt: new Date().toISOString(),
     };
     updated.totalSpent = updated.tasks.reduce((sum, t) => sum + (t.actualCost || 0), 0);
-    setSelected(updated);
-    setAllTurns((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    void persistTurn(updated);
   }
 
   if (selected) {
