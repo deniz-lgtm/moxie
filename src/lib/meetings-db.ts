@@ -209,6 +209,9 @@ export async function createActionItem(input: CreateActionItemInput): Promise<Db
     .select("*")
     .single();
   if (error) throw new Error(`[meetings-db] createActionItem: ${error.message}`);
+  if (Array.isArray(input.linked_action_item_ids) && input.linked_action_item_ids.length > 0) {
+    await syncLinkBackReferences(input.id, [], input.linked_action_item_ids);
+  }
   return data as DbMeetingActionItem;
 }
 
@@ -222,6 +225,11 @@ export async function bulkCreateActionItems(items: CreateActionItemInput[]): Pro
     .insert(items)
     .select("*");
   if (error) throw new Error(`[meetings-db] bulkCreateActionItems: ${error.message}`);
+  for (const it of items) {
+    if (Array.isArray(it.linked_action_item_ids) && it.linked_action_item_ids.length > 0) {
+      await syncLinkBackReferences(it.id, [], it.linked_action_item_ids);
+    }
+  }
   return (data ?? []) as DbMeetingActionItem[];
 }
 
@@ -237,6 +245,18 @@ export async function updateActionItem(id: string, update: UpdateActionItemInput
     patch.completed_at = null;
   }
 
+  // If linked_action_item_ids is changing, capture the prior value so we
+  // can mirror the change onto the other side after the update lands.
+  let priorLinks: string[] | null = null;
+  if ("linked_action_item_ids" in update) {
+    const { data: prior } = await sb
+      .from("meeting_action_items")
+      .select("linked_action_item_ids")
+      .eq("id", id)
+      .maybeSingle();
+    priorLinks = Array.isArray(prior?.linked_action_item_ids) ? prior.linked_action_item_ids : [];
+  }
+
   const { data, error } = await sb
     .from("meeting_action_items")
     .update(patch)
@@ -244,12 +264,80 @@ export async function updateActionItem(id: string, update: UpdateActionItemInput
     .select("*")
     .single();
   if (error) throw new Error(`[meetings-db] updateActionItem: ${error.message}`);
+
+  if (priorLinks !== null) {
+    const next = Array.isArray(update.linked_action_item_ids) ? update.linked_action_item_ids : [];
+    await syncLinkBackReferences(id, priorLinks, next);
+  }
+
   return data as DbMeetingActionItem;
+}
+
+/**
+ * Action item links are symmetric: when A's `linked_action_item_ids`
+ * gains B, B's `linked_action_item_ids` should also gain A — and the
+ * reverse on removal. This helper does the back-reference bookkeeping
+ * so callers (update/create/delete) can mutate one side and trust the
+ * other side stays consistent.
+ */
+async function syncLinkBackReferences(
+  selfId: string,
+  prior: string[],
+  next: string[]
+): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  const priorSet = new Set(prior.filter((x) => x !== selfId));
+  const nextSet = new Set(next.filter((x) => x !== selfId));
+  const added = [...nextSet].filter((x) => !priorSet.has(x));
+  const removed = [...prior].filter((x) => !nextSet.has(x) && x !== selfId);
+
+  for (const otherId of added) {
+    const { data: other } = await sb
+      .from("meeting_action_items")
+      .select("linked_action_item_ids")
+      .eq("id", otherId)
+      .maybeSingle();
+    if (!other) continue; // other was deleted; skip silently
+    const cur: string[] = Array.isArray(other.linked_action_item_ids) ? other.linked_action_item_ids : [];
+    if (cur.includes(selfId)) continue;
+    await sb
+      .from("meeting_action_items")
+      .update({ linked_action_item_ids: [...cur, selfId] })
+      .eq("id", otherId);
+  }
+
+  for (const otherId of removed) {
+    const { data: other } = await sb
+      .from("meeting_action_items")
+      .select("linked_action_item_ids")
+      .eq("id", otherId)
+      .maybeSingle();
+    if (!other) continue;
+    const cur: string[] = Array.isArray(other.linked_action_item_ids) ? other.linked_action_item_ids : [];
+    if (!cur.includes(selfId)) continue;
+    await sb
+      .from("meeting_action_items")
+      .update({ linked_action_item_ids: cur.filter((x) => x !== selfId) })
+      .eq("id", otherId);
+  }
 }
 
 export async function deleteActionItem(id: string): Promise<void> {
   const sb = getSupabase();
   if (!sb) throw new Error("Supabase not configured");
+  // Tear down back-references so other items don't keep a dead link.
+  const { data: prior } = await sb
+    .from("meeting_action_items")
+    .select("linked_action_item_ids")
+    .eq("id", id)
+    .maybeSingle();
+  const priorLinks: string[] = Array.isArray(prior?.linked_action_item_ids)
+    ? prior.linked_action_item_ids
+    : [];
+  if (priorLinks.length > 0) {
+    await syncLinkBackReferences(id, priorLinks, []);
+  }
   const { error } = await sb.from("meeting_action_items").delete().eq("id", id);
   if (error) throw new Error(`[meetings-db] deleteActionItem: ${error.message}`);
 }
