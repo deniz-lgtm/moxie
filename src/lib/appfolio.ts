@@ -247,7 +247,11 @@ export async function getGeneralLedger(params?: {
 //   POST /api/v2/guest_cards
 // Creates a prospect/lead in the AppFolio CRM. Returns the guest_card_id.
 // Required fields: first_name, last_name, email or phone.
-// Optional: property_id, unit_type, notes.
+// Optional: property_id, unit_id, showing_date, showing_time, source, notes.
+//
+// When showing_date / showing_time are provided, the prospect appears on
+// AppFolio's showing schedule for that property/unit — the structured
+// fields are how AppFolio's calendar/CRM picks up scheduled showings.
 //
 // See AppFolio API docs: Guest Card — Create
 export interface GuestCardInput {
@@ -256,6 +260,11 @@ export interface GuestCardInput {
   email?: string;
   phone?: string;
   propertyId?: string;
+  unitId?: string;
+  /** ISO 8601 datetime — split into showing_date + showing_time for AppFolio. */
+  showingAt?: string;
+  /** Free-text source label (e.g. "Moxie Showings"). */
+  source?: string;
   notes?: string;
 }
 
@@ -267,12 +276,28 @@ export interface GuestCardResult {
 export async function createGuestCard(input: GuestCardInput): Promise<GuestCardResult> {
   const url = `${getBaseUrl()}/guest_cards`;
   const headers = getAuthHeaders();
+
+  let showingDate: string | undefined;
+  let showingTime: string | undefined;
+  if (input.showingAt) {
+    const d = new Date(input.showingAt);
+    if (!Number.isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, "0");
+      showingDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      showingTime = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
+
   const body: Record<string, string | undefined> = {
     first_name: input.firstName,
     last_name: input.lastName,
     email: input.email,
     phone: input.phone,
     property_id: input.propertyId,
+    unit_id: input.unitId,
+    showing_date: showingDate,
+    showing_time: showingTime,
+    source: input.source,
     notes: input.notes,
   };
   // Strip undefined values
