@@ -51,6 +51,30 @@ type ExtractedItem = {
   priority: string | null;
 };
 
+type WoClassification = {
+  category: string;
+  priority: string;
+  title: string;
+};
+
+const CATEGORY_DOT_COLORS: Record<string, string> = {
+  plumbing: "bg-blue-500",
+  electrical: "bg-yellow-500",
+  hvac: "bg-cyan-500",
+  appliance: "bg-purple-500",
+  structural: "bg-stone-500",
+  pest: "bg-orange-500",
+  locksmith: "bg-gray-500",
+  general: "bg-slate-400",
+};
+
+const WO_PRIORITY_RANK: Record<string, number> = {
+  emergency: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
 function makeId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -89,6 +113,18 @@ export default function MeetingDetailView({
     if (typeof window === "undefined") return {};
     try {
       return JSON.parse(window.localStorage.getItem("moxie:wo-summaries") || "{}") || {};
+    } catch {
+      return {};
+    }
+  });
+  const [woClassifications, setWoClassifications] = useState<
+    Record<string, WoClassification>
+  >(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      return (
+        JSON.parse(window.localStorage.getItem("moxie:wo-classifications") || "{}") || {}
+      );
     } catch {
       return {};
     }
@@ -457,6 +493,80 @@ export default function MeetingDetailView({
     };
   }, [maintenanceOpen, woSummaries, workOrderSourceText]);
 
+  // Classify open work orders for AI category + priority. Same cache key
+  // as the maintenance page so both screens share results.
+  useEffect(() => {
+    const missing = maintenanceOpen
+      .map((wo) => {
+        const live = workOrders.find((w) => w.id === wo.id);
+        return {
+          id: wo.id,
+          title: wo.title,
+          description: live?.description || wo.title || "",
+        };
+      })
+      .filter((x) => !woClassifications[x.id])
+      .filter((x) => (x.description || x.title).trim().length > 0)
+      .slice(0, 30);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/maintenance/classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: missing }),
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        const incoming: Array<{ id: string } & WoClassification> = j.classifications || [];
+        if (cancelled || incoming.length === 0) return;
+        setWoClassifications((prev) => {
+          const next = { ...prev };
+          for (const c of incoming) {
+            next[c.id] = { category: c.category, priority: c.priority, title: c.title };
+          }
+          try {
+            window.localStorage.setItem("moxie:wo-classifications", JSON.stringify(next));
+          } catch {
+            /* ignore quota errors */
+          }
+          return next;
+        });
+      } catch {
+        /* leave entries unclassified */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [maintenanceOpen, woClassifications, workOrders]);
+
+  // Tenant total counts across all live work orders for the portfolio so
+  // the meeting agenda shows the same "is this a problem tenant?" hint.
+  const tenantOrderCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const w of workOrders) {
+      const name = (w.tenantName || "").trim();
+      if (!name || name === "—" || name.toLowerCase() === "vacant") continue;
+      map.set(name, (map.get(name) ?? 0) + 1);
+    }
+    return map;
+  }, [workOrders]);
+
+  // Open work orders sorted by AI priority (fallback to AppFolio priority).
+  const sortedMaintenanceOpen = useMemo(() => {
+    const ranked = [...maintenanceOpen];
+    ranked.sort((a, b) => {
+      const pa = woClassifications[a.id]?.priority || a.priority || "medium";
+      const pb = woClassifications[b.id]?.priority || b.priority || "medium";
+      const ra = WO_PRIORITY_RANK[pa] ?? 2;
+      const rb = WO_PRIORITY_RANK[pb] ?? 2;
+      return ra - rb;
+    });
+    return ranked;
+  }, [maintenanceOpen, woClassifications]);
+
   return (
     <div className="space-y-6">
       <button
@@ -714,21 +824,46 @@ export default function MeetingDetailView({
           empty="No open work orders at meeting time."
           onAdd={() => addCategoryItem("maintenance", "maintenance")}
         >
-          {maintenanceOpen.map((wo) => (
-            <AgendaRow
-              key={wo.id}
-              onClick={() => setOpenWorkOrderId(wo.id)}
-              title={woSummaries[wo.id] || wo.title}
-              right={wo.priority ? <StatusBadge value={wo.priority} /> : null}
-              meta={[
-                wo.workOrderNumber ? `#${wo.workOrderNumber}` : null,
-                wo.propertyName,
-                wo.unitName ? `Unit ${wo.unitName}` : null,
-                wo.status,
-                wo.vendor,
-              ]}
-            />
-          ))}
+          {sortedMaintenanceOpen.map((wo) => {
+            const live = workOrders.find((w) => w.id === wo.id);
+            const cls = woClassifications[wo.id];
+            const aiSummary = woSummaries[wo.id];
+            const titleText = cls?.title || aiSummary || wo.title;
+            const aiTitle = Boolean(
+              (cls?.title && cls.title !== wo.title) ||
+                (aiSummary && aiSummary !== wo.title)
+            );
+            const priority = cls?.priority || wo.priority || null;
+            const aiPriority = Boolean(cls?.priority && cls.priority !== wo.priority);
+            const category = cls?.category || live?.category || null;
+            const aiCategory = Boolean(
+              cls?.category && live?.category && cls.category !== live.category
+            );
+            const tenant = live?.tenantName?.trim();
+            const tenantCount =
+              tenant && tenant !== "—" && tenant.toLowerCase() !== "vacant"
+                ? tenantOrderCounts.get(tenant) ?? 0
+                : 0;
+            return (
+              <MaintenanceAgendaCard
+                key={wo.id}
+                title={titleText}
+                aiTitle={aiTitle}
+                priority={priority}
+                aiPriority={aiPriority}
+                status={wo.status || null}
+                category={category}
+                aiCategory={aiCategory}
+                workOrderNumber={wo.workOrderNumber}
+                propertyName={wo.propertyName || null}
+                unitName={wo.unitName || null}
+                tenantName={tenant || null}
+                tenantCount={tenantCount}
+                vendor={wo.vendor || null}
+                onClick={() => setOpenWorkOrderId(wo.id)}
+              />
+            );
+          })}
           {itemsByCategory.maintenance.length > 0 && (
             <AgendaSubsection label={`Added (${itemsByCategory.maintenance.length})`}>
               {itemsByCategory.maintenance.map((it) => (
@@ -1188,6 +1323,109 @@ function AgendaRow({
             </span>
           ))}
         </div>
+      )}
+    </button>
+  );
+}
+
+function MaintenanceAgendaCard({
+  title,
+  aiTitle,
+  priority,
+  aiPriority,
+  status,
+  category,
+  aiCategory,
+  workOrderNumber,
+  propertyName,
+  unitName,
+  tenantName,
+  tenantCount,
+  vendor,
+  onClick,
+}: {
+  title: string;
+  aiTitle: boolean;
+  priority: string | null;
+  aiPriority: boolean;
+  status: string | null;
+  category: string | null;
+  aiCategory: boolean;
+  workOrderNumber?: string | null;
+  propertyName: string | null;
+  unitName: string | null;
+  tenantName: string | null;
+  tenantCount: number;
+  vendor: string | null;
+  onClick: () => void;
+}) {
+  const dotColor = category ? CATEGORY_DOT_COLORS[category] || "bg-slate-400" : null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left bg-card rounded-xl border border-border p-3 sm:p-4 hover:shadow-md transition-shadow"
+    >
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        {priority && (
+          <span className="inline-flex items-center gap-1">
+            {aiPriority && (
+              <Sparkles
+                className="w-3 h-3 text-indigo-700"
+                aria-label="AI-determined priority"
+              />
+            )}
+            <StatusBadge value={priority} />
+          </span>
+        )}
+        {status && <StatusBadge value={status} />}
+        {category && (
+          <span className="text-xs capitalize ml-auto flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${dotColor}`} aria-hidden="true" />
+            <span className="text-muted-foreground">{category}</span>
+            {aiCategory && (
+              <Sparkles
+                className="w-3 h-3 text-indigo-700"
+                aria-label="AI-classified category"
+              />
+            )}
+          </span>
+        )}
+      </div>
+      <div className="flex items-start gap-2">
+        <h4 className="font-semibold text-sm break-words">{title}</h4>
+        {aiTitle && (
+          <span
+            title="AI-summarized title"
+            className="inline-flex items-center gap-0.5 text-[10px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-1.5 py-0.5 mt-0.5 shrink-0"
+          >
+            <Sparkles className="w-3 h-3" /> AI
+          </span>
+        )}
+      </div>
+      {(propertyName || unitName || tenantName || workOrderNumber) && (
+        <p className="text-xs text-muted-foreground mt-1 break-words">
+          {workOrderNumber && <span>#{workOrderNumber} · </span>}
+          {propertyName}
+          {unitName ? ` #${unitName}` : ""}
+          {tenantName && (
+            <>
+              {" · "}
+              {tenantName}
+              {tenantCount > 1 && (
+                <span
+                  className="ml-1 inline-flex items-center text-[10px] font-medium text-foreground bg-muted rounded-full px-1.5 py-0.5"
+                  title={`This tenant has ${tenantCount} work orders on file`}
+                >
+                  {tenantCount}
+                </span>
+              )}
+            </>
+          )}
+        </p>
+      )}
+      {vendor && (
+        <p className="text-xs text-muted-foreground mt-1">Vendor: {vendor}</p>
       )}
     </button>
   );

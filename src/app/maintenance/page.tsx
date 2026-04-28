@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { Sparkles, Languages, X } from "lucide-react";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
@@ -11,6 +12,20 @@ import type {
   MaintenanceCategory,
   Unit,
 } from "@/lib/types";
+
+type Classification = {
+  category: MaintenanceCategory;
+  priority: MaintenancePriority;
+  title: string;
+};
+
+const CLASSIFICATION_CACHE_KEY = "moxie:wo-classifications";
+const PRIORITY_RANK: Record<MaintenancePriority, number> = {
+  emergency: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 const OPEN_STATUSES = new Set<MaintenanceStatus>([
   "submitted",
@@ -69,7 +84,14 @@ type Metrics = {
   };
 };
 
-function computeMetrics(requests: MaintenanceRequest[]): Metrics {
+function computeMetrics(
+  requests: MaintenanceRequest[],
+  classifications: Record<string, Classification> = {}
+): Metrics {
+  const cat = (r: MaintenanceRequest): MaintenanceCategory =>
+    classifications[r.id]?.category ?? r.category;
+  const pri = (r: MaintenanceRequest): MaintenancePriority =>
+    classifications[r.id]?.priority ?? r.priority;
   const now = Date.now();
   const d30 = now - 30 * DAY_MS;
   const d90 = now - 90 * DAY_MS;
@@ -109,7 +131,7 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
     if (Number.isNaN(created) || created < d30) continue;
     const unitKey = r.unitId || r.unitNumber || "";
     if (!unitKey) continue;
-    const key = `${unitKey}|${r.category}`;
+    const key = `${unitKey}|${cat(r)}`;
     const arr = recentByKey.get(key) ?? [];
     arr.push(r);
     recentByKey.set(key, arr);
@@ -118,7 +140,7 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
     .filter(([, arr]) => arr.length >= 2)
     .map(([key, arr]) => ({
       key,
-      category: arr[0].category,
+      category: cat(arr[0]),
       propertyName: arr[0].propertyName,
       unitNumber: arr[0].unitNumber,
       count: arr.length,
@@ -140,7 +162,7 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
   const problemTenants = Array.from(byTenant.values())
     .map((reqs) => {
       const emergencies30d = reqs.filter(
-        (r) => r.priority === "emergency" && Date.parse(r.createdAt) >= d30
+        (r) => pri(r) === "emergency" && Date.parse(r.createdAt) >= d30
       ).length;
       return {
         name: reqs[0].tenantName,
@@ -156,7 +178,8 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
   // Category breakdown across all work orders
   const byCategory = new Map<MaintenanceCategory, number>();
   for (const r of requests) {
-    byCategory.set(r.category, (byCategory.get(r.category) ?? 0) + 1);
+    const c = cat(r);
+    byCategory.set(c, (byCategory.get(c) ?? 0) + 1);
   }
   const categoryBreakdown = Array.from(byCategory.entries())
     .map(([category, count]) => ({ category, count }))
@@ -193,7 +216,7 @@ function computeMetrics(requests: MaintenanceRequest[]): Metrics {
 
   return {
     openCount: open.length,
-    openEmergencies: open.filter((r) => r.priority === "emergency").length,
+    openEmergencies: open.filter((r) => pri(r) === "emergency").length,
     avgResolutionDays,
     resolvedSample: resolvedRecently.length,
     aging: [
@@ -261,6 +284,20 @@ export default function MaintenancePage() {
     category: "general" as MaintenanceCategory,
     priority: "medium" as MaintenancePriority,
   });
+  const [classifications, setClassifications] = useState<Record<string, Classification>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(CLASSIFICATION_CACHE_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, Classification>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [translateOpen, setTranslateOpen] = useState(false);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translating, setTranslating] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   async function loadRequests() {
     // Portfolio 25: no Supabase cache, go live to AppFolio
@@ -341,6 +378,62 @@ export default function MaintenancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portfolioId]);
 
+  // Background-classify any work order we don't already have a cached AI
+  // category/priority/title for. Persists to localStorage so the AI call
+  // only happens once per work order across sessions.
+  useEffect(() => {
+    if (allRequests.length === 0) return;
+    const missing = allRequests
+      .filter((r) => !classifications[r.id])
+      .filter((r) => (r.description || r.title || "").trim().length > 0)
+      .slice(0, 30)
+      .map((r) => ({ id: r.id, title: r.title, description: r.description }));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/maintenance/classify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: missing }),
+        });
+        if (!res.ok) return;
+        const j = await res.json();
+        const incoming: Array<{ id: string } & Classification> = j.classifications || [];
+        if (cancelled || incoming.length === 0) return;
+        setClassifications((prev) => {
+          const next = { ...prev };
+          for (const c of incoming) {
+            next[c.id] = { category: c.category, priority: c.priority, title: c.title };
+          }
+          try {
+            window.localStorage.setItem(CLASSIFICATION_CACHE_KEY, JSON.stringify(next));
+          } catch {
+            /* ignore quota errors */
+          }
+          return next;
+        });
+      } catch {
+        /* leave entries unclassified — UI falls back to AppFolio values */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [allRequests, classifications]);
+
+  // Tenant submission counts across the visible portfolio. Excludes blanks
+  // and "Vacant" placeholders so we don't badge those.
+  const tenantOrderCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of allRequests) {
+      const name = (r.tenantName || "").trim();
+      if (!name || name === "—" || name.toLowerCase() === "vacant") continue;
+      map.set(name, (map.get(name) ?? 0) + 1);
+    }
+    return map;
+  }, [allRequests]);
+
   const filteredUnits = unitSearch
     ? units.filter((u) => u.unitName.toLowerCase().includes(unitSearch.toLowerCase()))
     : units;
@@ -376,6 +469,14 @@ export default function MaintenancePage() {
 
   const trimmedQuery = filterQuery.trim().toLowerCase();
   const nowForAging = Date.now();
+  // AI classification overrides the AppFolio-derived category/priority for
+  // sorting and filtering when present. The original tenant-submitted value
+  // is still rendered alongside so the difference is visible.
+  const effectiveCategory = (r: MaintenanceRequest): MaintenanceCategory =>
+    classifications[r.id]?.category ?? r.category;
+  const effectivePriority = (r: MaintenanceRequest): MaintenancePriority =>
+    classifications[r.id]?.priority ?? r.priority;
+
   const filtered = allRequests
     .filter((r) => {
       if (filterStatus === "open") {
@@ -383,8 +484,8 @@ export default function MaintenancePage() {
       } else if (filterStatus !== "all" && r.status !== filterStatus) {
         return false;
       }
-      if (filterPriority !== "all" && r.priority !== filterPriority) return false;
-      if (filterCategory !== "all" && r.category !== filterCategory) return false;
+      if (filterPriority !== "all" && effectivePriority(r) !== filterPriority) return false;
+      if (filterCategory !== "all" && effectiveCategory(r) !== filterCategory) return false;
       if (filterAging !== "all") {
         const created = Date.parse(r.createdAt);
         if (Number.isNaN(created)) return false;
@@ -412,12 +513,12 @@ export default function MaintenancePage() {
       }
       return true;
     })
-    .sort((a, b) => {
-      const order: Record<string, number> = { emergency: 0, high: 1, medium: 2, low: 3 };
-      return order[a.priority] - order[b.priority];
-    });
+    .sort((a, b) => PRIORITY_RANK[effectivePriority(a)] - PRIORITY_RANK[effectivePriority(b)]);
 
-  const metrics = useMemo(() => computeMetrics(allRequests), [allRequests]);
+  const metrics = useMemo(
+    () => computeMetrics(allRequests, classifications),
+    [allRequests, classifications]
+  );
   const maxAging = Math.max(1, ...metrics.aging.map((a) => a.count));
   const maxCategory = Math.max(1, ...metrics.categoryBreakdown.map((c) => c.count));
 
@@ -505,6 +606,84 @@ export default function MaintenancePage() {
     void saveAnnotation({ [key]: value || null });
   }
 
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  const openTranslateModal = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      setTranslateOpen(true);
+      setCopiedAll(false);
+      const items = ids
+        .map((id) => allRequests.find((r) => r.id === id))
+        .filter((r): r is MaintenanceRequest => Boolean(r))
+        .map((r) => ({
+          id: r.id,
+          title: r.title,
+          description: r.description,
+          propertyName: r.propertyName,
+          unitNumber: r.unitNumber,
+        }));
+      if (items.length === 0) return;
+      setTranslating(true);
+      try {
+        const res = await fetch("/api/maintenance/translate-spanish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items }),
+        });
+        if (!res.ok) {
+          setTranslating(false);
+          return;
+        }
+        const j = await res.json();
+        const incoming: { id: string; text: string }[] = j.translations || [];
+        setTranslations((prev) => {
+          const next = { ...prev };
+          for (const t of incoming) next[t.id] = t.text;
+          return next;
+        });
+      } finally {
+        setTranslating(false);
+      }
+    },
+    [allRequests]
+  );
+
+  function closeTranslateModal() {
+    setTranslateOpen(false);
+    setCopiedAll(false);
+  }
+
+  function copyAllTranslations(ids: string[]) {
+    const blocks = ids
+      .map((id) => translations[id])
+      .filter((t): t is string => Boolean(t))
+      .join("\n\n");
+    if (!blocks) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      void navigator.clipboard.writeText(blocks);
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1800);
+    }
+  }
+
+  function copyOne(text: string) {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      void navigator.clipboard.writeText(text);
+    }
+  }
+
   if (selected) {
     return (
       <div className="space-y-6">
@@ -517,13 +696,44 @@ export default function MaintenancePage() {
 
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold break-words">{selected.title}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold break-words">
+                {classifications[selected.id]?.title || selected.title}
+              </h1>
+              {classifications[selected.id]?.title &&
+                classifications[selected.id]!.title !== selected.title && (
+                  <span
+                    title={`AI summary. Tenant title: ${selected.title}`}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5"
+                  >
+                    <Sparkles className="w-3 h-3" /> AI
+                  </span>
+                )}
+            </div>
             <p className="text-muted-foreground mt-1 break-words">
               {selected.propertyName} #{selected.unitNumber} &middot; {selected.tenantName}
+              {tenantOrderCounts.get(selected.tenantName) &&
+                tenantOrderCounts.get(selected.tenantName)! > 1 && (
+                  <span
+                    className="ml-2 inline-flex items-center text-xs font-medium text-foreground bg-muted rounded-full px-2 py-0.5"
+                    title="Total work orders submitted by this tenant"
+                  >
+                    {tenantOrderCounts.get(selected.tenantName)} total
+                  </span>
+                )}
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap shrink-0">
-            <StatusBadge value={selected.priority} />
+            {classifications[selected.id]?.priority &&
+              classifications[selected.id]!.priority !== selected.priority && (
+                <span
+                  title={`AI priority — tenant submitted "${selected.priority}"`}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5"
+                >
+                  <Sparkles className="w-3 h-3" />
+                </span>
+              )}
+            <StatusBadge value={classifications[selected.id]?.priority ?? selected.priority} />
             <StatusBadge value={selected.status} />
           </div>
         </div>
@@ -539,7 +749,18 @@ export default function MaintenancePage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Category</p>
-                <p className="text-sm mt-1 capitalize">{selected.category}</p>
+                <p className="text-sm mt-1 capitalize flex items-center gap-1.5">
+                  {classifications[selected.id]?.category ?? selected.category}
+                  {classifications[selected.id]?.category &&
+                    classifications[selected.id]!.category !== selected.category && (
+                      <span
+                        title={`AI-classified — original: ${selected.category}`}
+                        className="inline-flex items-center gap-0.5 text-[10px] font-medium text-indigo-700"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                      </span>
+                    )}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Created</p>
@@ -1120,40 +1341,132 @@ export default function MaintenancePage() {
         </div>
       )}
 
+      {/* Bulk action toolbar — appears once any request card is selected. */}
+      {!loading && selectedIds.size > 0 && (
+        <div className="sticky top-2 z-10 flex items-center justify-between gap-3 bg-card border border-border rounded-lg px-3 py-2 shadow-sm">
+          <span className="text-sm">
+            <span className="font-medium">{selectedIds.size}</span> selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => openTranslateModal(Array.from(selectedIds))}
+              className="px-3 py-1.5 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors inline-flex items-center gap-1.5"
+            >
+              <Languages className="w-4 h-4" />
+              Translate to Spanish
+            </button>
+            <button
+              onClick={clearSelection}
+              className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Request Cards */}
       {!loading && (
         <div ref={listRef} className="space-y-3">
-          {filtered.map((req) => (
-            <button
-              key={req.id}
-              onClick={() => setSelected(req)}
-              className="w-full text-left bg-card rounded-xl border border-border p-4 sm:p-5 hover:shadow-md transition-shadow cursor-pointer"
-            >
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <StatusBadge value={req.priority} />
-                <StatusBadge value={req.status} />
-                <span className="text-xs capitalize ml-auto flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${CATEGORY_COLORS[req.category]}`} aria-hidden="true" />
-                  <span className="text-muted-foreground">{req.category}</span>
-                </span>
+          {filtered.map((req) => {
+            const cls = classifications[req.id];
+            const cat = cls?.category ?? req.category;
+            const pri = cls?.priority ?? req.priority;
+            const titleText = cls?.title || req.title;
+            const aiTitle = cls?.title && cls.title !== req.title;
+            const aiCategory = cls?.category && cls.category !== req.category;
+            const aiPriority = cls?.priority && cls.priority !== req.priority;
+            const tenantCount = tenantOrderCounts.get(req.tenantName) ?? 0;
+            const isSelected = selectedIds.has(req.id);
+            return (
+              <div
+                key={req.id}
+                className={`relative bg-card rounded-xl border p-4 sm:p-5 hover:shadow-md transition-shadow ${
+                  isSelected ? "border-accent ring-1 ring-accent/40" : "border-border"
+                }`}
+              >
+                <label
+                  className="absolute top-3 left-3 inline-flex items-center cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelected(req.id)}
+                    className="h-4 w-4 accent-accent"
+                    aria-label="Select for bulk actions"
+                  />
+                </label>
+                <button
+                  onClick={() => setSelected(req)}
+                  className="block w-full text-left pl-7"
+                >
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className="inline-flex items-center gap-1">
+                      {aiPriority && (
+                        <span
+                          title={`AI priority — tenant submitted "${req.priority}"`}
+                          className="inline-flex items-center text-[10px] text-indigo-700"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                        </span>
+                      )}
+                      <StatusBadge value={pri} />
+                    </span>
+                    <StatusBadge value={req.status} />
+                    <span className="text-xs capitalize ml-auto flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${CATEGORY_COLORS[cat]}`}
+                        aria-hidden="true"
+                      />
+                      <span className="text-muted-foreground">{cat}</span>
+                      {aiCategory && (
+                        <span
+                          title={`AI-classified — original: ${req.category}`}
+                          className="inline-flex items-center text-[10px] text-indigo-700"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <h3 className="font-semibold break-words">{titleText}</h3>
+                    {aiTitle && (
+                      <span
+                        title={`AI summary — tenant wrote: "${req.title}"`}
+                        className="inline-flex items-center gap-0.5 text-[10px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-1.5 py-0.5 mt-0.5"
+                      >
+                        <Sparkles className="w-3 h-3" /> AI
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1 break-words">
+                    {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
+                    {tenantCount > 1 && (
+                      <span
+                        className="ml-1.5 inline-flex items-center text-[11px] font-medium text-foreground bg-muted rounded-full px-1.5 py-0.5"
+                        title={`This tenant has ${tenantCount} work orders on file`}
+                      >
+                        {tenantCount}
+                      </span>
+                    )}
+                  </p>
+                  {req.description && (
+                    <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                      {req.description}
+                    </p>
+                  )}
+                  {(req.assignedTo || req.scheduledDate) && (
+                    <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {req.assignedTo && <span>Assigned: {req.assignedTo}</span>}
+                      {req.scheduledDate && <span>Scheduled: {req.scheduledDate}</span>}
+                    </div>
+                  )}
+                </button>
               </div>
-              <h3 className="font-semibold break-words">{req.title}</h3>
-              <p className="text-sm text-muted-foreground mt-1 break-words">
-                {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
-              </p>
-              {req.description && (
-                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                  {req.description}
-                </p>
-              )}
-              {(req.assignedTo || req.scheduledDate) && (
-                <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {req.assignedTo && <span>Assigned: {req.assignedTo}</span>}
-                  {req.scheduledDate && <span>Scheduled: {req.scheduledDate}</span>}
-                </div>
-              )}
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1162,6 +1475,125 @@ export default function MaintenancePage() {
           No maintenance requests match the current filters.
         </div>
       )}
+
+      {translateOpen && (
+        <TranslateModal
+          ids={Array.from(selectedIds)}
+          requests={allRequests}
+          translations={translations}
+          loading={translating}
+          copiedAll={copiedAll}
+          onCopyAll={() => copyAllTranslations(Array.from(selectedIds))}
+          onCopyOne={copyOne}
+          onClose={closeTranslateModal}
+        />
+      )}
+    </div>
+  );
+}
+
+function TranslateModal({
+  ids,
+  requests,
+  translations,
+  loading,
+  copiedAll,
+  onCopyAll,
+  onCopyOne,
+  onClose,
+}: {
+  ids: string[];
+  requests: MaintenanceRequest[];
+  translations: Record<string, string>;
+  loading: boolean;
+  copiedAll: boolean;
+  onCopyAll: () => void;
+  onCopyOne: (text: string) => void;
+  onClose: () => void;
+}) {
+  const blocks = ids
+    .map((id) => {
+      const req = requests.find((r) => r.id === id);
+      return req ? { req, text: translations[id] as string | undefined } : null;
+    })
+    .filter((b): b is { req: MaintenanceRequest; text: string | undefined } => b !== null);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-background rounded-2xl border border-border shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <Languages className="w-5 h-5" />
+            Spanish translations
+            <span className="text-xs font-mono px-2 py-0.5 bg-muted rounded-full">
+              {blocks.length}
+            </span>
+          </h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-muted">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {loading && Object.keys(translations).length === 0 ? (
+            <p className="text-sm text-muted-foreground">Translating…</p>
+          ) : (
+            blocks.map(({ req, text }) => (
+              <div
+                key={req.id}
+                className="border border-border rounded-lg p-3 bg-card"
+              >
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <p className="text-xs text-muted-foreground">
+                    {req.propertyName} #{req.unitNumber} &middot; {req.tenantName}
+                  </p>
+                  {text && (
+                    <button
+                      onClick={() => onCopyOne(text)}
+                      className="text-xs font-medium text-accent hover:underline shrink-0"
+                    >
+                      Copy
+                    </button>
+                  )}
+                </div>
+                {text ? (
+                  <pre className="whitespace-pre-wrap text-sm font-sans">{text}</pre>
+                ) : (
+                  <p className="text-sm text-muted-foreground italic">
+                    {loading ? "Translating…" : "No translation"}
+                  </p>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center justify-between p-5 border-t border-border">
+          <p className="text-xs text-muted-foreground">
+            Paste into WhatsApp — one block per work order.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-3 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+            >
+              Close
+            </button>
+            <button
+              onClick={onCopyAll}
+              disabled={loading || blocks.every((b) => !b.text)}
+              className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {copiedAll ? "Copied!" : "Copy all"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
