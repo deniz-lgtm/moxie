@@ -327,6 +327,22 @@ export type DbNotice = {
   updated_at: string;
 };
 
+// ─── Monthly Reports ───────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_reports.sql.
+
+export type DbReport = {
+  id: string;
+  property_id: string | null;
+  property_name: string;
+  type: string;
+  month: string;
+  status: string;
+  notes: string;
+  data: unknown; // jsonb — shape varies by report type
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Unit Turns ────────────────────────────────────────────────
 // Mirrors supabase/migrations/20260428_unit_turns.sql.
 

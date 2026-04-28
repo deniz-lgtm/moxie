@@ -497,6 +497,36 @@ export interface ShowingSlot {
   updatedAt?: string;
 }
 
+// --- Monthly Reports ---
+export type ReportType = "pnl" | "occupancy" | "maintenance_cost" | "rent_roll";
+export type ReportStatus = "draft" | "generated" | "reviewed" | "sent";
+
+export interface ReportRentRollUnit {
+  name: string;
+  tenant: string | null;
+  rent: string | number | null;
+  status: string;
+  leaseEnd: string | null;
+}
+
+export interface ReportData {
+  occupancy?: { total: number; occupied: number; vacant: number; notice: number; future: number; rate: string };
+  rentRoll?: { units: ReportRentRollUnit[] };
+  maintenanceCost?: { categories: { category: string; count: number; totalCost: number }[]; totalSpend: number };
+}
+
+export interface Report {
+  id: string;
+  propertyId: string;
+  propertyName: string;
+  type: ReportType;
+  month: string;
+  status: ReportStatus;
+  createdAt: string;
+  notes: string;
+  data: ReportData;
+}
+
 // --- Comp Watch ---
 export type CompTrend = "up" | "down" | "stable";
 
