@@ -497,6 +497,32 @@ export interface ShowingSlot {
   updatedAt?: string;
 }
 
+// --- Comp Watch ---
+export type CompTrend = "up" | "down" | "stable";
+
+export interface CompRentEntry {
+  date: string;
+  avgRent1Bed: number | null;
+  avgRent2Bed: number | null;
+  avgRent4Bed: number | null;
+}
+
+export interface CompProperty {
+  id: string;
+  name: string;
+  address: string;
+  distance: string;
+  avgRent1Bed: number | null;
+  avgRent2Bed: number | null;
+  avgRent4Bed: number | null;
+  concessions: string;
+  occupancy: string;
+  lastUpdated: string;
+  trend: CompTrend;
+  notes: string;
+  rentHistory: CompRentEntry[];
+}
+
 // --- Leasing: Tours ---
 export type TourRegistrationStatus = "confirmed" | "pending" | "attended" | "no_show" | "rescheduled" | "cancelled";
 

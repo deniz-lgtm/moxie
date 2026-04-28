@@ -1,34 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { loadFromStorage, saveToStorage } from "@/lib/storage";
+import { useState, useEffect } from "react";
+import {
+  listComps,
+  upsertComp,
+  deleteComp as deleteCompFromDb,
+  migrateLocalToSupabaseIfNeeded,
+} from "@/lib/comp-watch-db";
 import { usePortfolio } from "@/contexts/PortfolioContext";
-import type { Property } from "@/lib/types";
+import type { CompProperty, CompRentEntry, CompTrend, Property } from "@/lib/types";
 
-type RentEntry = {
-  date: string;
-  avgRent1Bed: number | null;
-  avgRent2Bed: number | null;
-  avgRent4Bed: number | null;
-};
-
-type CompProperty = {
-  id: string;
-  name: string;
-  address: string;
-  distance: string;
-  avgRent1Bed: number | null;
-  avgRent2Bed: number | null;
-  avgRent4Bed: number | null;
-  concessions: string;
-  occupancy: string;
-  lastUpdated: string;
-  trend: "up" | "down" | "stable";
-  notes: string;
-  rentHistory: RentEntry[];
-};
-
-function calculateTrend(history: RentEntry[]): "up" | "down" | "stable" {
+function calculateTrend(history: CompRentEntry[]): CompTrend {
   if (history.length < 2) return "stable";
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
   const prev = sorted[sorted.length - 2];
@@ -49,7 +31,7 @@ function calculateTrend(history: RentEntry[]): "up" | "down" | "stable" {
 
 export default function CompWatchPage() {
   const { portfolioId } = usePortfolio();
-  const [comps, setComps] = useState<CompProperty[]>(() => loadFromStorage<CompProperty[]>("comps", []));
+  const [comps, setComps] = useState<CompProperty[]>([]);
   const [ownProperties, setOwnProperties] = useState<Property[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -69,12 +51,19 @@ export default function CompWatchPage() {
       .catch(() => {});
   }, [portfolioId]);
 
-  // Persist comps to localStorage
   useEffect(() => {
-    saveToStorage("comps", comps);
-  }, [comps]);
+    let cancelled = false;
+    (async () => {
+      await migrateLocalToSupabaseIfNeeded();
+      const rows = await listComps();
+      if (!cancelled) setComps(rows);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  function addComp() {
+  async function addComp() {
     if (!newComp.name.trim()) return;
     const comp: CompProperty = {
       id: `comp-${Date.now()}`,
@@ -91,52 +80,54 @@ export default function CompWatchPage() {
       notes: newComp.notes,
       rentHistory: [],
     };
-    setComps((prev) => [...prev, comp]);
+    const saved = await upsertComp(comp);
+    setComps((prev) => [...prev, saved]);
     setNewComp({ name: "", address: "", distance: "", notes: "" });
     setShowAddForm(false);
   }
 
-  function deleteComp(id: string) {
+  async function deleteComp(id: string) {
     setComps((prev) => prev.filter((c) => c.id !== id));
     if (expandedId === id) setExpandedId(null);
+    await deleteCompFromDb(id);
   }
 
   function updateCompField(id: string, field: keyof CompProperty, value: string | number) {
-    setComps((prev) =>
-      prev.map((c) => {
-        if (c.id !== id) return c;
-        const updated = { ...c, [field]: value, lastUpdated: new Date().toISOString().split("T")[0] };
+    const target = comps.find((c) => c.id === id);
+    if (!target) return;
+    const updated: CompProperty = {
+      ...target,
+      [field]: value,
+      lastUpdated: new Date().toISOString().split("T")[0],
+    };
 
-        // When rent changes, snapshot into rent history
-        if (field === "avgRent1Bed" || field === "avgRent2Bed" || field === "avgRent4Bed") {
-          const today = new Date().toISOString().split("T")[0];
-          const lastEntry = updated.rentHistory[updated.rentHistory.length - 1];
-          // Only add if date changed or first entry
-          if (!lastEntry || lastEntry.date !== today) {
-            updated.rentHistory = [
-              ...updated.rentHistory,
-              {
-                date: today,
-                avgRent1Bed: field === "avgRent1Bed" ? (value as number) : updated.avgRent1Bed,
-                avgRent2Bed: field === "avgRent2Bed" ? (value as number) : updated.avgRent2Bed,
-                avgRent4Bed: field === "avgRent4Bed" ? (value as number) : updated.avgRent4Bed,
-              },
-            ];
-          } else {
-            // Update today's entry
-            const hist = [...updated.rentHistory];
-            hist[hist.length - 1] = {
-              ...hist[hist.length - 1],
-              [field]: value as number,
-            };
-            updated.rentHistory = hist;
-          }
-          updated.trend = calculateTrend(updated.rentHistory);
-        }
+    // When rent changes, snapshot into rent history
+    if (field === "avgRent1Bed" || field === "avgRent2Bed" || field === "avgRent4Bed") {
+      const today = new Date().toISOString().split("T")[0];
+      const lastEntry = updated.rentHistory[updated.rentHistory.length - 1];
+      if (!lastEntry || lastEntry.date !== today) {
+        updated.rentHistory = [
+          ...updated.rentHistory,
+          {
+            date: today,
+            avgRent1Bed: field === "avgRent1Bed" ? (value as number) : updated.avgRent1Bed,
+            avgRent2Bed: field === "avgRent2Bed" ? (value as number) : updated.avgRent2Bed,
+            avgRent4Bed: field === "avgRent4Bed" ? (value as number) : updated.avgRent4Bed,
+          },
+        ];
+      } else {
+        const hist = [...updated.rentHistory];
+        hist[hist.length - 1] = {
+          ...hist[hist.length - 1],
+          [field]: value as number,
+        };
+        updated.rentHistory = hist;
+      }
+      updated.trend = calculateTrend(updated.rentHistory);
+    }
 
-        return updated;
-      })
-    );
+    setComps((prev) => prev.map((c) => (c.id === id ? updated : c)));
+    void upsertComp(updated);
   }
 
   return (

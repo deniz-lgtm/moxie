@@ -327,6 +327,36 @@ export type DbNotice = {
   updated_at: string;
 };
 
+// ─── Comp Watch ────────────────────────────────────────────────
+// Mirrors supabase/migrations/20260428_comp_watch.sql.
+
+export type DbCompProperty = {
+  id: string;
+  name: string;
+  address: string;
+  distance: string;
+  avg_rent_1bed: number | null;
+  avg_rent_2bed: number | null;
+  avg_rent_4bed: number | null;
+  concessions: string;
+  occupancy: string;
+  last_updated: string;
+  trend: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DbCompRentHistory = {
+  id: number;
+  comp_id: string;
+  recorded_on: string;
+  avg_rent_1bed: number | null;
+  avg_rent_2bed: number | null;
+  avg_rent_4bed: number | null;
+  created_at: string;
+};
+
 // ─── Tours (open-house leasing) ────────────────────────────────
 // Mirrors supabase/migrations/20260428_tours.sql.
 
