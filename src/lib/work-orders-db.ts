@@ -171,6 +171,10 @@ export type AnnotationUpdate = {
   scheduled_date_override?: string | null;
   tags?: string[];
   follow_up_on?: string | null;
+  ai_category?: string | null;
+  ai_priority?: string | null;
+  ai_title?: string | null;
+  ai_classified_at?: string | null;
 };
 
 /**
@@ -206,6 +210,10 @@ export async function saveAnnotation(
     scheduled_date_override: update.scheduled_date_override ?? existing?.scheduled_date_override ?? null,
     tags: update.tags ?? existing?.tags ?? [],
     follow_up_on: update.follow_up_on ?? existing?.follow_up_on ?? null,
+    ai_category: update.ai_category ?? existing?.ai_category ?? null,
+    ai_priority: update.ai_priority ?? existing?.ai_priority ?? null,
+    ai_title: update.ai_title ?? existing?.ai_title ?? null,
+    ai_classified_at: update.ai_classified_at ?? existing?.ai_classified_at ?? null,
   };
 
   const { data, error } = await sb

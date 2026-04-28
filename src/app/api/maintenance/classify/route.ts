@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { saveAnnotation } from "@/lib/work-orders-db";
+import { getSupabase } from "@/lib/supabase";
 import type { MaintenanceCategory, MaintenancePriority } from "@/lib/types";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
@@ -58,9 +60,9 @@ export async function POST(request: Request) {
     }
 
     if (!ANTHROPIC_API_KEY) {
-      return NextResponse.json({
-        classifications: valid.map((i) => fallbackClassify(i)),
-      });
+      const classifications = valid.map((i) => fallbackClassify(i));
+      await persistClassifications(classifications);
+      return NextResponse.json({ classifications });
     }
 
     const numbered = valid
@@ -112,9 +114,9 @@ ${numbered}`,
     });
 
     if (!response.ok) {
-      return NextResponse.json({
-        classifications: valid.map((i) => fallbackClassify(i)),
-      });
+      const classifications = valid.map((i) => fallbackClassify(i));
+      await persistClassifications(classifications);
+      return NextResponse.json({ classifications });
     }
 
     const data = await response.json();
@@ -139,11 +141,35 @@ ${numbered}`,
       return { id: i.id, category, priority, title };
     });
 
+    await persistClassifications(classifications);
     return NextResponse.json({ classifications });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Classify failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+// Best-effort persistence — on first install / portfolio 25 we won't have
+// a Supabase work_order_annotations row to write to. We don't want a
+// missing table to fail the user-facing classify call.
+async function persistClassifications(classifications: Classification[]): Promise<void> {
+  if (classifications.length === 0) return;
+  if (!getSupabase()) return;
+  const now = new Date().toISOString();
+  await Promise.all(
+    classifications.map(async (c) => {
+      try {
+        await saveAnnotation(c.id, {
+          ai_category: c.category,
+          ai_priority: c.priority,
+          ai_title: c.title,
+          ai_classified_at: now,
+        });
+      } catch {
+        /* ignore individual failures so one bad row doesn't kill the batch */
+      }
+    })
+  );
 }
 
 function fallbackClassify(i: { id: string; title: string; description: string }): Classification {
