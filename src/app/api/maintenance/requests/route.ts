@@ -99,7 +99,15 @@ export async function GET(request: NextRequest) {
     }
 
     const workOrders = inPortfolio.map((row, i) => {
-      const base = mapWorkOrderRow((row.raw as Record<string, any>) || {}, i);
+      // Make the table's `status` column authoritative over the snapshot
+      // in `raw.status`. The reconcile pass at sync time writes only to
+      // the column; without this merge the page would keep mapping rows
+      // off the original AppFolio raw status forever.
+      const rawWithLatestStatus = {
+        ...((row.raw as Record<string, any>) || {}),
+        status: row.status ?? (row.raw as Record<string, any> | null)?.status,
+      };
+      const base = mapWorkOrderRow(rawWithLatestStatus, i);
       return applyAnnotation(base, annotations.get(base.id));
     });
 
