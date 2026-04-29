@@ -4,7 +4,7 @@ import {
   getLastSyncTime,
   getAllAnnotations,
 } from "@/lib/work-orders-db";
-import { mapWorkOrderRow } from "@/lib/data";
+import { mapWorkOrderRow, getPortfolioPropertyIds } from "@/lib/data";
 import type {
   MaintenanceCategory,
   MaintenancePriority,
@@ -12,6 +12,13 @@ import type {
   MaintenanceStatus,
 } from "@/lib/types";
 import type { DbWorkOrderAnnotation } from "@/lib/supabase";
+
+// The Supabase work_orders table is shared across portfolios in theory,
+// but in practice only the Moxie portfolio (24) syncs to it. Default
+// the read path to portfolio 24 unless the caller asks otherwise. This
+// guards against legacy rows from other portfolios polluting counts on
+// /maintenance.
+const DEFAULT_PORTFOLIO_ID = "24";
 
 const VALID_CATEGORIES: ReadonlySet<string> = new Set([
   "plumbing",
@@ -63,17 +70,44 @@ function applyAnnotation(
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const [stored, annotations, syncedAt] = await Promise.all([
+    const portfolioId = searchParams.get("portfolio_id") ?? DEFAULT_PORTFOLIO_ID;
+
+    const [stored, annotations, syncedAt, portfolioPropertyIds] = await Promise.all([
       getStoredWorkOrders({
         property_id: searchParams.get("property_id") || undefined,
         status: searchParams.get("status") || undefined,
       }),
       getAllAnnotations(),
       getLastSyncTime(),
+      getPortfolioPropertyIds(portfolioId),
     ]);
 
-    const workOrders = stored.map((row, i) => {
-      const base = mapWorkOrderRow((row.raw as Record<string, any>) || {}, i);
+    // Drop any stored row whose property isn't in the requested portfolio.
+    // The reconcile pass at sync time only flips IN-portfolio rows to
+    // closed; phantom rows from other portfolios would otherwise stay
+    // counted as open forever.
+    const inPortfolio = stored.filter((row) => {
+      const propId = row.property_id ? String(row.property_id) : "";
+      return propId.length > 0 && portfolioPropertyIds.has(propId);
+    });
+    const filteredOut = stored.length - inPortfolio.length;
+    if (filteredOut > 0) {
+      console.log(
+        `[Moxie] /api/maintenance/requests: filtered out ${filteredOut} stored rows ` +
+          `not in portfolio ${portfolioId} (kept ${inPortfolio.length}/${stored.length})`
+      );
+    }
+
+    const workOrders = inPortfolio.map((row, i) => {
+      // Make the table's `status` column authoritative over the snapshot
+      // in `raw.status`. The reconcile pass at sync time writes only to
+      // the column; without this merge the page would keep mapping rows
+      // off the original AppFolio raw status forever.
+      const rawWithLatestStatus = {
+        ...((row.raw as Record<string, any>) || {}),
+        status: row.status ?? (row.raw as Record<string, any> | null)?.status,
+      };
+      const base = mapWorkOrderRow(rawWithLatestStatus, i);
       return applyAnnotation(base, annotations.get(base.id));
     });
 
@@ -82,6 +116,8 @@ export async function GET(request: NextRequest) {
       source: "supabase" as const,
       syncedAt,
       count: workOrders.length,
+      portfolioId,
+      filteredOut,
     });
   } catch (error: any) {
     return NextResponse.json(
