@@ -283,14 +283,23 @@ export interface GuestCardResult {
 // diagnostic info describing what was tried.
 export interface ProspectShowing {
   guestCardId: string;
+  showingId?: string;
   firstName?: string;
   lastName?: string;
   email?: string;
   phone?: string;
+  propertyId?: string;
   propertyName?: string;
+  unitId?: string;
   unitName?: string;
   /** ISO 8601 datetime of the scheduled showing. */
   showingAt: string;
+  /** AppFolio-side status: "Completed", "Scheduled", "No Show", etc. */
+  status?: string;
+  /** Showing type: "In-Person", "Self-Showing", etc. */
+  type?: string;
+  description?: string;
+  assignedUser?: string;
 }
 
 export interface ProspectShowingsResult {
@@ -339,11 +348,17 @@ const COMBINED_NAME_FIELDS = ["guest_card_name", "name", "prospect_name"];
 const FIRST_NAME_FIELDS = ["first_name", "firstName", "FirstName", "applicant_first_name", "prospect_first_name"];
 const LAST_NAME_FIELDS = ["last_name", "lastName", "LastName", "applicant_last_name", "prospect_last_name"];
 const PROPERTY_NAME_FIELDS = ["property_name", "PropertyName", "property"];
+const PROPERTY_ID_FIELDS = ["property_id", "PropertyId"];
 const UNIT_NAME_FIELDS = ["showing_unit", "unit_name", "UnitName", "unit", "unit_number"];
+const UNIT_ID_FIELDS = ["unit_id", "UnitId"];
 const EMAIL_FIELDS = ["email", "Email", "applicant_email", "prospect_email"];
 const PHONE_FIELDS = ["phone", "Phone", "phone_number", "PhoneNumber"];
 const GUEST_CARD_ID_FIELDS = ["guest_card_id", "GuestCardId", "prospect_id", "id", "Id"];
+const SHOWING_ID_FIELDS = ["showing_id", "ShowingId"];
 const STATUS_FIELDS = ["status", "Status", "showing_status"];
+const TYPE_FIELDS = ["type", "Type", "showing_type"];
+const DESCRIPTION_FIELDS = ["description", "Description", "notes"];
+const ASSIGNED_USER_FIELDS = ["assigned_user", "AssignedUser", "host"];
 
 function pickStr(row: Record<string, unknown>, candidates: string[]): string | undefined {
   for (const k of candidates) {
@@ -448,13 +463,20 @@ export async function getProspectShowings(): Promise<ProspectShowingsResult> {
 
     showings.push({
       guestCardId: id,
+      showingId: pickStr(row, SHOWING_ID_FIELDS),
       firstName,
       lastName,
       email: pickStr(row, EMAIL_FIELDS),
       phone: pickStr(row, PHONE_FIELDS),
+      propertyId: pickStr(row, PROPERTY_ID_FIELDS),
       propertyName: pickStr(row, PROPERTY_NAME_FIELDS),
+      unitId: pickStr(row, UNIT_ID_FIELDS),
       unitName: pickStr(row, UNIT_NAME_FIELDS),
       showingAt: new Date(showingAt).toISOString(),
+      status: pickStr(row, STATUS_FIELDS),
+      type: pickStr(row, TYPE_FIELDS),
+      description: pickStr(row, DESCRIPTION_FIELDS),
+      assignedUser: pickStr(row, ASSIGNED_USER_FIELDS),
     });
   }
 

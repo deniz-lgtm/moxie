@@ -38,6 +38,51 @@ function capacityUsed(slot: ShowingSlot): number {
     .reduce((s, r) => s + (r.partySize || 1), 0);
 }
 
+/** Default duration for an AppFolio showing whose end-time isn't tracked. */
+const APPFOLIO_DEFAULT_MINUTES = 30;
+
+/** Map an AppFolio showing into the same shape as a Moxie ShowingSlot so
+ *  the existing week/month/list views can render it without forking. The
+ *  synthetic id `af-<guestCardId>` is what the rest of the page checks
+ *  against to know whether interactions (cancel, register, etc.) are
+ *  permitted — AppFolio shadows are read-only. */
+function appfolioShowingToSlot(ps: any): ShowingSlot {
+  const startsAt = ps.showingAt as string;
+  const endsAt = new Date(new Date(startsAt).getTime() + APPFOLIO_DEFAULT_MINUTES * 60_000).toISOString();
+  const status: ShowingSlot["status"] =
+    String(ps.status ?? "").toLowerCase() === "completed" ? "completed" : "open";
+  const prospectName = [ps.firstName, ps.lastName].filter(Boolean).join(" ").trim() || "AppFolio prospect";
+  const synthRegistration = {
+    id: `af-reg-${ps.guestCardId}`,
+    slotId: `af-${ps.guestCardId}`,
+    prospectName,
+    prospectEmail: ps.email,
+    prospectPhone: ps.phone,
+    partySize: 1,
+    status: status === "completed" ? ("attended" as const) : ("confirmed" as const),
+    notes: ps.description || ps.type ? [ps.type, ps.description].filter(Boolean).join(" — ") : undefined,
+    guestCardId: String(ps.guestCardId),
+    source: "appfolio",
+  };
+  return {
+    id: `af-${ps.guestCardId}`,
+    propertyId: ps.propertyId,
+    propertyName: ps.propertyName,
+    unitId: ps.unitId,
+    unitName: ps.unitName,
+    startsAt,
+    endsAt,
+    hostName: ps.assignedUser,
+    capacity: 1,
+    notes: ps.description,
+    publicToken: "",
+    status,
+    registrations: [synthRegistration],
+    source: "appfolio",
+    appfolioShowingId: ps.showingId ? String(ps.showingId) : undefined,
+  };
+}
+
 function groupByDate(slots: ShowingSlot[]): { date: string; slots: ShowingSlot[] }[] {
   const map = new Map<string, ShowingSlot[]>();
   for (const s of slots) {
@@ -132,7 +177,7 @@ function RegRow({
       </td>
       <td className="py-2 text-right">
         <div className="flex items-center justify-end gap-1">
-          {!reg.guestCardId && (
+          {!reg.guestCardId && reg.source !== "appfolio" && (
             <button
               onClick={pushToAppFolio}
               disabled={pushing}
@@ -142,7 +187,7 @@ function RegRow({
               {pushing ? "…" : "→AF"}
             </button>
           )}
-          {reg.status === "confirmed" && (
+          {reg.status === "confirmed" && reg.source !== "appfolio" && (
             <>
               <button
                 onClick={() => onStatus(reg.id, "attended")}
@@ -158,12 +203,14 @@ function RegRow({
               </button>
             </>
           )}
-          <button
-            onClick={() => onDelete(reg.id)}
-            className="text-xs px-1.5 py-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          >
-            <X className="w-3 h-3" />
-          </button>
+          {reg.source !== "appfolio" && (
+            <button
+              onClick={() => onDelete(reg.id)}
+              className="text-xs px-1.5 py-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -186,6 +233,7 @@ function SlotDetail({
   const [addForm, setAddForm] = useState({ name: "", email: "", phone: "", partySize: "1", notes: "", guestCardId: "" });
   const [copied, setCopied] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const isAppfolio = slot.source === "appfolio";
 
   const publicUrl =
     typeof window !== "undefined"
@@ -269,9 +317,16 @@ function SlotDetail({
                 {[slot.propertyName, slot.unitName].filter(Boolean).join(" – ")}
               </p>
             )}
-            <h2 className="text-lg font-semibold mt-0.5">
-              {formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}
-            </h2>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <h2 className="text-lg font-semibold">
+                {formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}
+              </h2>
+              {isAppfolio && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-semibold uppercase tracking-wide">
+                  AppFolio
+                </span>
+              )}
+            </div>
             <p className="text-sm text-muted-foreground">{formatDateHeading(slot.startsAt)}</p>
             {slot.hostName && <p className="text-xs text-muted-foreground mt-1">Host: {slot.hostName}</p>}
           </div>
@@ -290,21 +345,30 @@ function SlotDetail({
             <CapacityBar used={used} capacity={slot.capacity} />
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex-1 text-xs bg-muted rounded px-2 py-1.5 font-mono truncate text-muted-foreground">
-              {publicUrl}
-            </div>
-            <button
-              onClick={copyLink}
-              className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition"
-            >
-              {copied ? <Check className="w-3 h-3" /> : <ClipboardCopy className="w-3 h-3" />}
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
+          {isAppfolio ? (
+            <p className="text-xs text-muted-foreground bg-orange-50 border border-orange-200 rounded px-3 py-2">
+              This is a 1-on-1 showing booked in AppFolio. Convert it to an
+              open house below to add more prospects and share a sign-up link.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 text-xs bg-muted rounded px-2 py-1.5 font-mono truncate text-muted-foreground">
+                  {publicUrl}
+                </div>
+                <button
+                  onClick={copyLink}
+                  className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition"
+                >
+                  {copied ? <Check className="w-3 h-3" /> : <ClipboardCopy className="w-3 h-3" />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
 
-          {slot.publicDescription && (
-            <p className="text-sm text-muted-foreground">{slot.publicDescription}</p>
+              {slot.publicDescription && (
+                <p className="text-sm text-muted-foreground">{slot.publicDescription}</p>
+              )}
+            </>
           )}
         </div>
 
@@ -312,7 +376,7 @@ function SlotDetail({
         <div className="flex-1 p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm">Registrations ({regs.length})</h3>
-            {slot.status === "open" && (
+            {slot.status === "open" && !isAppfolio && (
               <button
                 onClick={() => setAdding(true)}
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-border hover:bg-muted"
@@ -414,7 +478,7 @@ function SlotDetail({
         </div>
 
         {/* footer actions */}
-        {slot.status === "open" && (
+        {slot.status === "open" && !isAppfolio && (
           <div className="p-5 border-t border-border">
             <button
               onClick={cancelSlot}
@@ -423,6 +487,20 @@ function SlotDetail({
             >
               {cancelling ? "Cancelling…" : "Cancel this slot"}
             </button>
+          </div>
+        )}
+        {isAppfolio && (
+          <div className="p-5 border-t border-border space-y-2">
+            <button
+              disabled
+              title="Coming soon: turn this 1-on-1 showing into a multi-prospect open house with a public sign-up link."
+              className="w-full text-sm py-2 rounded bg-orange-100 text-orange-900 hover:bg-orange-200 transition disabled:opacity-60 disabled:cursor-not-allowed font-medium"
+            >
+              Make available for open house
+            </button>
+            <p className="text-[11px] text-muted-foreground text-center">
+              Coming soon — this will widen the showing to additional prospects and generate a shareable link.
+            </p>
           </div>
         )}
       </div>
@@ -680,14 +758,19 @@ function NewSlotModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 function SlotCard({ slot, onClick }: { slot: ShowingSlot; onClick: () => void }) {
   const used = capacityUsed(slot);
   const regCount = (slot.registrations ?? []).length;
+  const isAppfolio = slot.source === "appfolio";
   return (
     <button
       onClick={onClick}
-      className="w-full text-left p-4 bg-card border border-border rounded-xl hover:shadow-md hover:border-primary/40 transition group"
+      className={`w-full text-left p-4 border rounded-xl hover:shadow-md transition group ${
+        isAppfolio
+          ? "bg-orange-50/50 border-orange-200 hover:border-orange-400"
+          : "bg-card border-border hover:border-primary/40"
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold">
               {formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}
             </span>
@@ -696,6 +779,11 @@ function SlotCard({ slot, onClick }: { slot: ShowingSlot; onClick: () => void })
             >
               {slot.status}
             </span>
+            {isAppfolio && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-semibold uppercase tracking-wide">
+                AppFolio
+              </span>
+            )}
           </div>
           {(slot.propertyName || slot.unitName) && (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
@@ -818,17 +906,22 @@ function WeekView({ slots, onOpenSlot, weekOf, onWeekChange }: {
               {/* slot blocks */}
               {daySlots.map((slot) => {
                 const used = capacityUsed(slot);
+                const isAppfolio = slot.source === "appfolio";
                 return (
                   <button
                     key={slot.id}
                     onClick={() => onOpenSlot(slot)}
                     style={{ ...slotStyle(slot), position: "absolute", left: "2px", right: "2px" }}
-                    className="bg-purple-100 border border-purple-300 rounded text-left px-1 py-0.5 hover:bg-purple-200 transition overflow-hidden"
+                    className={`border rounded text-left px-1 py-0.5 transition overflow-hidden ${
+                      isAppfolio
+                        ? "bg-orange-100 border-orange-300 hover:bg-orange-200"
+                        : "bg-purple-100 border-purple-300 hover:bg-purple-200"
+                    }`}
                   >
-                    <p className="text-[10px] font-semibold text-purple-900 leading-tight truncate">
+                    <p className={`text-[10px] font-semibold leading-tight truncate ${isAppfolio ? "text-orange-900" : "text-purple-900"}`}>
                       {[slot.propertyName, slot.unitName].filter(Boolean).join(" – ") || "Open house"}
                     </p>
-                    <p className="text-[9px] text-purple-700">
+                    <p className={`text-[9px] ${isAppfolio ? "text-orange-700" : "text-purple-700"}`}>
                       {formatTime(slot.startsAt)} · {used}/{slot.capacity}
                     </p>
                   </button>
@@ -905,15 +998,22 @@ function MonthView({ slots, onOpenSlot, monthOf, onMonthChange }: {
               <span className={`text-xs font-medium inline-flex items-center justify-center w-5 h-5 rounded-full mb-1 ${isToday ? "bg-primary text-primary-foreground" : ""}`}>
                 {new Date(cell.date + "T12:00:00").getDate()}
               </span>
-              {daySlots.slice(0, 3).map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => onOpenSlot(s)}
-                  className="w-full text-left text-[10px] px-1 py-0.5 mb-0.5 rounded bg-purple-100 text-purple-800 hover:bg-purple-200 truncate font-medium"
-                >
-                  {formatTime(s.startsAt)} {[s.propertyName, s.unitName].filter(Boolean).join(" – ") || "Showing"}
-                </button>
-              ))}
+              {daySlots.slice(0, 3).map((s) => {
+                const isAppfolio = s.source === "appfolio";
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => onOpenSlot(s)}
+                    className={`w-full text-left text-[10px] px-1 py-0.5 mb-0.5 rounded truncate font-medium ${
+                      isAppfolio
+                        ? "bg-orange-100 text-orange-800 hover:bg-orange-200"
+                        : "bg-purple-100 text-purple-800 hover:bg-purple-200"
+                    }`}
+                  >
+                    {formatTime(s.startsAt)} {[s.propertyName, s.unitName].filter(Boolean).join(" – ") || "Showing"}
+                  </button>
+                );
+              })}
               {daySlots.length > 3 && (
                 <span className="text-[10px] text-muted-foreground px-1">+{daySlots.length - 3} more</span>
               )}
@@ -942,9 +1042,33 @@ export default function ShowingsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/showings/slots?include_regs=1");
-      const j = await res.json();
-      setSlots(Array.isArray(j.slots) ? j.slots : []);
+      const [moxieRes, appfolioRes] = await Promise.allSettled([
+        fetch("/api/showings/slots?include_regs=1").then((r) => r.json()),
+        fetch("/api/appfolio/showings").then((r) => r.json()),
+      ]);
+
+      const moxieSlots: ShowingSlot[] =
+        moxieRes.status === "fulfilled" && Array.isArray(moxieRes.value.slots)
+          ? moxieRes.value.slots
+          : [];
+
+      // De-dupe AppFolio shadows: any Moxie registration that's already
+      // pushed to AppFolio carries that guest_card_id, so skip the AF row.
+      const linkedGuestCardIds = new Set<string>();
+      for (const s of moxieSlots) {
+        for (const r of s.registrations ?? []) {
+          if (r.guestCardId) linkedGuestCardIds.add(String(r.guestCardId));
+        }
+      }
+
+      const appfolioSlots: ShowingSlot[] =
+        appfolioRes.status === "fulfilled" && Array.isArray(appfolioRes.value.showings)
+          ? (appfolioRes.value.showings as any[])
+              .filter((ps) => !linkedGuestCardIds.has(String(ps.guestCardId)))
+              .map((ps) => appfolioShowingToSlot(ps))
+          : [];
+
+      setSlots([...moxieSlots, ...appfolioSlots]);
     } catch {
       setSlots([]);
     } finally {
@@ -961,6 +1085,11 @@ export default function ShowingsPage() {
   const groups = groupByDate(visibleSlots);
 
   const openSlot = async (slot: ShowingSlot) => {
+    // AppFolio shadows aren't in Moxie's DB — open them directly.
+    if (slot.source === "appfolio") {
+      setSelectedSlot(slot);
+      return;
+    }
     const res = await fetch(`/api/showings/slots?id=${slot.id}`);
     const j = await res.json();
     setSelectedSlot(j.slot ?? slot);

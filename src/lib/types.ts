@@ -501,6 +501,11 @@ export interface ShowingSlot {
   publicToken: string;
   status: ShowingSlotStatus;
   registrations?: ShowingRegistration[];
+  /** "moxie" = open-house slot owned in Supabase; "appfolio" = read-only
+   *  shadow of an AppFolio guest-card showing. Defaults to "moxie". */
+  source?: "moxie" | "appfolio";
+  /** AppFolio's showing_id when source === "appfolio". */
+  appfolioShowingId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
