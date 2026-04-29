@@ -73,7 +73,9 @@ export default function PublicSignUpPage({ params }: PageProps) {
       }
       setSlot(s);
       if (s.status !== "open") { setState("closed"); return; }
-      if (seatsUsed(s) >= s.capacity) { setState("full"); return; }
+      // capacity === 0 is the "unlimited" convention used by AppFolio-promoted
+      // open houses — never goes "full".
+      if (s.capacity > 0 && seatsUsed(s) >= s.capacity) { setState("full"); return; }
       setState("form");
     } catch {
       setState("error");
@@ -182,6 +184,7 @@ export default function PublicSignUpPage({ params }: PageProps) {
           {slot && (
             <div className="mt-4 p-4 bg-gray-50 rounded-xl text-sm text-gray-700 space-y-1">
               {slot.propertyName && <p className="font-medium">{slot.propertyName}</p>}
+              {slot.unitName && <p className="text-gray-600">Unit {slot.unitName}</p>}
               <p>{formatDate(slot.startsAt)}</p>
               <p>{formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}</p>
               {slot.hostName && <p className="text-gray-500">Host: {slot.hostName}</p>}
@@ -197,15 +200,23 @@ export default function PublicSignUpPage({ params }: PageProps) {
 
   // ── form ─────────────────────────────────────────────────────────────────
   const used = slot ? seatsUsed(slot) : 0;
-  const remaining = slot ? Math.max(0, slot.capacity - used) : 0;
+  const isUnlimited = slot?.capacity === 0;
+  const remaining = slot && !isUnlimited ? Math.max(0, slot.capacity - used) : Infinity;
+  const partySizeMax = isUnlimited ? 8 : Math.min(remaining, 8);
 
   return (
     <PublicShell slot={slot}>
+      {isUnlimited && (
+        <div className="mb-4 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
+          This is an open house — drop by anytime during the window. Sign up so we know to expect you.
+        </div>
+      )}
+
       {slot?.publicDescription && (
         <p className="text-sm text-gray-600 mb-5 leading-relaxed">{slot.publicDescription}</p>
       )}
 
-      {remaining <= 5 && remaining > 0 && (
+      {!isUnlimited && remaining <= 5 && remaining > 0 && (
         <div className="mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           Only {remaining} spot{remaining === 1 ? "" : "s"} left!
         </div>
@@ -257,7 +268,7 @@ export default function PublicSignUpPage({ params }: PageProps) {
             value={form.partySize}
             onChange={(e) => setForm((f) => ({ ...f, partySize: e.target.value }))}
           >
-            {Array.from({ length: Math.min(remaining, 8) }, (_, i) => i + 1).map((n) => (
+            {Array.from({ length: Math.max(1, partySizeMax) }, (_, i) => i + 1).map((n) => (
               <option key={n} value={n}>
                 {n} {n === 1 ? "person" : "people"}
               </option>
@@ -313,6 +324,9 @@ function PublicShell({ slot, children }: { slot?: ShowingSlot | null; children: 
               <h1 className="text-xl font-bold text-gray-900">
                 {slot.propertyName ? `Showing at ${slot.propertyName}` : "Open House Sign-Up"}
               </h1>
+              {slot.unitName && (
+                <p className="mt-1 text-sm text-gray-700 font-medium">Unit {slot.unitName}</p>
+              )}
               <div className="mt-2 space-y-0.5 text-sm text-gray-600">
                 <p>{formatDate(slot.startsAt)}</p>
                 <p>{formatTime(slot.startsAt)} – {formatTime(slot.endsAt)}</p>
