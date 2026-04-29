@@ -307,33 +307,43 @@ export interface ProspectShowingsResult {
   }[];
 }
 
+// Primary report on this AppFolio install is /reports/showings.json — fields
+// confirmed live: guest_card_id, guest_card_name ("Last, First"), email,
+// phone_number, property_name, showing_unit, unit_id, showing_time
+// (full ISO datetime), status, type. The other endpoints stay as fallbacks
+// in case a different tenant exposes its data under a different name.
 const CANDIDATE_REPORTS = [
+  "/reports/showings.json",
   "/reports/guest_card_detail.json",
   "/reports/prospect_summary.json",
   "/reports/prospect_detail.json",
-  "/reports/prospect_log.json",
-  "/reports/applicant_directory.json",
-  "/reports/showing_detail.json",
-  "/reports/showings.json",
 ];
 
+// Datetime fields that already encode the full showing time (ISO or similar).
+// Try these first; if found we don't need a separate time field.
+const SHOWING_DATETIME_FIELDS = [
+  "showing_time",      // /reports/showings.json — full ISO ("2026-04-27T19:45:00Z")
+  "showing_at", "showing_datetime", "appointment_at",
+];
+// Date-only fields requiring a paired time field.
 const SHOWING_DATE_FIELDS = [
   "showing_date", "showingDate", "ShowingDate",
-  "scheduled_showing_date", "next_showing_date",
-  "appointment_date", "showing_at", "showing_datetime",
+  "scheduled_showing_date", "next_showing_date", "appointment_date",
 ];
-const SHOWING_TIME_FIELDS = [
-  "showing_time", "showingTime", "ShowingTime",
-  "scheduled_showing_time", "next_showing_time",
-  "appointment_time",
+const SHOWING_TIME_ONLY_FIELDS = [
+  "showingTime", "ShowingTime",
+  "scheduled_showing_time", "next_showing_time", "appointment_time",
 ];
+// Combined "Last, First" field — only used if first/last aren't separate.
+const COMBINED_NAME_FIELDS = ["guest_card_name", "name", "prospect_name"];
 const FIRST_NAME_FIELDS = ["first_name", "firstName", "FirstName", "applicant_first_name", "prospect_first_name"];
 const LAST_NAME_FIELDS = ["last_name", "lastName", "LastName", "applicant_last_name", "prospect_last_name"];
 const PROPERTY_NAME_FIELDS = ["property_name", "PropertyName", "property"];
-const UNIT_NAME_FIELDS = ["unit_name", "UnitName", "unit", "unit_number"];
+const UNIT_NAME_FIELDS = ["showing_unit", "unit_name", "UnitName", "unit", "unit_number"];
 const EMAIL_FIELDS = ["email", "Email", "applicant_email", "prospect_email"];
 const PHONE_FIELDS = ["phone", "Phone", "phone_number", "PhoneNumber"];
 const GUEST_CARD_ID_FIELDS = ["guest_card_id", "GuestCardId", "prospect_id", "id", "Id"];
+const STATUS_FIELDS = ["status", "Status", "showing_status"];
 
 function pickStr(row: Record<string, unknown>, candidates: string[]): string | undefined {
   for (const k of candidates) {
@@ -355,6 +365,41 @@ function findFieldName(row: Record<string, unknown>, candidates: string[]): stri
   return undefined;
 }
 
+/** Parse a row's showing datetime — supports either a single ISO field or
+ * a date+time pair. Returns the raw string for `new Date(...)` to consume. */
+function parseShowingAt(row: Record<string, unknown>): string | undefined {
+  // Prefer single ISO datetime fields.
+  const dt = pickStr(row, SHOWING_DATETIME_FIELDS);
+  if (dt) {
+    if (!Number.isNaN(new Date(dt).getTime())) return dt;
+  }
+  // Fallback: combine separate date + time fields.
+  const dateStr = pickStr(row, SHOWING_DATE_FIELDS);
+  if (!dateStr) return undefined;
+  const timeStr = pickStr(row, SHOWING_TIME_ONLY_FIELDS) ?? "00:00";
+  const isoDate = (() => {
+    const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+    return dateStr.slice(0, 10);
+  })();
+  const time = /^\d{1,2}:\d{2}/.test(timeStr) ? timeStr : "00:00";
+  const padded = time.length === 4 ? `0${time}` : time;
+  const combined = `${isoDate}T${padded}:00`;
+  return Number.isNaN(new Date(combined).getTime()) ? undefined : combined;
+}
+
+/** Parse "Last, First" or "First Last" into { firstName, lastName }. */
+function splitCombinedName(name: string): { firstName?: string; lastName?: string } {
+  const trimmed = name.trim();
+  if (trimmed.includes(",")) {
+    const [last, first] = trimmed.split(",").map((s) => s.trim());
+    return { firstName: first || undefined, lastName: last || undefined };
+  }
+  const parts = trimmed.split(/\s+/);
+  if (parts.length === 1) return { firstName: parts[0] };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
 export async function getProspectShowings(): Promise<ProspectShowingsResult> {
   const attempts: ProspectShowingsResult["attempts"] = [];
   let pickedRows: any[] = [];
@@ -363,7 +408,9 @@ export async function getProspectShowings(): Promise<ProspectShowingsResult> {
     try {
       const rows = await appfolioFetchAll(endpoint);
       const sampleRow = rows[0] as Record<string, unknown> | undefined;
-      const showingDateField = sampleRow ? findFieldName(sampleRow, SHOWING_DATE_FIELDS) : undefined;
+      const showingDateField = sampleRow
+        ? findFieldName(sampleRow, [...SHOWING_DATETIME_FIELDS, ...SHOWING_DATE_FIELDS])
+        : undefined;
       attempts.push({
         endpoint,
         ok: true,
@@ -372,7 +419,6 @@ export async function getProspectShowings(): Promise<ProspectShowingsResult> {
         sampleRow,
         showingDateField,
       });
-      // Pick the first successful report that exposes a showing date field.
       if (pickedRows.length === 0 && rows.length > 0 && showingDateField) {
         pickedRows = rows;
       }
@@ -383,31 +429,32 @@ export async function getProspectShowings(): Promise<ProspectShowingsResult> {
 
   const showings: ProspectShowing[] = [];
   for (const row of pickedRows) {
-    const dateStr = pickStr(row, SHOWING_DATE_FIELDS);
-    if (!dateStr) continue;
-    const timeStr = pickStr(row, SHOWING_TIME_FIELDS) ?? "00:00";
-    // Normalize date — AppFolio sometimes returns MM/DD/YYYY.
-    const isoDate = (() => {
-      const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-      if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-      // Already YYYY-MM-DD or full ISO string.
-      return dateStr.slice(0, 10);
-    })();
-    const time = /^\d{1,2}:\d{2}/.test(timeStr) ? timeStr : "00:00";
-    const showingAt = `${isoDate}T${time.length === 4 ? "0" + time : time}:00`;
-    if (Number.isNaN(new Date(showingAt).getTime())) continue;
+    const showingAt = parseShowingAt(row);
+    if (!showingAt) continue;
+
+    // Skip cancelled showings — completed/scheduled both belong on the calendar.
+    const status = pickStr(row, STATUS_FIELDS)?.toLowerCase() ?? "";
+    if (status === "cancelled" || status === "canceled") continue;
 
     const id = pickStr(row, GUEST_CARD_ID_FIELDS);
     if (!id) continue;
+
+    let firstName = pickStr(row, FIRST_NAME_FIELDS);
+    let lastName = pickStr(row, LAST_NAME_FIELDS);
+    if (!firstName && !lastName) {
+      const combined = pickStr(row, COMBINED_NAME_FIELDS);
+      if (combined) ({ firstName, lastName } = splitCombinedName(combined));
+    }
+
     showings.push({
       guestCardId: id,
-      firstName: pickStr(row, FIRST_NAME_FIELDS),
-      lastName: pickStr(row, LAST_NAME_FIELDS),
+      firstName,
+      lastName,
       email: pickStr(row, EMAIL_FIELDS),
       phone: pickStr(row, PHONE_FIELDS),
       propertyName: pickStr(row, PROPERTY_NAME_FIELDS),
       unitName: pickStr(row, UNIT_NAME_FIELDS),
-      showingAt,
+      showingAt: new Date(showingAt).toISOString(),
     });
   }
 

@@ -173,9 +173,12 @@ export async function loadCalendarEvents(window?: {
       const startDate = new Date(ps.showingAt);
       if (Number.isNaN(startDate.getTime())) continue;
       const date = isoDate(startDate);
+      if (!withinWindow(date, fromIso, toIso)) continue;
       const time = startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       const who = [ps.firstName, ps.lastName].filter(Boolean).join(" ").trim();
-      const where = ps.propertyName || ps.unitName;
+      // Property names from AppFolio are long ("1116 30th St. - The Hula House");
+      // prefer the unit ("1118 ¾") if present for a tighter calendar label.
+      const where = ps.unitName || ps.propertyName;
       const label = where
         ? `Showing: ${where}${who ? ` — ${who}` : ""} @ ${time}`
         : `Showing${who ? `: ${who}` : ""} @ ${time}`;
