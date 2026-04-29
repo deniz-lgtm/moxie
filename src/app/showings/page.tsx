@@ -80,6 +80,7 @@ function appfolioShowingToSlot(ps: any): ShowingSlot {
     registrations: [synthRegistration],
     source: "appfolio",
     appfolioShowingId: ps.showingId ? String(ps.showingId) : undefined,
+    appfolioGuestCardId: String(ps.guestCardId),
   };
 }
 
@@ -107,6 +108,20 @@ const STATUS_COLORS: Record<string, string> = {
 // ─── sub-components ─────────────────────────────────────────────────────────
 
 function CapacityBar({ used, capacity }: { used: number; capacity: number }) {
+  // capacity === 0 is the convention for unlimited (used by AppFolio-promoted
+  // open houses). Show a flat green bar + count instead of a fill ratio.
+  if (capacity === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+          <div className="bg-emerald-400 h-full rounded-full" style={{ width: "100%" }} />
+        </div>
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          {used} · unlimited
+        </span>
+      </div>
+    );
+  }
   const pct = Math.min(100, Math.round((used / Math.max(capacity, 1)) * 100));
   const color = pct >= 100 ? "bg-red-500" : pct >= 75 ? "bg-amber-500" : "bg-emerald-500";
   return (
@@ -233,7 +248,46 @@ function SlotDetail({
   const [addForm, setAddForm] = useState({ name: "", email: "", phone: "", partySize: "1", notes: "", guestCardId: "" });
   const [copied, setCopied] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteError, setPromoteError] = useState("");
   const isAppfolio = slot.source === "appfolio";
+  const isPromoted = !isAppfolio && Boolean(slot.appfolioShowingId);
+
+  const promoteToOpenHouse = async () => {
+    if (!slot.appfolioShowingId || !slot.appfolioGuestCardId) {
+      setPromoteError("Missing AppFolio showing/guest-card id");
+      return;
+    }
+    setPromoting(true);
+    setPromoteError("");
+    try {
+      const res = await fetch("/api/showings/promote-appfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appfolioShowingId: slot.appfolioShowingId,
+          appfolioGuestCardId: slot.appfolioGuestCardId,
+          propertyId: slot.propertyId,
+          propertyName: slot.propertyName,
+          unitId: slot.unitId,
+          unitName: slot.unitName,
+          startsAt: slot.startsAt,
+          hostName: slot.hostName,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.slot) {
+        setPromoteError(j.error || "Failed to promote");
+        return;
+      }
+      onRefresh();
+      onClose();
+    } catch (err: any) {
+      setPromoteError(err?.message || "Failed");
+    } finally {
+      setPromoting(false);
+    }
+  };
 
   const publicUrl =
     typeof window !== "undefined"
@@ -326,6 +380,11 @@ function SlotDetail({
                   AppFolio
                 </span>
               )}
+              {isPromoted && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold uppercase tracking-wide">
+                  Open House
+                </span>
+              )}
             </div>
             <p className="text-sm text-muted-foreground">{formatDateHeading(slot.startsAt)}</p>
             {slot.hostName && <p className="text-xs text-muted-foreground mt-1">Host: {slot.hostName}</p>}
@@ -340,7 +399,11 @@ function SlotDetail({
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span className="font-medium">Capacity</span>
-              <span className="text-muted-foreground">{used} / {slot.capacity} seats</span>
+              <span className="text-muted-foreground">
+                {slot.capacity === 0
+                  ? `${used} signed up · unlimited`
+                  : `${used} / ${slot.capacity} seats`}
+              </span>
             </div>
             <CapacityBar used={used} capacity={slot.capacity} />
           </div>
@@ -492,14 +555,15 @@ function SlotDetail({
         {isAppfolio && (
           <div className="p-5 border-t border-border space-y-2">
             <button
-              disabled
-              title="Coming soon: turn this 1-on-1 showing into a multi-prospect open house with a public sign-up link."
-              className="w-full text-sm py-2 rounded bg-orange-100 text-orange-900 hover:bg-orange-200 transition disabled:opacity-60 disabled:cursor-not-allowed font-medium"
+              onClick={promoteToOpenHouse}
+              disabled={promoting || !slot.appfolioShowingId || !slot.appfolioGuestCardId}
+              className="w-full text-sm py-2 rounded bg-orange-500 text-white hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
-              Make available for open house
+              {promoting ? "Creating open house…" : "Make available for open house"}
             </button>
+            {promoteError && <p className="text-xs text-destructive text-center">{promoteError}</p>}
             <p className="text-[11px] text-muted-foreground text-center">
-              Coming soon — this will widen the showing to additional prospects and generate a shareable link.
+              Adds a public sign-up link and 30-min open-house slot in Moxie. The original AppFolio prospect stays as the first registrant.
             </p>
           </div>
         )}
@@ -759,6 +823,7 @@ function SlotCard({ slot, onClick }: { slot: ShowingSlot; onClick: () => void })
   const used = capacityUsed(slot);
   const regCount = (slot.registrations ?? []).length;
   const isAppfolio = slot.source === "appfolio";
+  const isPromoted = !isAppfolio && Boolean(slot.appfolioShowingId);
   return (
     <button
       onClick={onClick}
@@ -782,6 +847,11 @@ function SlotCard({ slot, onClick }: { slot: ShowingSlot; onClick: () => void })
             {isAppfolio && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 font-semibold uppercase tracking-wide">
                 AppFolio
+              </span>
+            )}
+            {isPromoted && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold uppercase tracking-wide">
+                Open House
               </span>
             )}
           </div>
@@ -922,7 +992,7 @@ function WeekView({ slots, onOpenSlot, weekOf, onWeekChange }: {
                       {[slot.propertyName, slot.unitName].filter(Boolean).join(" – ") || "Open house"}
                     </p>
                     <p className={`text-[9px] ${isAppfolio ? "text-orange-700" : "text-purple-700"}`}>
-                      {formatTime(slot.startsAt)} · {used}/{slot.capacity}
+                      {formatTime(slot.startsAt)} · {slot.capacity === 0 ? `${used}` : `${used}/${slot.capacity}`}
                     </p>
                   </button>
                 );
@@ -1047,26 +1117,70 @@ export default function ShowingsPage() {
         fetch("/api/appfolio/showings").then((r) => r.json()),
       ]);
 
-      const moxieSlots: ShowingSlot[] =
+      const rawAppfolio: any[] =
+        appfolioRes.status === "fulfilled" && Array.isArray(appfolioRes.value.showings)
+          ? appfolioRes.value.showings
+          : [];
+
+      // Index AppFolio prospects by showing_id so promoted Moxie slots can
+      // hydrate the original prospect as a synthetic registration.
+      const appfolioByShowingId = new Map<string, any>();
+      for (const ps of rawAppfolio) {
+        if (ps.showingId) appfolioByShowingId.set(String(ps.showingId), ps);
+      }
+
+      const rawMoxie: ShowingSlot[] =
         moxieRes.status === "fulfilled" && Array.isArray(moxieRes.value.slots)
           ? moxieRes.value.slots
           : [];
 
-      // De-dupe AppFolio shadows: any Moxie registration that's already
-      // pushed to AppFolio carries that guest_card_id, so skip the AF row.
+      // For Moxie slots that were promoted from an AppFolio showing,
+      // prepend the original prospect as a synthetic registration so the
+      // detail panel still shows them. (We don't copy their PII into Moxie.)
+      const moxieSlots: ShowingSlot[] = rawMoxie.map((s) => {
+        if (!s.appfolioShowingId) return s;
+        const ps = appfolioByShowingId.get(s.appfolioShowingId);
+        if (!ps) return s;
+        const prospectName = [ps.firstName, ps.lastName].filter(Boolean).join(" ").trim() || "AppFolio prospect";
+        const synthetic: ShowingRegistration = {
+          id: `af-origin-${ps.guestCardId}`,
+          slotId: s.id,
+          prospectName,
+          prospectEmail: ps.email,
+          prospectPhone: ps.phone,
+          partySize: 1,
+          status: "confirmed",
+          notes: "Original AppFolio booking",
+          guestCardId: String(ps.guestCardId),
+          source: "appfolio",
+        };
+        const existing = s.registrations ?? [];
+        // Avoid double-adding if the slot somehow already has the synth.
+        if (existing.some((r) => r.id === synthetic.id)) return s;
+        return { ...s, registrations: [synthetic, ...existing] };
+      });
+
+      // De-dupe AppFolio shadows against Moxie state. Two paths:
+      //   1. A Moxie slot was promoted from this AppFolio showing
+      //      (matches by appfolio_showing_id) — hide the shadow.
+      //   2. A Moxie registration was pushed to AppFolio earlier
+      //      (matches by guest_card_id) — hide the shadow.
+      const linkedShowingIds = new Set<string>();
       const linkedGuestCardIds = new Set<string>();
-      for (const s of moxieSlots) {
+      for (const s of rawMoxie) {
+        if (s.appfolioShowingId) linkedShowingIds.add(s.appfolioShowingId);
         for (const r of s.registrations ?? []) {
           if (r.guestCardId) linkedGuestCardIds.add(String(r.guestCardId));
         }
       }
 
-      const appfolioSlots: ShowingSlot[] =
-        appfolioRes.status === "fulfilled" && Array.isArray(appfolioRes.value.showings)
-          ? (appfolioRes.value.showings as any[])
-              .filter((ps) => !linkedGuestCardIds.has(String(ps.guestCardId)))
-              .map((ps) => appfolioShowingToSlot(ps))
-          : [];
+      const appfolioSlots: ShowingSlot[] = rawAppfolio
+        .filter((ps) => {
+          if (ps.showingId && linkedShowingIds.has(String(ps.showingId))) return false;
+          if (linkedGuestCardIds.has(String(ps.guestCardId))) return false;
+          return true;
+        })
+        .map((ps) => appfolioShowingToSlot(ps));
 
       setSlots([...moxieSlots, ...appfolioSlots]);
     } catch {

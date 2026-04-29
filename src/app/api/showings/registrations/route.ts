@@ -69,15 +69,19 @@ export async function POST(request: Request) {
 
     // Capacity check — `count` is how many "seats" are already claimed.
     // Party size of the incoming registration is what we're adding.
-    const active = await countActiveRegistrations(slot.id);
-    const currentSeatsUsed = (slot.registrations ?? [])
-      .filter((r) => r.status === "confirmed" || r.status === "attended")
-      .reduce((s, r) => s + (r.partySize || 1), 0) || active; // fallback to count if partySize not hydrated
-    if (currentSeatsUsed + partySize > slot.capacity) {
-      return NextResponse.json(
-        { error: "Slot is full", capacity: slot.capacity, remaining: Math.max(0, slot.capacity - currentSeatsUsed) },
-        { status: 409 }
-      );
+    // Skipped entirely when slot.capacity is 0 (treated as unlimited —
+    // used for AppFolio-promoted open houses).
+    if (slot.capacity > 0) {
+      const active = await countActiveRegistrations(slot.id);
+      const currentSeatsUsed = (slot.registrations ?? [])
+        .filter((r) => r.status === "confirmed" || r.status === "attended")
+        .reduce((s, r) => s + (r.partySize || 1), 0) || active; // fallback to count if partySize not hydrated
+      if (currentSeatsUsed + partySize > slot.capacity) {
+        return NextResponse.json(
+          { error: "Slot is full", capacity: slot.capacity, remaining: Math.max(0, slot.capacity - currentSeatsUsed) },
+          { status: 409 }
+        );
+      }
     }
 
     const now = new Date().toISOString();
@@ -100,7 +104,11 @@ export async function POST(request: Request) {
     // Wire the registration into AppFolio's showing schedule. Best-effort:
     // if AppFolio creds aren't configured or the call fails, the registration
     // still saves successfully — the user can retry via the "→AF" button.
-    if (!saved.guestCardId) {
+    //
+    // Skipped for slots promoted from an AppFolio showing (appfolioShowingId
+    // set). Those open-house sign-ups stay inside Moxie — see promote-appfolio
+    // route docstring.
+    if (!saved.guestCardId && !slot.appfolioShowingId) {
       const guestCardId = await pushRegistrationToAppFolio(saved, slot);
       if (guestCardId) {
         saved = await upsertRegistration({ ...saved, guestCardId });

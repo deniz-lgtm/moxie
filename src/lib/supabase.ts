@@ -477,6 +477,8 @@ export type DbShowingSlot = {
   public_description: string | null;
   public_token: string;
   status: ShowingSlotStatus;
+  appfolio_showing_id: string | null;
+  appfolio_guest_card_id: string | null;
   created_at: string;
   updated_at: string;
 };

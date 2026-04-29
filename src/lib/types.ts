@@ -504,8 +504,11 @@ export interface ShowingSlot {
   /** "moxie" = open-house slot owned in Supabase; "appfolio" = read-only
    *  shadow of an AppFolio guest-card showing. Defaults to "moxie". */
   source?: "moxie" | "appfolio";
-  /** AppFolio's showing_id when source === "appfolio". */
+  /** AppFolio's showing_id — set on a Moxie slot when it was promoted
+   *  from an AppFolio 1-on-1 showing, OR when source === "appfolio". */
   appfolioShowingId?: string;
+  /** AppFolio's guest_card_id of the original prospect (for promoted slots). */
+  appfolioGuestCardId?: string;
   createdAt?: string;
   updatedAt?: string;
 }
