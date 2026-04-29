@@ -274,13 +274,13 @@ export interface GuestCardResult {
 }
 
 // --- Prospect Showings (read from AppFolio) ---
-// AppFolio's `guest_card_detail` v2 report exposes guest cards (prospects)
-// with their scheduled showing. Field names vary between AppFolio tenants
-// — we probe a few candidates to be resilient.
+// AppFolio's prospect/guest-card data is exposed via varying v2 reports
+// across tenants. We probe several candidate endpoints and field names so
+// the team calendar can still surface showings even when a particular
+// install uses non-standard naming.
 //
-// If the report 404s or returns an unexpected shape, this returns an empty
-// array so callers can degrade gracefully (e.g. team calendar simply
-// omits AppFolio-side showings).
+// If no report is reachable, callers receive an empty showings list +
+// diagnostic info describing what was tried.
 export interface ProspectShowing {
   guestCardId: string;
   firstName?: string;
@@ -293,21 +293,47 @@ export interface ProspectShowing {
   showingAt: string;
 }
 
+export interface ProspectShowingsResult {
+  showings: ProspectShowing[];
+  /** Per-report probe results, useful for `?debug=1` on the API route. */
+  attempts: {
+    endpoint: string;
+    ok: boolean;
+    rowCount?: number;
+    sampleFields?: string[];
+    sampleRow?: Record<string, unknown>;
+    showingDateField?: string;
+    error?: string;
+  }[];
+}
+
+const CANDIDATE_REPORTS = [
+  "/reports/guest_card_detail.json",
+  "/reports/prospect_summary.json",
+  "/reports/prospect_detail.json",
+  "/reports/prospect_log.json",
+  "/reports/applicant_directory.json",
+  "/reports/showing_detail.json",
+  "/reports/showings.json",
+];
+
 const SHOWING_DATE_FIELDS = [
   "showing_date", "showingDate", "ShowingDate",
   "scheduled_showing_date", "next_showing_date",
+  "appointment_date", "showing_at", "showing_datetime",
 ];
 const SHOWING_TIME_FIELDS = [
   "showing_time", "showingTime", "ShowingTime",
   "scheduled_showing_time", "next_showing_time",
+  "appointment_time",
 ];
-const FIRST_NAME_FIELDS = ["first_name", "firstName", "FirstName", "applicant_first_name"];
-const LAST_NAME_FIELDS = ["last_name", "lastName", "LastName", "applicant_last_name"];
+const FIRST_NAME_FIELDS = ["first_name", "firstName", "FirstName", "applicant_first_name", "prospect_first_name"];
+const LAST_NAME_FIELDS = ["last_name", "lastName", "LastName", "applicant_last_name", "prospect_last_name"];
 const PROPERTY_NAME_FIELDS = ["property_name", "PropertyName", "property"];
 const UNIT_NAME_FIELDS = ["unit_name", "UnitName", "unit", "unit_number"];
-const EMAIL_FIELDS = ["email", "Email", "applicant_email"];
+const EMAIL_FIELDS = ["email", "Email", "applicant_email", "prospect_email"];
 const PHONE_FIELDS = ["phone", "Phone", "phone_number", "PhoneNumber"];
-const GUEST_CARD_ID_FIELDS = ["guest_card_id", "GuestCardId", "id", "Id"];
+const GUEST_CARD_ID_FIELDS = ["guest_card_id", "GuestCardId", "prospect_id", "id", "Id"];
 
 function pickStr(row: Record<string, unknown>, candidates: string[]): string | undefined {
   for (const k of candidates) {
@@ -317,21 +343,46 @@ function pickStr(row: Record<string, unknown>, candidates: string[]): string | u
   return undefined;
 }
 
-export async function getProspectShowings(): Promise<ProspectShowing[]> {
-  // Try guest_card_detail first; fall back to prospect_summary.
-  const reports = ["/reports/guest_card_detail.json", "/reports/prospect_summary.json"];
-  let rows: any[] = [];
-  for (const endpoint of reports) {
+/** Find the first key in `row` whose name matches any candidate (case-insensitive) AND has a non-empty value. */
+function findFieldName(row: Record<string, unknown>, candidates: string[]): string | undefined {
+  const lcCandidates = new Set(candidates.map((c) => c.toLowerCase()));
+  for (const key of Object.keys(row)) {
+    if (lcCandidates.has(key.toLowerCase())) {
+      const v = row[key];
+      if (v != null && String(v).trim() !== "") return key;
+    }
+  }
+  return undefined;
+}
+
+export async function getProspectShowings(): Promise<ProspectShowingsResult> {
+  const attempts: ProspectShowingsResult["attempts"] = [];
+  let pickedRows: any[] = [];
+
+  for (const endpoint of CANDIDATE_REPORTS) {
     try {
-      rows = await appfolioFetchAll(endpoint);
-      if (rows.length > 0) break;
+      const rows = await appfolioFetchAll(endpoint);
+      const sampleRow = rows[0] as Record<string, unknown> | undefined;
+      const showingDateField = sampleRow ? findFieldName(sampleRow, SHOWING_DATE_FIELDS) : undefined;
+      attempts.push({
+        endpoint,
+        ok: true,
+        rowCount: rows.length,
+        sampleFields: sampleRow ? Object.keys(sampleRow) : [],
+        sampleRow,
+        showingDateField,
+      });
+      // Pick the first successful report that exposes a showing date field.
+      if (pickedRows.length === 0 && rows.length > 0 && showingDateField) {
+        pickedRows = rows;
+      }
     } catch (err: any) {
-      console.warn(`[AppFolio] ${endpoint} unavailable: ${err?.message ?? err}`);
+      attempts.push({ endpoint, ok: false, error: err?.message ?? String(err) });
     }
   }
 
-  const out: ProspectShowing[] = [];
-  for (const row of rows) {
+  const showings: ProspectShowing[] = [];
+  for (const row of pickedRows) {
     const dateStr = pickStr(row, SHOWING_DATE_FIELDS);
     if (!dateStr) continue;
     const timeStr = pickStr(row, SHOWING_TIME_FIELDS) ?? "00:00";
@@ -339,6 +390,7 @@ export async function getProspectShowings(): Promise<ProspectShowing[]> {
     const isoDate = (() => {
       const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+      // Already YYYY-MM-DD or full ISO string.
       return dateStr.slice(0, 10);
     })();
     const time = /^\d{1,2}:\d{2}/.test(timeStr) ? timeStr : "00:00";
@@ -347,7 +399,7 @@ export async function getProspectShowings(): Promise<ProspectShowing[]> {
 
     const id = pickStr(row, GUEST_CARD_ID_FIELDS);
     if (!id) continue;
-    out.push({
+    showings.push({
       guestCardId: id,
       firstName: pickStr(row, FIRST_NAME_FIELDS),
       lastName: pickStr(row, LAST_NAME_FIELDS),
@@ -358,7 +410,8 @@ export async function getProspectShowings(): Promise<ProspectShowing[]> {
       showingAt,
     });
   }
-  return out;
+
+  return { showings, attempts };
 }
 
 export async function createGuestCard(input: GuestCardInput): Promise<GuestCardResult> {
