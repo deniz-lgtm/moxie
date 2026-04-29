@@ -30,6 +30,8 @@ function dbToSlot(row: DbShowingSlot, registrations: ShowingRegistration[] = [])
     publicToken: row.public_token,
     status: row.status,
     registrations,
+    appfolioShowingId: row.appfolio_showing_id ?? undefined,
+    appfolioGuestCardId: row.appfolio_guest_card_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -51,6 +53,8 @@ function slotToDb(s: ShowingSlot): Omit<DbShowingSlot, "created_at" | "updated_a
     public_description: s.publicDescription ?? null,
     public_token: s.publicToken,
     status: s.status,
+    appfolio_showing_id: s.appfolioShowingId ?? null,
+    appfolio_guest_card_id: s.appfolioGuestCardId ?? null,
   };
 }
 
