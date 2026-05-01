@@ -106,6 +106,10 @@ export default function MeetingDetailView({
   } | null>(null);
   const [openInspectionId, setOpenInspectionId] = useState<string | null>(null);
   const [openCarryOverItem, setOpenCarryOverItem] = useState<DbMeetingActionItem | null>(null);
+  // Local override for carry-over checkbox state. Carry-over rows come from
+  // the meeting's frozen agenda_snapshot, so we track completions during
+  // this session here rather than mutating the snapshot.
+  const [carryOverDone, setCarryOverDone] = useState<Set<string>>(new Set());
   const [dateDraft, setDateDraft] = useState<string>(meeting.meeting_date);
   const [meetingUrlDraft, setMeetingUrlDraft] = useState<string>(meeting.meeting_url || "");
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -165,6 +169,59 @@ export default function MeetingDetailView({
   useEffect(() => {
     loadItems();
   }, [loadItems]);
+
+  // Seed the carry-over checkbox state from the live status of each
+  // referenced action item. Carry-over rows come from the meeting's
+  // frozen agenda_snapshot, so the checkbox state needs to be looked
+  // up separately or completions wouldn't persist across reloads.
+  useEffect(() => {
+    const ids = (meeting.agenda_snapshot?.carryOverActions ?? []).map((c) => c.id);
+    if (ids.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      ids.map((id) =>
+        fetch(`/api/meetings/action-items?id=${encodeURIComponent(id)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => (j?.item?.status === "completed" ? j.item.id : null))
+          .catch(() => null)
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      const done = new Set<string>(results.filter((x): x is string => Boolean(x)));
+      setCarryOverDone(done);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting.id, meeting.agenda_snapshot?.carryOverActions]);
+
+  const toggleCarryOver = useCallback(
+    async (id: string, currentlyDone: boolean) => {
+      // Optimistic toggle, then PATCH the underlying row.
+      setCarryOverDone((prev) => {
+        const next = new Set(prev);
+        if (currentlyDone) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      try {
+        await fetch(`/api/meetings/action-items?id=${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: currentlyDone ? "open" : "completed" }),
+        });
+      } catch {
+        // Revert on failure
+        setCarryOverDone((prev) => {
+          const next = new Set(prev);
+          if (currentlyDone) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+      }
+    },
+    []
+  );
 
   const persistMeeting = useCallback(
     async (patch: Partial<DbPropertyMeeting>) => {
@@ -747,6 +804,121 @@ export default function MeetingDetailView({
 
       {/* Three category cards — stacked vertically so each row breathes */}
       <div className="space-y-4">
+        {/* Review: carry-over action items from prior meetings */}
+        <AgendaCard
+          title="Review — open action items from prior meetings"
+          icon={<ClipboardList className="w-4 h-4" />}
+          count={carryOver.length + itemsByCategory.review.length}
+          empty="No open action items from prior meetings. Starting fresh."
+          onAdd={() => addCategoryItem("review", "review")}
+        >
+          {carryOver.map((c) => {
+            const isDone = carryOverDone.has(c.id);
+            return (
+              <div
+                key={c.id}
+                className="flex items-start gap-2 border-b border-border last:border-0 pb-2 last:pb-0 px-1 -mx-1"
+              >
+                <span
+                  role="checkbox"
+                  aria-checked={isDone}
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleCarryOver(c.id, isDone);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === " " || e.key === "Enter") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleCarryOver(c.id, isDone);
+                    }
+                  }}
+                  className="mt-0.5 shrink-0 cursor-pointer"
+                >
+                  {isDone ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <Circle className="w-4 h-4 text-muted-foreground" />
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // Optimistic open: build a stub from the snapshot so the modal
+                    // is responsive even if the carry-over id is stale or the
+                    // fetch fails. Fresh data replaces the stub if available.
+                    const stub: DbMeetingActionItem = {
+                      id: c.id,
+                      meeting_id: meeting.id,
+                      property_id: meeting.property_id ?? null,
+                      title: c.title,
+                      description: c.description ?? null,
+                      assigned_to: c.assignedTo ?? null,
+                      due_date: c.dueDate ?? null,
+                      status: c.status,
+                      priority: null,
+                      source: "manual",
+                      category: "review",
+                      completed_at: null,
+                      completed_by: null,
+                      linked_work_order_id: null,
+                      linked_unit_id: null,
+                      linked_action_item_ids: [],
+                      comments: [],
+                      attachments: [],
+                      created_at: c.fromMeetingDate ?? new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    };
+                    setOpenCarryOverItem(stub);
+                    try {
+                      const r = await fetch(`/api/meetings/action-items?id=${encodeURIComponent(c.id)}`);
+                      if (!r.ok) return;
+                      const j = await r.json();
+                      if (j.item) setOpenCarryOverItem(j.item);
+                    } catch {
+                      // Keep the stub if fetch fails.
+                    }
+                  }}
+                  className="flex-1 text-left text-sm hover:bg-muted/50 rounded transition-colors"
+                >
+                  <p
+                    className={`font-medium ${
+                      isDone ? "line-through text-muted-foreground" : ""
+                    }`}
+                  >
+                    {c.title}
+                  </p>
+                  <div className="text-xs text-muted-foreground mt-1 flex items-center gap-3 flex-wrap">
+                    <StatusBadge value={isDone ? "completed" : c.status} />
+                    {c.assignedTo && <span>Owner: {c.assignedTo}</span>}
+                    {c.dueDate && <span>Due: {c.dueDate}</span>}
+                  </div>
+                </button>
+              </div>
+            );
+          })}
+          {itemsByCategory.review.map((it) => (
+            <AgendaRow
+              key={it.id}
+              onClick={() => setOpenItemId(it.id)}
+              title={it.title}
+              right={<StatusBadge value={it.status} />}
+              meta={[
+                it.assigned_to ? `Owner: ${it.assigned_to}` : null,
+                it.due_date ? `Due: ${it.due_date}` : null,
+                "Added this meeting",
+              ]}
+              done={it.status === "completed"}
+              onToggleDone={() =>
+                patchItem(it.id, {
+                  status: it.status === "completed" ? "open" : "completed",
+                })
+              }
+            />
+          ))}
+        </AgendaCard>
+
         {/* ─── Leasing ─────────────────────────────────────── */}
         <AgendaCard
           title="Leasing"
@@ -824,6 +996,12 @@ export default function MeetingDetailView({
                     it.assigned_to ? `Owner: ${it.assigned_to}` : null,
                     it.due_date ? `Due: ${it.due_date}` : null,
                   ]}
+                  done={it.status === "completed"}
+                  onToggleDone={() =>
+                    patchItem(it.id, {
+                      status: it.status === "completed" ? "open" : "completed",
+                    })
+                  }
                 />
               ))}
             </AgendaSubsection>
@@ -890,6 +1068,12 @@ export default function MeetingDetailView({
                     it.assigned_to ? `Owner: ${it.assigned_to}` : null,
                     it.due_date ? `Due: ${it.due_date}` : null,
                   ]}
+                  done={it.status === "completed"}
+                  onToggleDone={() =>
+                    patchItem(it.id, {
+                      status: it.status === "completed" ? "open" : "completed",
+                    })
+                  }
                 />
               ))}
             </AgendaSubsection>
@@ -931,6 +1115,12 @@ export default function MeetingDetailView({
                     it.assigned_to ? `Owner: ${it.assigned_to}` : null,
                     it.due_date ? `Due: ${it.due_date}` : null,
                   ]}
+                  done={it.status === "completed"}
+                  onToggleDone={() =>
+                    patchItem(it.id, {
+                      status: it.status === "completed" ? "open" : "completed",
+                    })
+                  }
                 />
               ))}
             </AgendaSubsection>
@@ -1331,11 +1521,15 @@ function AgendaRow({
   right,
   meta,
   onClick,
+  done,
+  onToggleDone,
 }: {
   title: string;
   right?: React.ReactNode;
   meta?: (string | null | undefined)[];
   onClick?: () => void;
+  done?: boolean;
+  onToggleDone?: () => void;
 }) {
   const metas = (meta || []).filter((x): x is string => Boolean(x));
   return (
@@ -1344,20 +1538,55 @@ function AgendaRow({
       onClick={onClick}
       className="w-full text-left text-sm hover:bg-muted/50 rounded px-1 -mx-1 py-1 transition-colors"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium truncate">{title}</span>
-        {right && <span className="shrink-0">{right}</span>}
-      </div>
-      {metas.length > 0 && (
-        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-          {metas.map((m, i) => (
-            <span key={i}>
-              {i > 0 && <span className="opacity-50 mr-2">·</span>}
-              {m}
+      <div className="flex items-start gap-2">
+        {onToggleDone && (
+          <span
+            role="checkbox"
+            aria-checked={!!done}
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleDone();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                onToggleDone();
+              }
+            }}
+            className="mt-0.5 shrink-0 cursor-pointer"
+          >
+            {done ? (
+              <CheckCircle2 className="w-4 h-4 text-green-600" />
+            ) : (
+              <Circle className="w-4 h-4 text-muted-foreground" />
+            )}
+          </span>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className={`font-medium truncate ${
+                done ? "line-through text-muted-foreground" : ""
+              }`}
+            >
+              {title}
             </span>
-          ))}
+            {right && <span className="shrink-0">{right}</span>}
+          </div>
+          {metas.length > 0 && (
+            <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
+              {metas.map((m, i) => (
+                <span key={i}>
+                  {i > 0 && <span className="opacity-50 mr-2">·</span>}
+                  {m}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </button>
   );
 }
