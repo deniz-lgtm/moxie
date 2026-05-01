@@ -498,6 +498,40 @@ export type DbShowingRegistration = {
   updated_at: string;
 };
 
+export type SigningRequestStatus =
+  | "queued"
+  | "sent"
+  | "viewed"
+  | "signed"
+  | "declined"
+  | "expired"
+  | "cancelled"
+  | "error";
+
+export type DbSigningRequest = {
+  id: string;
+  template_key: string;
+  provider: string;
+  provider_request_id: string | null;
+  status: SigningRequestStatus;
+  recipient_name: string;
+  recipient_email: string;
+  prefill: Record<string, string> | null;
+  source_type: string | null;
+  source_id: string | null;
+  property_id: string | null;
+  unit_id: string | null;
+  tenant_id: string | null;
+  signed_pdf_url: string | null;
+  sign_url: string | null;
+  signed_at: string | null;
+  declined_at: string | null;
+  last_event_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Property P&L Line Items (monthly opex + other income) ──────
 // Mirrors supabase/migrations/20260423_property_pnl_line_items.sql.
 // One row per property × month × category. Rent comes from rent roll;
