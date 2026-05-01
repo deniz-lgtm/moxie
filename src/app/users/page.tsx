@@ -14,6 +14,7 @@ type AppUser = {
   lastSignInAt: string | null;
   contactId: string | null;
   isActive: boolean;
+  totpEnrolled: boolean;
 };
 
 const ROLE_OPTIONS: { value: ContactRole; label: string }[] = [
@@ -221,7 +222,6 @@ function AddUserModal({
   const [role, setRole] = useState<ContactRole | "">("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [sendInvite, setSendInvite] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -236,7 +236,7 @@ function AddUserModal({
       setError("Name and email are required");
       return;
     }
-    if (!sendInvite && password.length < 8) {
+    if (password.length < 8) {
       setError("Password must be at least 8 characters");
       return;
     }
@@ -251,8 +251,7 @@ function AddUserModal({
           email: email.trim(),
           role: role || undefined,
           phone: phone.trim() || undefined,
-          password: sendInvite ? undefined : password,
-          sendInvite,
+          password,
         }),
       });
       const j = await r.json();
@@ -328,34 +327,18 @@ function AddUserModal({
           </div>
 
           <div className="border-t border-border pt-4 space-y-3">
-            <label className="flex items-start gap-2 cursor-pointer">
+            <Field label="Initial password">
               <input
-                type="checkbox"
-                checked={sendInvite}
-                onChange={(e) => setSendInvite(e.target.checked)}
-                className="mt-0.5"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
               />
-              <span className="text-sm">
-                <span className="font-medium">Send invite email</span>
-                <span className="text-muted-foreground block text-xs">
-                  They&rsquo;ll receive a magic link to set their own password.
-                </span>
-              </span>
-            </label>
-            {!sendInvite && (
-              <Field label="Initial password">
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 8 characters"
-                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  They can change it after signing in.
-                </p>
-              </Field>
-            )}
+              <p className="text-xs text-muted-foreground mt-1">
+                Share this securely. The user will set up two-factor authentication on first sign-in.
+              </p>
+            </Field>
           </div>
 
           {error && (
@@ -376,7 +359,7 @@ function AddUserModal({
             disabled={submitting}
             className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent/90 disabled:opacity-50"
           >
-            {submitting ? "Creating…" : sendInvite ? "Send Invite" : "Create User"}
+            {submitting ? "Creating…" : "Create User"}
           </button>
         </div>
       </div>
