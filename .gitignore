@@ -35,6 +35,9 @@ yarn-error.log*
 .env*.local
 !.env.local.example
 
+# MCP server config (contains API keys for Notion + Firecrawl)
+.mcp.json
+
 # vercel
 .vercel
 
