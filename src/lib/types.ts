@@ -513,6 +513,41 @@ export interface ShowingSlot {
   updatedAt?: string;
 }
 
+// --- Document Signing (Dropbox Sign / HelloSign) ---
+export type SigningRequestStatus =
+  | "queued"
+  | "sent"
+  | "viewed"
+  | "signed"
+  | "declined"
+  | "expired"
+  | "cancelled"
+  | "error";
+
+export interface SigningRequest {
+  id: string;
+  templateKey: string;
+  provider: string;                 // "dropbox_sign"
+  providerRequestId?: string;       // Dropbox Sign signature_request_id
+  status: SigningRequestStatus;
+  recipientName: string;
+  recipientEmail: string;
+  prefill?: Record<string, string>;
+  sourceType?: string;              // "move_out_inspection" | "ad_hoc"
+  sourceId?: string;
+  propertyId?: string;
+  unitId?: string;
+  tenantId?: string;
+  signedPdfUrl?: string;
+  signUrl?: string;
+  signedAt?: string;
+  declinedAt?: string;
+  lastEventAt?: string;
+  errorMessage?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // --- Monthly Reports ---
 export type ReportType = "pnl" | "occupancy" | "maintenance_cost" | "rent_roll";
 export type ReportStatus = "draft" | "generated" | "reviewed" | "sent";

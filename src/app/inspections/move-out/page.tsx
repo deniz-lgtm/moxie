@@ -7,6 +7,7 @@ import { SaveIndicator } from "@/components/SaveIndicator";
 import { InspectionErrorBoundary } from "@/components/InspectionErrorBoundary";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
 import { FloorPlanPreview, isPdfUrl } from "@/components/FloorPlanPreview";
+import { SendForSignaturePanel } from "@/components/SendForSignaturePanel";
 import { useSaveQueue } from "@/hooks/useSaveQueue";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
@@ -2492,6 +2493,11 @@ function MoveOutInspectionContent() {
             </a>
           )}
         </div>
+
+        <SendForSignaturePanel
+          inspection={activeInspection}
+          tenants={selectedTenantList}
+        />
 
         {/* Photo Evidence Gallery */}
         {(() => {
