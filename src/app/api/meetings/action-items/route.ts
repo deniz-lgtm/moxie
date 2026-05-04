@@ -15,10 +15,11 @@ import type { ActionItemCategory, ActionItemSource, ActionItemStatus } from "@/l
 
 /**
  * GET /api/meetings/action-items
- *   ?id=<action_item_id>  fetch a single action item
- *   ?meeting_id=<id>      items for a specific meeting
- *   ?property_id=<id>     items for a property (all meetings)
- *   ?status=<status>      filter by status
+ *   ?id=<action_item_id>     fetch a single action item
+ *   ?meeting_id=<id>         items for a specific meeting
+ *   ?property_id=<id>        items for a property (all meetings)
+ *   ?status=<status>         filter by a single status
+ *   ?statuses=open,in_progress  filter by multiple statuses (comma-separated)
  */
 export async function GET(request: Request) {
   try {
@@ -29,10 +30,15 @@ export async function GET(request: Request) {
       if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
       return NextResponse.json({ item });
     }
+    const statusesParam = url.searchParams.get("statuses");
+    const statuses = statusesParam
+      ? (statusesParam.split(",").map((s) => s.trim()).filter(Boolean) as ActionItemStatus[])
+      : undefined;
     const items = await listActionItems({
       meetingId: url.searchParams.get("meeting_id") || undefined,
       propertyId: url.searchParams.get("property_id") || undefined,
       status: (url.searchParams.get("status") as ActionItemStatus) || undefined,
+      statuses,
     });
     return NextResponse.json({ items });
   } catch (error: any) {

@@ -292,6 +292,18 @@ export const apps: AppConfig[] = [
     isBuilt: true,
   },
   {
+    id: "tasks",
+    name: "Tasks",
+    description: "Central view of all open action items across every meeting — assignees, due dates, and source meeting in one place. Items roll over from week to week until someone closes them out.",
+    href: "/tasks",
+    icon: "ClipboardCheck",
+    category: "team",
+    categoryLabel: "Team",
+    categoryColor: "teal",
+    roles: ["property_manager", "asset_manager", "owner"],
+    isBuilt: true,
+  },
+  {
     id: "contacts",
     name: "Contacts",
     description: "Internal team directory — property managers, maintenance, leasing, and asset managers with phone, email, and role",

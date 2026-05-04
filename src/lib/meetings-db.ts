@@ -177,6 +177,7 @@ export async function listActionItems(opts: {
   meetingId?: string;
   propertyId?: string;
   status?: ActionItemStatus;
+  statuses?: ActionItemStatus[];
 }): Promise<DbMeetingActionItem[]> {
   const sb = getSupabase();
   if (!sb) return [];
@@ -188,6 +189,7 @@ export async function listActionItems(opts: {
   if (opts.meetingId) query = query.eq("meeting_id", opts.meetingId);
   if (opts.propertyId) query = query.eq("property_id", opts.propertyId);
   if (opts.status) query = query.eq("status", opts.status);
+  if (opts.statuses && opts.statuses.length > 0) query = query.in("status", opts.statuses);
 
   const { data, error } = await query;
   if (error) {

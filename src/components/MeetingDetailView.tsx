@@ -110,6 +110,11 @@ export default function MeetingDetailView({
   // the meeting's frozen agenda_snapshot, so we track completions during
   // this session here rather than mutating the snapshot.
   const [carryOverDone, setCarryOverDone] = useState<Set<string>>(new Set());
+  // Open items from prior meetings that weren't in this meeting's frozen
+  // snapshot — typically because they were added after this meeting was
+  // generated. Merging these in keeps unresolved tasks rolling over until
+  // someone explicitly closes them out, even if the snapshot is stale.
+  const [liveCarryOver, setLiveCarryOver] = useState<DbMeetingActionItem[]>([]);
   const [dateDraft, setDateDraft] = useState<string>(meeting.meeting_date);
   const [meetingUrlDraft, setMeetingUrlDraft] = useState<string>(meeting.meeting_url || "");
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -194,6 +199,28 @@ export default function MeetingDetailView({
       cancelled = true;
     };
   }, [meeting.id, meeting.agenda_snapshot?.carryOverActions]);
+
+  // Live rollover: any action item that's currently open/in-progress and
+  // tied to a different meeting is also surfaced here. This catches items
+  // created after this meeting was generated, which the frozen snapshot
+  // wouldn't otherwise include.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/meetings/action-items?statuses=open,in_progress`)
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((j) => {
+        if (cancelled) return;
+        const all: DbMeetingActionItem[] = Array.isArray(j.items) ? j.items : [];
+        const fromOtherMeetings = all.filter((i) => i.meeting_id !== meeting.id);
+        setLiveCarryOver(fromOtherMeetings);
+      })
+      .catch(() => {
+        if (!cancelled) setLiveCarryOver([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting.id, items]);
 
   const toggleCarryOver = useCallback(
     async (id: string, currentlyDone: boolean) => {
@@ -386,7 +413,28 @@ export default function MeetingDetailView({
   };
 
   const agenda = meeting.agenda_snapshot || {};
-  const carryOver: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions) ? agenda.carryOverActions : [];
+  // Merge frozen snapshot carry-overs with live open items from other
+  // meetings. The snapshot wins on ordering (so the meeting agenda stays
+  // stable as the team works through it); newly-discovered items append
+  // at the end. Items already linked to this meeting are skipped — they
+  // render in the per-meeting items list instead.
+  const carryOver: DbAgendaCarryOver[] = useMemo(() => {
+    const snapshot: DbAgendaCarryOver[] = Array.isArray(agenda.carryOverActions)
+      ? agenda.carryOverActions
+      : [];
+    const snapIds = new Set(snapshot.map((c) => c.id));
+    const liveExtras: DbAgendaCarryOver[] = liveCarryOver
+      .filter((i) => !snapIds.has(i.id))
+      .map((i) => ({
+        id: i.id,
+        title: i.title,
+        description: i.description,
+        assignedTo: i.assigned_to,
+        dueDate: i.due_date,
+        status: i.status,
+      }));
+    return [...snapshot, ...liveExtras];
+  }, [agenda.carryOverActions, liveCarryOver]);
 
   // Hydrate carry-over snapshots into ActionItemRow-compatible stubs so the
   // unified Action Items list can render them with the same UI as native
