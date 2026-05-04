@@ -16,6 +16,14 @@ export interface MeterMapping {
   unitIds: string[]; // units served by this meter
   splitMethod: SplitMethod;
   customShares?: Record<string, number>; // unitId → percentage (0-100) for custom splits
+  /**
+   * When true, vacant units are excluded from the split entirely — the
+   * owner absorbs the vacant share rather than spreading it across the
+   * remaining tenants. Defaults to false (vacant units pay their share
+   * for sqft/equal splits; for occupancy splits vacant units already
+   * pay nothing because their occupant count is 0).
+   */
+  ownerAbsorbsVacancy?: boolean;
 }
 
 export interface RubsBill {

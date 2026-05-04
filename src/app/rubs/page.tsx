@@ -407,6 +407,7 @@ export default function RubsPage() {
           mappings={mappings}
           aliases={aliases}
           units={units}
+          existingBills={bills}
           occupancyRecords={occupancy?.records || []}
           onImported={(newBills) => {
             setBills((prev) => [...prev, ...newBills]);
@@ -760,6 +761,7 @@ function ImportBillsFlow({
   mappings,
   aliases,
   units,
+  existingBills,
   occupancyRecords,
   onImported,
 }: {
@@ -767,6 +769,7 @@ function ImportBillsFlow({
   mappings: MeterMapping[];
   aliases: PropertyAlias[];
   units: Unit[];
+  existingBills: RubsBill[];
   occupancyRecords: import("@/lib/rubs-types").OccupancyRecord[];
   onImported: (bills: RubsBill[]) => void;
 }) {
@@ -1199,6 +1202,30 @@ function ImportBillsFlow({
     }
     return mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
   }
+  // YoY anomaly: a parsed bill is flagged when its amount is ≥30% higher
+  // than the same property+meter from ~12 months earlier. Helps catch
+  // leaks, misreads, or new equipment that needs investigation before
+  // tenants get charged the inflated amount.
+  function findAnomaly(p: ParsedBill): { lastYear: number; pctIncrease: number } | null {
+    if (!p.matchedProperty || !p.billingPeriod || p.totalAmount <= 0) return null;
+    const [yStr, mStr] = p.billingPeriod.split("-");
+    const lastYearMonth = `${Number(yStr) - 1}-${mStr}`;
+    const acctNorm = (p.accountNumber || "").replace(/\s|-/g, "").toLowerCase();
+    // Match prior bill via the same mapping when possible (account-based),
+    // else fall back to property+meterType.
+    const priorMappingId = acctNorm
+      ? mappings.find((m) => m.meterId.replace(/\s|-/g, "").toLowerCase() === acctNorm)?.id
+      : undefined;
+    const prior = existingBills.find((b) =>
+      b.month === lastYearMonth &&
+      (priorMappingId ? b.mappingId === priorMappingId : (b.propertyName === p.matchedProperty && b.meterType === p.meterType)),
+    );
+    if (!prior || prior.totalAmount <= 0) return null;
+    const pct = (p.totalAmount - prior.totalAmount) / prior.totalAmount;
+    if (pct < 0.3) return null;
+    return { lastYear: prior.totalAmount, pctIncrease: pct };
+  }
+
   const unmappedAccounts = (() => {
     const seen = new Map<string, { property: string; meterType: string; account: string }>();
     for (const p of parsedBills) {
@@ -1302,6 +1329,7 @@ function ImportBillsFlow({
                 const hasMatch = Boolean(p.matchedProperty);
                 const outOfPeriod = Boolean(p.billingPeriod) && !inBillingPeriod(p);
                 const unknownType = p.meterType === "unknown";
+                const anomaly = findAnomaly(p);
                 const rowBg = outOfPeriod
                   ? "bg-slate-100 opacity-60"
                   : !hasMatch || unknownType
@@ -1375,6 +1403,14 @@ function ImportBillsFlow({
                         onChange={(e) => updateParsedBill(i, "totalAmount", parseFloat(e.target.value) || 0)}
                         className="text-xs border border-border rounded px-2 py-1 w-24 text-right"
                       />
+                      {anomaly && (
+                        <p
+                          className="text-[10px] text-amber-700 mt-0.5"
+                          title={`Last year same month: $${anomaly.lastYear.toLocaleString()}`}
+                        >
+                          ↑{Math.round(anomaly.pctIncrease * 100)}% YoY
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-xs text-muted-foreground">{p.accountNumber}</td>
                   </tr>
