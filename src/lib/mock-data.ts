@@ -131,6 +131,18 @@ export const apps: AppConfig[] = [
   },
   // --- Leasing ---
   {
+    id: "units",
+    name: "Units",
+    description: "Master unit list — pulled live from AppFolio with Moxie overrides layered on top. Edit unit names and notes locally without touching AppFolio. Filter leased / unleased by academic year.",
+    href: "/leasing/units",
+    icon: "Building2",
+    category: "leasing",
+    categoryLabel: "Leasing",
+    categoryColor: "purple",
+    roles: ["property_manager", "asset_manager", "leasing_agent", "owner"],
+    isBuilt: true,
+  },
+  {
     id: "applications",
     name: "Applications",
     description: "Track lease applications, co-applicant progress, document uploads, guarantor status",

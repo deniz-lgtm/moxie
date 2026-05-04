@@ -282,6 +282,18 @@ export type DbPropertyAttribute = {
   updated_at: string;
 };
 
+// ─── Unit Overrides (Moxie overlay per AppFolio unit) ───────────
+// Mirrors supabase/migrations/20260504_unit_overrides.sql.
+
+export type DbUnitOverride = {
+  appfolio_unit_id: string;
+  display_name: string | null;
+  notes: string | null;
+  custom_fields: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 // ─── Capital Projects ───────────────────────────────────────────
 // Mirrors supabase/migrations/20260423_capital_projects.sql.
 
