@@ -14,13 +14,15 @@ import {
   Bell,
   Megaphone,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   TrendingUp,
   Calendar,
   MessageSquare,
-  LinkIcon as LinkIcon2,
   HardHat,
   BarChart3,
   LogOut,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -161,7 +163,21 @@ const categoryOrder: (AppCategory | "primary")[] = [
   ...appCategories.sort((a, b) => a.order - b.order).map((c) => c.id),
 ];
 
-export function Sidebar() {
+type SidebarProps = {
+  /** Desktop-only: render the icons-only collapsed rail. */
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  /** Mobile: drawer is open and sliding in over content. */
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
+};
+
+export function Sidebar({
+  collapsed,
+  onToggleCollapse,
+  mobileOpen,
+  onCloseMobile,
+}: SidebarProps) {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
   const { portfolioId, setPortfolioId } = usePortfolio();
@@ -194,149 +210,243 @@ export function Sidebar() {
     return !hasMoreSpecific;
   }
 
+  // On the collapsed rail, child trees and category headers are hidden
+  // because there's no room for labels. Clicking the parent still
+  // navigates to its top-level href.
+  const showLabels = !collapsed;
+
   return (
-    <aside
-      className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 z-50 border-r border-white/5"
-      style={{ backgroundColor: "#111827" }}
-    >
-      <div className="h-24 flex items-center justify-center px-4 border-b border-white/10">
-        <Link href="/" className="group hover:opacity-85 transition-opacity">
-          <Image
-            src="/moxie-logo.png"
-            alt="Moxie Management"
-            width={160}
-            height={80}
-            className="w-40 h-auto object-contain"
-          />
-        </Link>
-      </div>
+    <>
+      {/* Mobile backdrop. Tapping it closes the drawer. */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 lg:hidden transition-opacity ${
+          mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={onCloseMobile}
+        aria-hidden="true"
+      />
 
-      <div className="border-b border-white/5 px-3 py-3">
-        <p className="text-[10px] font-semibold text-sidebar-text uppercase tracking-wider mb-2 px-1">
-          Portfolio
-        </p>
-        <div className="inline-flex w-full rounded-lg border border-white/10 bg-white/5 p-0.5">
-          {(["24", "25"] as PortfolioId[]).map((id) => (
-            <button
-              key={id}
-              onClick={() => setPortfolioId(id)}
-              className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                portfolioId === id
-                  ? "bg-sidebar-active text-sidebar-text-active shadow-sm"
-                  : "text-sidebar-text hover:text-sidebar-text-active"
-              }`}
-            >
-              {PORTFOLIO_LABELS[id]}
-            </button>
-          ))}
+      <aside
+        className={`
+          fixed inset-y-0 left-0 z-50 flex flex-col border-r border-white/5
+          transition-[transform,width] duration-200 ease-out
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+          lg:translate-x-0
+          ${collapsed ? "lg:w-16" : "lg:w-64"}
+          w-64
+        `}
+        style={{ backgroundColor: "#111827" }}
+        aria-label="Primary navigation"
+      >
+        {/* Header: logo + collapse/close controls. The desktop chevron
+            toggles the icon-only rail; the mobile X closes the drawer. */}
+        <div
+          className={`h-24 flex items-center border-b border-white/10 ${
+            collapsed ? "lg:px-2 lg:justify-center px-4 justify-between" : "px-4 justify-between"
+          }`}
+        >
+          <Link
+            href="/"
+            onClick={onCloseMobile}
+            className="group hover:opacity-85 transition-opacity flex items-center justify-center"
+          >
+            {collapsed ? (
+              <div className="hidden lg:flex w-10 h-10 hero-gradient rounded-lg items-center justify-center shadow-md">
+                <span className="text-white font-bold text-lg">M</span>
+              </div>
+            ) : null}
+            <Image
+              src="/moxie-logo.png"
+              alt="Moxie Management"
+              width={160}
+              height={80}
+              className={`w-40 h-auto object-contain ${collapsed ? "lg:hidden" : ""}`}
+            />
+          </Link>
+
+          {/* Desktop collapse toggle */}
+          <button
+            onClick={onToggleCollapse}
+            className={`hidden lg:inline-flex p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors ${
+              collapsed ? "lg:hidden" : ""
+            }`}
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+          >
+            <ChevronLeft size={16} />
+          </button>
+
+          {/* Mobile close */}
+          <button
+            onClick={onCloseMobile}
+            className="lg:hidden p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors"
+            aria-label="Close sidebar"
+          >
+            <X size={18} />
+          </button>
         </div>
-      </div>
 
-      <nav className="flex-1 overflow-y-auto py-4 px-3">
-        {categoryOrder.map((cat) => {
-          const items = sidebarItems.filter((i) => i.category === cat);
-          if (items.length === 0) return null;
-          const header = cat === "primary" ? null : categoryHeaders[cat];
+        {/* Floating expand button — only visible when collapsed on desktop.
+            Sits over the right edge of the rail so it stays reachable. */}
+        {collapsed && (
+          <button
+            onClick={onToggleCollapse}
+            className="hidden lg:flex absolute -right-3 top-28 w-6 h-6 rounded-full bg-sidebar-hover border border-white/10 text-sidebar-text-active items-center justify-center hover:bg-sidebar-active transition-colors shadow-md"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <ChevronRight size={14} />
+          </button>
+        )}
 
-          return (
-            <div key={cat} className="mb-4">
-              {header && (
-                <div className="px-3 mb-2">
-                  <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
-                    {header}
-                  </h3>
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {items.map((item) => {
-                  const active = isActive(item.href);
-                  const isExpanded = !!expanded[item.id];
-                  const hasChildren = item.children && item.children.length > 0;
+        {/* Portfolio selector — hidden on the collapsed rail because the
+            two labels won't fit. Use the expanded view to switch portfolios. */}
+        {showLabels && (
+          <div className="border-b border-white/5 px-3 py-3">
+            <p className="text-[10px] font-semibold text-sidebar-text uppercase tracking-wider mb-2 px-1">
+              Portfolio
+            </p>
+            <div className="inline-flex w-full rounded-lg border border-white/10 bg-white/5 p-0.5">
+              {(["24", "25"] as PortfolioId[]).map((id) => (
+                <button
+                  key={id}
+                  onClick={() => setPortfolioId(id)}
+                  className={`flex-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    portfolioId === id
+                      ? "bg-sidebar-active text-sidebar-text-active shadow-sm"
+                      : "text-sidebar-text hover:text-sidebar-text-active"
+                  }`}
+                >
+                  {PORTFOLIO_LABELS[id]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
-                  return (
-                    <div key={item.id}>
-                      <div className="flex items-center">
-                        <Link
-                          href={item.href}
-                          className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                            active
-                              ? "bg-sidebar-active text-sidebar-text-active shadow-sm shadow-accent/20"
-                              : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
-                          }`}
-                        >
-                          <item.Icon
-                            size={18}
-                            className={`transition-colors duration-200 ${active ? "text-red-400" : "text-sidebar-text"}`}
-                          />
-                          <span className="flex-1">{item.label}</span>
-                          {active && <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />}
-                        </Link>
-                        {hasChildren && (
-                          <button
-                            onClick={() => toggleExpand(item.id)}
-                            className="p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors"
+        <nav className={`flex-1 overflow-y-auto py-4 ${collapsed ? "lg:px-2 px-3" : "px-3"}`}>
+          {categoryOrder.map((cat) => {
+            const items = sidebarItems.filter((i) => i.category === cat);
+            if (items.length === 0) return null;
+            const header = cat === "primary" ? null : categoryHeaders[cat];
+
+            return (
+              <div key={cat} className="mb-4">
+                {header && showLabels && (
+                  <div className="px-3 mb-2">
+                    <h3 className="text-xs font-semibold text-sidebar-text uppercase tracking-wider">
+                      {header}
+                    </h3>
+                  </div>
+                )}
+                <div className="space-y-0.5">
+                  {items.map((item) => {
+                    const active = isActive(item.href);
+                    const isExpanded = !!expanded[item.id];
+                    const hasChildren = item.children && item.children.length > 0;
+
+                    return (
+                      <div key={item.id}>
+                        <div className="flex items-center">
+                          <Link
+                            href={item.href}
+                            onClick={onCloseMobile}
+                            title={collapsed ? item.label : undefined}
+                            className={`flex-1 flex items-center gap-3 ${
+                              collapsed ? "lg:justify-center lg:px-0" : ""
+                            } px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                              active
+                                ? "bg-sidebar-active text-sidebar-text-active shadow-sm shadow-accent/20"
+                                : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
+                            }`}
                           >
-                            <ChevronDown
-                              size={14}
-                              className={`transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                            <item.Icon
+                              size={18}
+                              className={`transition-colors duration-200 ${active ? "text-red-400" : "text-sidebar-text"}`}
                             />
-                          </button>
+                            {showLabels && (
+                              <>
+                                <span className="flex-1">{item.label}</span>
+                                {active && <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />}
+                              </>
+                            )}
+                          </Link>
+                          {hasChildren && showLabels && (
+                            <button
+                              onClick={() => toggleExpand(item.id)}
+                              className="p-1.5 rounded-md text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover transition-colors"
+                              aria-label={`Toggle ${item.label} sub-pages`}
+                            >
+                              <ChevronDown
+                                size={14}
+                                className={`transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                              />
+                            </button>
+                          )}
+                        </div>
+
+                        {hasChildren && isExpanded && showLabels && (
+                          <div className="ml-5 pl-4 border-l border-white/5 mt-1 mb-1 space-y-0.5">
+                            {item.children!.map((child) => {
+                              const childActive = pathname === child.href;
+                              return (
+                                <Link
+                                  key={child.href}
+                                  href={child.href}
+                                  onClick={onCloseMobile}
+                                  className={`block px-3 py-2 rounded-md text-sm transition-colors ${
+                                    childActive
+                                      ? "text-sidebar-text-active font-medium bg-sidebar-hover"
+                                      : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
+                                  }`}
+                                >
+                                  {child.label}
+                                </Link>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
-
-                      {hasChildren && isExpanded && (
-                        <div className="ml-5 pl-4 border-l border-white/5 mt-1 mb-1 space-y-0.5">
-                          {item.children!.map((child) => {
-                            const childActive = pathname === child.href;
-                            return (
-                              <Link
-                                key={child.href}
-                                href={child.href}
-                                className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                                  childActive
-                                    ? "text-sidebar-text-active font-medium bg-sidebar-hover"
-                                    : "text-sidebar-text hover:text-sidebar-text-active hover:bg-sidebar-hover"
-                                }`}
-                              >
-                                {child.label}
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </nav>
+            );
+          })}
+        </nav>
 
-      <div className="border-t border-white/5 p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-sidebar-hover flex items-center justify-center">
-            <span className="text-xs font-medium text-sidebar-text-active">
-              {user?.email ? user.email.substring(0, 2).toUpperCase() : "PM"}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-sidebar-text-active truncate">
-              {user?.email || "Property Manager"}
-            </p>
-            <p className="text-[10px] text-sidebar-text truncate">Moxie Management</p>
-          </div>
-          {user && (
-            <button
-              onClick={signOut}
-              className="p-1.5 rounded-lg text-sidebar-text hover:text-red-400 hover:bg-sidebar-hover transition-colors"
-              title="Sign out"
+        <div className={`border-t border-white/5 ${collapsed ? "lg:p-2 p-4" : "p-4"}`}>
+          <div className={`flex items-center ${collapsed ? "lg:justify-center gap-3" : "gap-3"}`}>
+            <div
+              className="w-8 h-8 rounded-full bg-sidebar-hover flex items-center justify-center shrink-0"
+              title={collapsed ? user?.email ?? undefined : undefined}
             >
-              <LogOut size={14} />
-            </button>
-          )}
+              <span className="text-xs font-medium text-sidebar-text-active">
+                {user?.email ? user.email.substring(0, 2).toUpperCase() : "PM"}
+              </span>
+            </div>
+            {showLabels && (
+              <>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-sidebar-text-active truncate">
+                    {user?.email || "Property Manager"}
+                  </p>
+                  <p className="text-[10px] text-sidebar-text truncate">Moxie Management</p>
+                </div>
+                {user && (
+                  <button
+                    onClick={signOut}
+                    className="p-1.5 rounded-lg text-sidebar-text hover:text-red-400 hover:bg-sidebar-hover transition-colors"
+                    title="Sign out"
+                  >
+                    <LogOut size={14} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }
