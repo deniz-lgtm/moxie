@@ -81,6 +81,8 @@ export interface ParsedBill {
   meterType: MeterType;
   accountNumber: string;
   confidence: number; // 0–1
+  /** How the property was matched. Helps the UI explain low-confidence rows. */
+  matchedVia?: "address" | "alias" | "fuzzy" | "none";
   sourceFile: string;
   /** SHA-256 hex of the source PDF, propagated through parsing. */
   fileHash?: string;

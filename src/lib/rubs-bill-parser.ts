@@ -4,8 +4,8 @@
 // Sends PDF documents to Claude AI to extract billing data.
 // Follows the same API pattern as ai-analysis.ts.
 
-import type { ParsedBill, MeterType, PropertyAlias } from "./rubs-types";
-import { buildAliasMap, matchProperty } from "./rubs-property-resolver";
+import type { ParsedBill, MeterType, PropertyAlias, OccupancyRecord } from "./rubs-types";
+import { buildAliasMap, buildAddressIndex, matchPropertyByAddress } from "./rubs-property-resolver";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
@@ -45,6 +45,7 @@ export async function parseBillPdf(
   sourceFile: string,
   aliases: PropertyAlias[] = [],
   fileHash?: string,
+  occupancyRecords: OccupancyRecord[] = [],
 ): Promise<ParsedBill[]> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY not configured");
@@ -126,11 +127,12 @@ export async function parseBillPdf(
 
   // Map to ParsedBill with property matching
   const aliasMap = buildAliasMap(aliases);
+  const addressIndex = occupancyRecords.length > 0 ? buildAddressIndex(occupancyRecords) : undefined;
   return rawEntries
     .filter((e) => e.totalAmount && e.totalAmount > 0)
     .map((entry) => {
       const serviceAddr = entry.serviceAddress || "";
-      const matched = matchProperty(serviceAddr, knownProperties, aliasMap);
+      const matched = matchPropertyByAddress(serviceAddr, knownProperties, aliasMap, addressIndex);
 
       // Convert billing period end date to YYYY-MM
       let billingPeriod = "";
@@ -150,6 +152,7 @@ export async function parseBillPdf(
         meterType: normalizeMeterType(entry.meterType, entry.utilityProvider, serviceAddr),
         accountNumber: entry.accountNumber || "",
         confidence: matched.confidence,
+        matchedVia: matched.matchedVia,
         sourceFile,
         fileHash,
         servicePeriodStart: normalizeDate(entry.billingPeriodStart),

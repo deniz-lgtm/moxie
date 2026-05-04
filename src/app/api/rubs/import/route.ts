@@ -96,11 +96,12 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { filename, knownProperties, aliases, fileHash } = body as {
+    const { filename, knownProperties, aliases, fileHash, occupancyRecords } = body as {
       filename: string;
       knownProperties: string[];
       aliases?: import("@/lib/rubs-types").PropertyAlias[];
       fileHash?: string;
+      occupancyRecords?: import("@/lib/rubs-types").OccupancyRecord[];
     };
 
     if (!filename) {
@@ -171,6 +172,7 @@ export async function POST(request: Request) {
       relPath,
       aliases || [],
       fileHash,
+      occupancyRecords || [],
     );
     return NextResponse.json({ results });
   } catch (error: any) {

@@ -407,6 +407,7 @@ export default function RubsPage() {
           mappings={mappings}
           aliases={aliases}
           units={units}
+          occupancyRecords={occupancy?.records || []}
           onImported={(newBills) => {
             setBills((prev) => [...prev, ...newBills]);
             setShowImport(false);
@@ -759,12 +760,14 @@ function ImportBillsFlow({
   mappings,
   aliases,
   units,
+  occupancyRecords,
   onImported,
 }: {
   propertyNames: string[];
   mappings: MeterMapping[];
   aliases: PropertyAlias[];
   units: Unit[];
+  occupancyRecords: import("@/lib/rubs-types").OccupancyRecord[];
   onImported: (bills: RubsBill[]) => void;
 }) {
   const [step, setStep] = useState<ImportStep>("scan");
@@ -885,6 +888,7 @@ function ImportBillsFlow({
             knownProperties: propertyNames,
             aliases,
             fileHash,
+            occupancyRecords,
           }),
         });
         const data = await res.json();
@@ -1276,6 +1280,12 @@ function ImportBillsFlow({
                       {p.serviceAddress && (
                         <p className="text-xs text-muted-foreground mt-0.5 truncate" title={p.serviceAddress}>
                           {p.serviceAddress}
+                          {p.matchedVia === "address" && (
+                            <span className="ml-1 text-[10px] uppercase tracking-wide text-green-700">addr</span>
+                          )}
+                          {p.matchedVia === "fuzzy" && (
+                            <span className="ml-1 text-[10px] uppercase tracking-wide text-amber-700">fuzzy</span>
+                          )}
                         </p>
                       )}
                     </td>
