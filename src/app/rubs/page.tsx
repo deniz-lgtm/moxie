@@ -937,7 +937,17 @@ function ImportBillsFlow({
           continue;
         }
       }
-      const mapping = mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
+      // Prefer matching by meter account number (mapping.meterId) when the
+      // bill carries one, since a single property+utility can have multiple
+      // accounts (e.g. two gas meters serving different unit clusters). Only
+      // fall back to property+type when no account match exists.
+      const acct = (p.accountNumber || "").trim();
+      const acctNorm = acct.replace(/\s|-/g, "").toLowerCase();
+      const mapping =
+        (acctNorm
+          ? mappings.find((m) => m.meterId.replace(/\s|-/g, "").toLowerCase() === acctNorm)
+          : undefined) ||
+        mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
       // Auto-calculate when a meter mapping exists. Skip when there is no
       // mapping — those bills land as drafts so the user knows to set one up.
       const allocations = mapping
@@ -1178,6 +1188,29 @@ function ImportBillsFlow({
   const unknownTypeCount = parsedBills.filter((p) => p.meterType === "unknown").length;
   const outOfPeriodCount = parsedBills.filter((p) => p.billingPeriod && !inBillingPeriod(p)).length;
 
+  // Surface meter accounts seen on bills that have no mapping. Account # is
+  // the unique key per meter; matching by it (vs property+type) catches the
+  // "two gas accounts at one property" case the propertyName lookup misses.
+  function findMappingFor(p: ParsedBill): MeterMapping | undefined {
+    const acctNorm = (p.accountNumber || "").replace(/\s|-/g, "").toLowerCase();
+    if (acctNorm) {
+      const byAcct = mappings.find((m) => m.meterId.replace(/\s|-/g, "").toLowerCase() === acctNorm);
+      if (byAcct) return byAcct;
+    }
+    return mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
+  }
+  const unmappedAccounts = (() => {
+    const seen = new Map<string, { property: string; meterType: string; account: string }>();
+    for (const p of parsedBills) {
+      if (!p.matchedProperty || p.meterType === "unknown") continue;
+      if (findMappingFor(p)) continue;
+      const acct = (p.accountNumber || "").trim() || "(no account #)";
+      const key = `${p.matchedProperty}|${p.meterType}|${acct}`;
+      if (!seen.has(key)) seen.set(key, { property: p.matchedProperty, meterType: p.meterType, account: acct });
+    }
+    return Array.from(seen.values());
+  })();
+
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       <div className="p-5 border-b border-border space-y-3">
@@ -1223,6 +1256,32 @@ function ImportBillsFlow({
             </span>
           )}
         </div>
+        {unmappedAccounts.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs">
+            <p className="font-semibold text-amber-900 mb-1">
+              {unmappedAccounts.length} unmapped meter account{unmappedAccounts.length !== 1 ? "s" : ""} —
+              these bills will save as drafts until you create a mapping.
+            </p>
+            <ul className="text-amber-900 space-y-0.5">
+              {unmappedAccounts.slice(0, 10).map((u, i) => (
+                <li key={i} className="flex items-center justify-between gap-3">
+                  <span className="truncate">
+                    <strong>{u.property}</strong> · {METER_TYPE_LABELS[u.meterType as MeterType]} · acct {u.account}
+                  </span>
+                  <Link
+                    href={`/rubs/settings?addProperty=${encodeURIComponent(u.property)}&addMeterType=${u.meterType}&addAccount=${encodeURIComponent(u.account)}`}
+                    className="text-accent hover:underline whitespace-nowrap"
+                  >
+                    Create mapping →
+                  </Link>
+                </li>
+              ))}
+              {unmappedAccounts.length > 10 && (
+                <li>...and {unmappedAccounts.length - 10} more</li>
+              )}
+            </ul>
+          </div>
+        )}
       </div>
       {parsedBills.length > 0 ? (
         <div className="overflow-x-auto">
