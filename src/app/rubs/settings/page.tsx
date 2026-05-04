@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { Unit } from "@/lib/types";
 import type { MeterMapping, MeterType, MeteringMethod, SplitMethod, PropertyAlias } from "@/lib/rubs-types";
@@ -28,6 +29,7 @@ export default function RubsSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editMapping, setEditMapping] = useState<MeterMapping | null>(null);
+  const [prefill, setPrefill] = useState<{ propertyName?: string; meterType?: MeterType; meterId?: string } | null>(null);
   const [importPreview, setImportPreview] = useState<ImportResult | null>(null);
   const [importFilename, setImportFilename] = useState("");
   const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
@@ -65,6 +67,24 @@ export default function RubsSettingsPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Open the new-mapping form pre-filled when arriving via the
+  // "Create mapping →" link from the import preview unmapped panel.
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const property = searchParams?.get("addProperty");
+    const meterType = searchParams?.get("addMeterType") as MeterType | null;
+    const account = searchParams?.get("addAccount");
+    if (property || meterType || account) {
+      setPrefill({
+        propertyName: property || undefined,
+        meterType: meterType || undefined,
+        meterId: account && account !== "(no account #)" ? account : undefined,
+      });
+      setShowForm(true);
+      setEditMapping(null);
+    }
+  }, [searchParams]);
 
   const propertyNames = [...new Set(units.map((u) => u.propertyName).filter(Boolean))].sort();
   const mappingPropertyNames = [...new Set(mappings.map((m) => m.propertyName))].sort();
@@ -304,8 +324,9 @@ export default function RubsSettingsPage() {
           propertyNames={propertyNames}
           units={units}
           existing={editMapping}
+          prefill={editMapping ? null : prefill}
           onSave={handleSave}
-          onCancel={() => { setShowForm(false); setEditMapping(null); }}
+          onCancel={() => { setShowForm(false); setEditMapping(null); setPrefill(null); }}
         />
       )}
 
@@ -564,20 +585,22 @@ function MappingForm({
   propertyNames,
   units,
   existing,
+  prefill,
   onSave,
   onCancel,
 }: {
   propertyNames: string[];
   units: Unit[];
   existing: MeterMapping | null;
+  prefill?: { propertyName?: string; meterType?: MeterType; meterId?: string } | null;
   onSave: (mapping: MeterMapping) => void;
   onCancel: () => void;
 }) {
-  const [propertyName, setPropertyName] = useState(existing?.propertyName || "");
-  const [meterType, setMeterType] = useState<MeterType>(existing?.meterType || "water");
+  const [propertyName, setPropertyName] = useState(existing?.propertyName || prefill?.propertyName || "");
+  const [meterType, setMeterType] = useState<MeterType>(existing?.meterType || prefill?.meterType || "water");
   const [meteringMethod, setMeteringMethod] = useState<MeteringMethod>(existing?.meteringMethod || "master");
   const [splitMethod, setSplitMethod] = useState<SplitMethod>(existing?.splitMethod || "sqft");
-  const [meterId, setMeterId] = useState(existing?.meterId || "");
+  const [meterId, setMeterId] = useState(existing?.meterId || prefill?.meterId || "");
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set(existing?.unitIds || []));
 
   const propUnits = units.filter((u) => u.propertyName === propertyName);
