@@ -48,8 +48,10 @@ const COLUMNS: ColumnDef[] = [
   { key: "displayName", header: "Unit name", defaultVisible: true },
   { key: "propertyName", header: "Property", defaultVisible: true },
   { key: "unitNumber", header: "Unit #", defaultVisible: false },
-  { key: "status", header: "Status", defaultVisible: true },
-  { key: "ayStatus", header: "AY status", defaultVisible: true },
+  { key: "status", header: "Current Status", defaultVisible: true },
+  // ayStatus header is rendered dynamically with the selected academic
+  // year (e.g. "2026-2027 Status") via headerLabel() below.
+  { key: "ayStatus", header: "AY Status", defaultVisible: true },
   { key: "bedBath", header: "Bd/Ba", defaultVisible: true },
   { key: "sqft", header: "Sqft", align: "right", defaultVisible: false },
   { key: "rent", header: "Rent", align: "right", defaultVisible: true },
@@ -59,6 +61,11 @@ const COLUMNS: ColumnDef[] = [
   { key: "moveOut", header: "Move-out", defaultVisible: false },
   { key: "notes", header: "Notes", defaultVisible: false },
 ];
+
+function headerLabel(c: ColumnDef, ay: AcademicYear): string {
+  if (c.key === "ayStatus") return `${ay} Status`;
+  return c.header;
+}
 
 const COLUMN_VISIBILITY_KEY = "moxie:units-columns-v1";
 
@@ -80,6 +87,7 @@ type UnitRow = {
   sqft: number | null;
   rent: number | string | null;
   tenant: string | null;
+  additionalTenants: string | null;
   leaseFrom: string | null;
   leaseTo: string | null;
   moveIn: string | null;
@@ -114,6 +122,21 @@ function fmtRent(rent: number | string | null): string {
 function fmtBedBath(bd: number | null, ba: number | null): string {
   if (bd == null && ba == null) return "—";
   return `${bd ?? "—"}bd / ${ba ?? "—"}ba`;
+}
+
+// Combine the primary tenant with AppFolio's `additional_tenants` field
+// (which may itself be a comma-separated string) into a single display
+// list. Empty / null pieces are dropped.
+function joinTenants(primary: string | null, additional: string | null): string {
+  const parts: string[] = [];
+  if (primary && primary.trim()) parts.push(primary.trim());
+  if (additional && additional.trim()) {
+    for (const t of additional.split(",")) {
+      const name = t.trim();
+      if (name && !parts.includes(name)) parts.push(name);
+    }
+  }
+  return parts.join(", ");
 }
 
 export default function UnitsPage() {
@@ -195,6 +218,7 @@ export default function UnitsPage() {
         sqft: u.sqft,
         rent: u.rent,
         tenant: u.tenant,
+        additionalTenants: u.additionalTenants,
         leaseFrom: u.leaseFrom,
         leaseTo: u.leaseTo,
         moveIn: u.moveIn,
@@ -222,7 +246,7 @@ export default function UnitsPage() {
         r.unitName,
         r.propertyName,
         r.unitNumber,
-        r.tenant || "",
+        joinTenants(r.tenant, r.additionalTenants),
         r.notes,
       ]
         .join(" ")
@@ -243,7 +267,7 @@ export default function UnitsPage() {
         case "bedBath": return (r.bedrooms ?? -1) * 10 + (r.bathrooms ?? 0);
         case "sqft": return r.sqft ?? -1;
         case "rent": return Number(r.rent) || -1;
-        case "tenant": return (r.tenant || "").toLowerCase();
+        case "tenant": return joinTenants(r.tenant, r.additionalTenants).toLowerCase();
         case "leaseFrom": return r.leaseFrom || "";
         case "leaseTo": return r.leaseTo || "";
         case "moveOut": return r.moveOut || "";
@@ -476,7 +500,7 @@ export default function UnitsPage() {
                       setVisible((v) => ({ ...v, [c.key]: e.target.checked }))
                     }
                   />
-                  {c.header}
+                  {headerLabel(c, academicYear)}
                 </label>
               ))}
             </div>
@@ -509,7 +533,7 @@ export default function UnitsPage() {
                       }`}
                     >
                       <span className="inline-flex items-center gap-1">
-                        {c.header}
+                        {headerLabel(c, academicYear)}
                         {sortBy === c.key && (
                           sortDir === "asc"
                             ? <ChevronUp className="w-3 h-3" />
@@ -666,12 +690,14 @@ function renderCell(key: ColumnKey, row: UnitRow, p: CellProps): React.ReactNode
       );
     case "rent":
       return <span className="font-medium">{fmtRent(row.rent)}</span>;
-    case "tenant":
+    case "tenant": {
+      const joined = joinTenants(row.tenant, row.additionalTenants);
       return (
-        <span className={row.tenant ? "" : "text-muted-foreground italic"}>
-          {row.tenant || "Vacant"}
+        <span className={joined ? "" : "text-muted-foreground italic"}>
+          {joined || "Vacant"}
         </span>
       );
+    }
     case "leaseFrom":
       return <span className="text-muted-foreground">{row.leaseFrom || "—"}</span>;
     case "leaseTo":
