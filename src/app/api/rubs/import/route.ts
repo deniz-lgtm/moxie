@@ -96,10 +96,11 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { filename, knownProperties, aliases } = body as {
+    const { filename, knownProperties, aliases, fileHash } = body as {
       filename: string;
       knownProperties: string[];
       aliases?: import("@/lib/rubs-types").PropertyAlias[];
+      fileHash?: string;
     };
 
     if (!filename) {
@@ -113,7 +114,6 @@ export async function POST(request: Request) {
     if (!relPath) {
       return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
     }
-    const displayName = relPath.split("/").pop() || relPath;
     let pdfBase64: string;
 
     const sb = getSupabase();
@@ -161,7 +161,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const results = await parseBillPdf(pdfBase64, knownProperties || [], displayName, aliases || []);
+    // Pass the full relative path as the source so the PDF link can resolve
+    // it back to the storage object later. Earlier code passed only the
+    // basename, which broke `/api/rubs/pdf?file=...` lookups for PDFs nested
+    // in subfolders (e.g. "2026-04/acct1.pdf").
+    const results = await parseBillPdf(
+      pdfBase64,
+      knownProperties || [],
+      relPath,
+      aliases || [],
+      fileHash,
+    );
     return NextResponse.json({ results });
   } catch (error: any) {
     return NextResponse.json(

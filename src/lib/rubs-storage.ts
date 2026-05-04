@@ -32,6 +32,15 @@ export async function uploadBillPdf(file: File, folder = ""): Promise<string> {
   return path;
 }
 
+/** SHA-256 hex digest of a File / Blob. Used to dedup re-uploaded bills. */
+export async function hashFile(file: Blob): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /** List all PDFs in the bucket (recursive). */
 export async function listBillPdfs(): Promise<StoredBillFile[]> {
   const sb = getSupabase();
