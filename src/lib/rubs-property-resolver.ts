@@ -13,7 +13,7 @@
 // Everywhere the system compares two property name strings, use
 // resolvePropertyName() instead of string equality so aliases are respected.
 
-import type { PropertyAlias } from "./rubs-types";
+import type { PropertyAlias, OccupancyRecord } from "./rubs-types";
 
 /**
  * Normalize a property name for case/whitespace/suffix-insensitive comparison.
@@ -128,6 +128,114 @@ export function matchProperty(
   return {
     property: bestScore >= 0.4 ? bestMatch : null,
     confidence: bestScore,
+  };
+}
+
+// ─── Address-based matching ────────────────────────────────────
+// Property names in AppFolio are sometimes legal-entity names ("Dorr Holdings
+// LLC") rather than addresses, which makes matching utility bills painful.
+// Unit names, however, almost always start with the street address. We can
+// derive a street-address → property-name index from the occupancy records
+// and match bills against that instead.
+
+/**
+ * Pull a normalized street address out of a free-form string. Accepts both
+ * AppFolio unit names ("1116 30th St #A", "1118 ¾ 30th Street") and utility
+ * bill service addresses ("1116 30TH ST APT A, LOS ANGELES, CA 90007").
+ *
+ * Returns the street number + name in lowercase (no unit, no city/state/zip,
+ * no suffix). Empty string if no street address can be extracted.
+ */
+export function extractStreetAddress(raw: string): string {
+  if (!raw) return "";
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/[Ââ½¾¼–—“”]/g, "")
+    .replace(/[.,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Match "<number> <street>" up to the first unit token, city, or end.
+  const m = cleaned.match(
+    /^(\d+(?:\s*[¼½¾]|\s*[a-z])?)\s+([^,#]+?)(?=\s*(?:#|apt|unit|suite|ste|los\s*angeles|,|$))/,
+  );
+  if (!m) {
+    // Fall back: number + everything until comma / # / unit keyword.
+    const m2 = cleaned.match(/^(\d+)\s+([^,#]+)/);
+    if (!m2) return "";
+    return normalizeAddressFragment(`${m2[1]} ${m2[2]}`);
+  }
+  return normalizeAddressFragment(`${m[1]} ${m[2]}`);
+}
+
+/**
+ * Pull a unit number ("A", "101", "1B") out of a string. Looks for "#X",
+ * "apt X", "unit X", "suite X" markers. Returns "" if none found.
+ */
+export function extractUnitNumber(raw: string): string {
+  if (!raw) return "";
+  const m = raw
+    .toLowerCase()
+    .match(/(?:#|\bapt\.?|\bunit\.?|\bsuite\.?|\bste\.?)\s*([a-z0-9-]+)/);
+  return m ? m[1].trim() : "";
+}
+
+function normalizeAddressFragment(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[Ââ½¾¼]/g, "")
+    .replace(/[.,#()\-/\\]/g, " ")
+    .replace(/\b(street|st|place|pl|boulevard|blvd|avenue|ave|drive|dr|road|rd|court|ct|lane|ln|way|north|south|east|west|n|s|e|w)\b\.?/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export interface AddressIndex {
+  /** normalized street address → canonical property name */
+  byStreet: Map<string, string>;
+  /** "<street>|<unit>" → OccupancyRecord (for unit-level lookups) */
+  byStreetUnit: Map<string, OccupancyRecord>;
+}
+
+/** Build address-based lookup tables from AppFolio occupancy records. */
+export function buildAddressIndex(records: OccupancyRecord[]): AddressIndex {
+  const byStreet = new Map<string, string>();
+  const byStreetUnit = new Map<string, OccupancyRecord>();
+  for (const rec of records) {
+    // Unit names usually include the street; property name is the fallback.
+    const street =
+      extractStreetAddress(rec.unitName) || extractStreetAddress(rec.propertyName);
+    if (!street) continue;
+    if (!byStreet.has(street)) byStreet.set(street, rec.propertyName);
+    const unit = extractUnitNumber(rec.unitName);
+    byStreetUnit.set(`${street}|${unit}`, rec);
+  }
+  return { byStreet, byStreetUnit };
+}
+
+/**
+ * Match a utility bill's service address to a known property using the
+ * address index first, falling back to the legacy name-based matcher.
+ * The address index sidesteps the "property name is an LLC, not an address"
+ * problem completely when occupancy data is available.
+ */
+export function matchPropertyByAddress(
+  serviceAddress: string,
+  knownProperties: string[],
+  aliasMap: Map<string, string>,
+  addressIndex?: AddressIndex,
+): { property: string | null; confidence: number; matchedVia: "address" | "alias" | "fuzzy" | "none" } {
+  if (addressIndex) {
+    const street = extractStreetAddress(serviceAddress);
+    if (street) {
+      const direct = addressIndex.byStreet.get(street);
+      if (direct) return { property: direct, confidence: 1, matchedVia: "address" };
+    }
+  }
+  const fallback = matchProperty(serviceAddress, knownProperties, aliasMap);
+  return {
+    property: fallback.property,
+    confidence: fallback.confidence,
+    matchedVia: fallback.confidence === 1 ? "alias" : fallback.property ? "fuzzy" : "none",
   };
 }
 
