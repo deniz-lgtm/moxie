@@ -21,6 +21,7 @@ import {
   getMeterMappings,
   getMeterMappingById,
   getBills,
+  getBillByFileHash,
   saveBill as saveBillToStorage,
   deleteBill as deleteBillFromStorage,
   getOccupancyData,
@@ -37,7 +38,7 @@ import {
   generateAppFolioExport,
   getExportTotal,
 } from "@/lib/rubs-appfolio-export";
-import { uploadBillPdf, deleteAllBillPdfs } from "@/lib/rubs-storage";
+import { uploadBillPdf, deleteAllBillPdfs, hashFile } from "@/lib/rubs-storage";
 
 // ─── Main Page ─────────────────────────────────────────────────
 
@@ -779,6 +780,8 @@ function ImportBillsFlow({
   const [periodTo, setPeriodTo] = useState("");
   const [uploading, setUploading] = useState({ current: 0, total: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [skippedDuplicates, setSkippedDuplicates] = useState<string[]>([]);
+  const [fileHashes, setFileHashes] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleUpload(fileList: File[]) {
@@ -788,22 +791,34 @@ function ImportBillsFlow({
       return;
     }
     setError("");
+    setSkippedDuplicates([]);
     setUploading({ current: 0, total: pdfs.length });
     const folder = new Date().toISOString().slice(0, 7); // YYYY-MM
     const uploadedPaths: string[] = [];
+    const pathHashes: Record<string, string> = {};
+    const duplicates: string[] = [];
     for (let i = 0; i < pdfs.length; i++) {
       setUploading({ current: i + 1, total: pdfs.length });
       try {
+        const hash = await hashFile(pdfs[i]);
+        const existing = await getBillByFileHash(hash);
+        if (existing) {
+          duplicates.push(`${pdfs[i].name} → already imported as ${existing.propertyName} ${existing.month}`);
+          continue;
+        }
         const storedPath = await uploadBillPdf(pdfs[i], folder);
         uploadedPaths.push(storedPath);
+        pathHashes[storedPath] = hash;
       } catch (err: any) {
         setError(err.message || `Upload failed for ${pdfs[i].name}`);
       }
     }
     setUploading({ current: 0, total: 0 });
+    setSkippedDuplicates(duplicates);
+    setFileHashes((prev) => ({ ...prev, ...pathHashes }));
     // Auto-parse just the newly uploaded files and land on the review screen.
     if (uploadedPaths.length > 0) {
-      await parseSelected(uploadedPaths);
+      await parseSelected(uploadedPaths, pathHashes);
     }
   }
 
@@ -848,9 +863,11 @@ function ImportBillsFlow({
     }
   }
 
-  async function parseSelected(filenames?: string[]) {
+  async function parseSelected(filenames?: string[], extraHashes?: Record<string, string>) {
     const filesToParse = filenames ?? Array.from(selectedFiles);
     if (filesToParse.length === 0) return;
+
+    const hashLookup = { ...fileHashes, ...(extraHashes || {}) };
 
     setStep("parsing");
     setParseProgress({ current: 0, total: filesToParse.length });
@@ -858,11 +875,17 @@ function ImportBillsFlow({
 
     for (let i = 0; i < filesToParse.length; i++) {
       setParseProgress({ current: i + 1, total: filesToParse.length });
+      const fileHash = hashLookup[filesToParse[i]];
       try {
         const res = await fetch("/api/rubs/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: filesToParse[i], knownProperties: propertyNames, aliases }),
+          body: JSON.stringify({
+            filename: filesToParse[i],
+            knownProperties: propertyNames,
+            aliases,
+            fileHash,
+          }),
         });
         const data = await res.json();
         if (data.results) {
@@ -874,10 +897,11 @@ function ImportBillsFlow({
             matchedProperty: null,
             totalAmount: 0,
             billingPeriod: "",
-            meterType: "water",
+            meterType: "unknown",
             accountNumber: "",
             confidence: 0,
             sourceFile: filesToParse[i],
+            fileHash,
           });
         }
       } catch {
@@ -891,10 +915,24 @@ function ImportBillsFlow({
 
   async function handleSaveImported() {
     const validBills = parsedBills.filter(
-      (p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod && inBillingPeriod(p),
+      (p) =>
+        p.matchedProperty &&
+        p.totalAmount > 0 &&
+        p.billingPeriod &&
+        p.meterType !== "unknown" &&
+        inBillingPeriod(p),
     );
     const newBills: RubsBill[] = [];
+    const skipped: string[] = [];
     for (const p of validBills) {
+      // Hash dedup — skip if we've already saved a bill for this exact PDF.
+      if (p.fileHash) {
+        const existing = await getBillByFileHash(p.fileHash);
+        if (existing) {
+          skipped.push(`${p.sourceFile} (already imported as ${existing.propertyName} ${existing.month})`);
+          continue;
+        }
+      }
       const mapping = mappings.find((m) => m.propertyName === p.matchedProperty && m.meterType === p.meterType);
       // Auto-calculate when a meter mapping exists. Skip when there is no
       // mapping — those bills land as drafts so the user knows to set one up.
@@ -916,11 +954,17 @@ function ImportBillsFlow({
         status: mapping ? "calculated" : "draft",
         allocations,
         sourceFile: p.sourceFile,
+        fileHash: p.fileHash,
+        servicePeriodStart: p.servicePeriodStart,
+        servicePeriodEnd: p.servicePeriodEnd,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       await saveBillToStorage(bill);
       newBills.push(bill);
+    }
+    if (skipped.length > 0) {
+      setSkippedDuplicates((prev) => [...prev, ...skipped]);
     }
     onImported(newBills);
   }
@@ -1028,6 +1072,18 @@ function ImportBillsFlow({
           <p className="text-sm text-red-500">{error}</p>
         )}
 
+        {skippedDuplicates.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+            <p className="font-semibold mb-1">Skipped {skippedDuplicates.length} duplicate file{skippedDuplicates.length !== 1 ? "s" : ""}:</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {skippedDuplicates.slice(0, 10).map((d, i) => (
+                <li key={i} className="truncate">{d}</li>
+              ))}
+              {skippedDuplicates.length > 10 && <li>...and {skippedDuplicates.length - 10} more</li>}
+            </ul>
+          </div>
+        )}
+
         {files.length > 0 && (
           <>
             <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
@@ -1108,8 +1164,14 @@ function ImportBillsFlow({
 
   // ─── Preview Step ───────────────────────────────────────
   const validCount = parsedBills.filter(
-    (p) => p.matchedProperty && p.totalAmount > 0 && p.billingPeriod && inBillingPeriod(p),
+    (p) =>
+      p.matchedProperty &&
+      p.totalAmount > 0 &&
+      p.billingPeriod &&
+      p.meterType !== "unknown" &&
+      inBillingPeriod(p),
   ).length;
+  const unknownTypeCount = parsedBills.filter((p) => p.meterType === "unknown").length;
   const outOfPeriodCount = parsedBills.filter((p) => p.billingPeriod && !inBillingPeriod(p)).length;
 
   return (
@@ -1151,6 +1213,11 @@ function ImportBillsFlow({
               {outOfPeriodCount} bill{outOfPeriodCount !== 1 ? "s" : ""} outside this range — will be skipped
             </span>
           )}
+          {unknownTypeCount > 0 && (
+            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">
+              {unknownTypeCount} bill{unknownTypeCount !== 1 ? "s" : ""} with unknown utility type — pick one to import
+            </span>
+          )}
         </div>
       </div>
       {parsedBills.length > 0 ? (
@@ -1171,10 +1238,29 @@ function ImportBillsFlow({
               {parsedBills.map((p, i) => {
                 const hasMatch = Boolean(p.matchedProperty);
                 const outOfPeriod = Boolean(p.billingPeriod) && !inBillingPeriod(p);
-                const rowBg = outOfPeriod ? "bg-slate-100 opacity-60" : !hasMatch ? "bg-amber-50" : "";
+                const unknownType = p.meterType === "unknown";
+                const rowBg = outOfPeriod
+                  ? "bg-slate-100 opacity-60"
+                  : !hasMatch || unknownType
+                    ? "bg-amber-50"
+                    : "";
                 return (
                   <tr key={i} className={`border-b border-border last:border-0 ${rowBg}`}>
-                    <td className="px-4 py-2 text-xs text-muted-foreground max-w-32 truncate">{p.sourceFile}</td>
+                    <td className="px-4 py-2 text-xs max-w-32 truncate">
+                      {p.sourceFile ? (
+                        <a
+                          href={`/api/rubs/pdf?file=${encodeURIComponent(p.sourceFile)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent hover:underline"
+                          title={p.sourceFile}
+                        >
+                          {p.sourceFile.split("/").pop()}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-muted-foreground">{p.utilityProvider}</td>
                     <td className="px-4 py-2">
                       <select
@@ -1197,7 +1283,8 @@ function ImportBillsFlow({
                       <select
                         value={p.meterType}
                         onChange={(e) => updateParsedBill(i, "meterType", e.target.value)}
-                        className="text-xs border border-border rounded px-2 py-1"
+                        className={`text-xs border rounded px-2 py-1 ${unknownType ? "border-amber-400 bg-amber-50" : "border-border"}`}
+                        title={unknownType ? "Utility type couldn't be determined — please pick one" : undefined}
                       >
                         {(Object.entries(METER_TYPE_LABELS) as [MeterType, string][]).map(([k, v]) => (
                           <option key={k} value={k}>{v}</option>

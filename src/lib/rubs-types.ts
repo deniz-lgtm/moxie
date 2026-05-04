@@ -2,7 +2,7 @@
 // RUBS (Ratio Utility Billing System) — Types
 // ============================================
 
-export type MeterType = "water" | "gas" | "electric" | "sewer";
+export type MeterType = "water" | "gas" | "electric" | "sewer" | "unknown";
 export type MeteringMethod = "master" | "sub_metered";
 export type SplitMethod = "sqft" | "occupancy" | "equal" | "custom";
 export type BillStatus = "draft" | "calculated" | "posted";
@@ -29,6 +29,12 @@ export interface RubsBill {
   allocations: RubsAllocation[];
   /** Relative path to the source PDF in the bills folder, e.g. "2026-04/LADWP/acct1.pdf" */
   sourceFile?: string;
+  /** SHA-256 hex digest of the source PDF. Used for duplicate detection. */
+  fileHash?: string;
+  /** Inclusive billing period start (YYYY-MM-DD), if known. */
+  servicePeriodStart?: string;
+  /** Inclusive billing period end (YYYY-MM-DD), if known. */
+  servicePeriodEnd?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +55,7 @@ export const METER_TYPE_LABELS: Record<MeterType, string> = {
   gas: "Gas",
   electric: "Electric",
   sewer: "Sewer",
+  unknown: "Unknown",
 };
 
 export const SPLIT_METHOD_LABELS: Record<SplitMethod, string> = {
@@ -75,6 +82,12 @@ export interface ParsedBill {
   accountNumber: string;
   confidence: number; // 0–1
   sourceFile: string;
+  /** SHA-256 hex of the source PDF, propagated through parsing. */
+  fileHash?: string;
+  /** Service period start as YYYY-MM-DD, if extracted. */
+  servicePeriodStart?: string;
+  /** Service period end as YYYY-MM-DD, if extracted. */
+  servicePeriodEnd?: string;
 }
 
 export interface ImportFileInfo {

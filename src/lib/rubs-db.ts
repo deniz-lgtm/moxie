@@ -71,6 +71,9 @@ function billToDb(b: RubsBill): Omit<DbRubsBill, "created_at" | "updated_at"> {
     status: b.status,
     allocations: b.allocations as RubsAllocation[],
     source_file: b.sourceFile || null,
+    file_hash: b.fileHash || null,
+    service_period_start: b.servicePeriodStart || null,
+    service_period_end: b.servicePeriodEnd || null,
   };
 }
 
@@ -85,6 +88,9 @@ function billFromDb(row: DbRubsBill): RubsBill {
     status: row.status,
     allocations: (row.allocations || []) as RubsAllocation[],
     sourceFile: row.source_file || undefined,
+    fileHash: row.file_hash || undefined,
+    servicePeriodStart: row.service_period_start || undefined,
+    servicePeriodEnd: row.service_period_end || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -168,6 +174,22 @@ export async function getBills(): Promise<RubsBill[]> {
 export async function getBillById(id: string): Promise<RubsBill | undefined> {
   const all = await getBills();
   return all.find((b) => b.id === id);
+}
+
+/** Look up an existing bill by SHA-256 hash of its source PDF. */
+export async function getBillByFileHash(hash: string): Promise<RubsBill | undefined> {
+  if (!hash) return undefined;
+  const sb = getSupabase();
+  if (sb) {
+    const { data, error } = await sb
+      .from("rubs_bills")
+      .select("*")
+      .eq("file_hash", hash)
+      .maybeSingle();
+    if (!error && data) return billFromDb(data);
+    if (error && !isMissingTableError(error)) console.warn("[rubs-db] getBillByFileHash:", error.message);
+  }
+  return loadFromStorage<RubsBill[]>(BILLS_KEY, []).find((b) => b.fileHash === hash);
 }
 
 export async function getBillsFiltered(filters?: { month?: string; propertyName?: string }): Promise<RubsBill[]> {

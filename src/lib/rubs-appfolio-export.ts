@@ -261,6 +261,7 @@ export function generateAppFolioExport(
     gas: "Gas",
     electric: "Electric",
     sewer: "Sewer",
+    unknown: "Utility",
   };
 
   const description = `${utilityLabels[utilityType]} RUBS - ${billingMonth}`;

@@ -18,16 +18,22 @@ For each utility charge found, return:
   "utilityProvider": "LADWP" or "SoCal Gas" or the provider name,
   "serviceAddress": "the exact service address as printed on the bill",
   "totalAmount": 123.45,
+  "billingPeriodStart": "YYYY-MM-DD",
   "billingPeriodEnd": "YYYY-MM-DD",
-  "meterType": "water" or "gas" or "electric",
+  "meterType": "water" or "gas" or "electric" or "sewer",
   "accountNumber": "the account or meter number"
 }
 
 Rules:
 - totalAmount should be the TOTAL AMOUNT DUE for that specific utility (not a partial or line item)
 - For LADWP: water and electric are often on the same bill. Extract EACH as a separate entry with its own totalAmount
-- billingPeriodEnd is the END date of the billing period (not the due date)
-- meterType must be exactly one of: "water", "gas", "electric"
+- billingPeriodStart and billingPeriodEnd bound the service period (not the due date)
+- meterType must be exactly one of: "water", "gas", "electric", "sewer"
+  - SoCal Gas / SoCalGas / "natural gas" / "therms" / "ccf of gas" → "gas"
+  - LADWP electric / "kwh" / "kilowatt" / "power" → "electric"
+  - LADWP water / "hcf" / "ccf of water" → "water"
+  - "sewer" / "wastewater" → "sewer"
+  - If genuinely uncertain, omit the field (do NOT guess)
 - If you cannot determine a field, use null
 - Always return a JSON array, even for a single entry: [{ ... }]
 
@@ -37,7 +43,8 @@ export async function parseBillPdf(
   pdfBase64: string,
   knownProperties: string[],
   sourceFile: string,
-  aliases: PropertyAlias[] = []
+  aliases: PropertyAlias[] = [],
+  fileHash?: string,
 ): Promise<ParsedBill[]> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY not configured");
@@ -111,6 +118,7 @@ export async function parseBillPdf(
     utilityProvider?: string;
     serviceAddress?: string;
     totalAmount?: number;
+    billingPeriodStart?: string;
     billingPeriodEnd?: string;
     meterType?: string;
     accountNumber?: string;
@@ -139,19 +147,31 @@ export async function parseBillPdf(
         matchedProperty: matched.property,
         totalAmount: entry.totalAmount || 0,
         billingPeriod,
-        meterType: normalizeMeterType(entry.meterType),
+        meterType: normalizeMeterType(entry.meterType, entry.utilityProvider, serviceAddr),
         accountNumber: entry.accountNumber || "",
         confidence: matched.confidence,
         sourceFile,
+        fileHash,
+        servicePeriodStart: normalizeDate(entry.billingPeriodStart),
+        servicePeriodEnd: normalizeDate(entry.billingPeriodEnd),
       };
     });
 }
 
-function normalizeMeterType(raw?: string): MeterType {
-  if (!raw) return "water";
-  const lower = raw.toLowerCase();
-  if (lower.includes("gas")) return "gas";
-  if (lower.includes("electric") || lower.includes("power") || lower.includes("kwh")) return "electric";
-  if (lower.includes("sewer") || lower.includes("sewage") || lower.includes("wastewater")) return "sewer";
-  return "water";
+function normalizeDate(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return undefined;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeMeterType(raw?: string, provider?: string, address?: string): MeterType {
+  const haystack = `${raw || ""} ${provider || ""} ${address || ""}`.toLowerCase();
+  // Order matters: check the most specific keywords first.
+  if (/\b(socal\s*gas|natural\s*gas|therm|ccf\s*of\s*gas)\b/.test(haystack)) return "gas";
+  if (/\b(gas)\b/.test(haystack) && !/\bgas\s*tax\b/.test(haystack)) return "gas";
+  if (/\b(kwh|kilowatt|electric|power)\b/.test(haystack)) return "electric";
+  if (/\b(sewer|sewage|wastewater)\b/.test(haystack)) return "sewer";
+  if (/\b(water|hcf|ccf\s*of\s*water|ladwp\s*water)\b/.test(haystack)) return "water";
+  return "unknown";
 }
