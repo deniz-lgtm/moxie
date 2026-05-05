@@ -268,6 +268,16 @@ export default function RubsPage() {
         onBack={() => setSelected(null)}
         onPost={() => handlePostBill(selected)}
         onExport={() => handleExport(selected.id)}
+        onUpdate={async (updates) => {
+          const updated: RubsBill = {
+            ...selected,
+            ...updates,
+            updatedAt: new Date().toISOString(),
+          };
+          await saveBillToStorage(updated);
+          setBills((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
+          setSelected(updated);
+        }}
         onRecalculate={async (method: SplitMethod) => {
           const mapping = await getMeterMappingById(selected.mappingId);
           if (!mapping) return;
@@ -563,6 +573,7 @@ function BillDetailView({
   onBack,
   onPost,
   onExport,
+  onUpdate,
   onRecalculate,
 }: {
   bill: RubsBill;
@@ -572,11 +583,39 @@ function BillDetailView({
   onBack: () => void;
   onPost: () => void;
   onExport: () => void;
+  onUpdate: (updates: Partial<RubsBill>) => Promise<void>;
   onRecalculate: (method: SplitMethod) => void | Promise<void>;
 }) {
   const [recalcMethod, setRecalcMethod] = useState<SplitMethod | "">("");
   const [recalculating, setRecalculating] = useState(false);
   const [showAppFolioExport, setShowAppFolioExport] = useState(false);
+  const [editingAllocations, setEditingAllocations] = useState(false);
+  const [draftAmounts, setDraftAmounts] = useState<Record<string, number>>({});
+
+  function startEdit() {
+    setDraftAmounts(Object.fromEntries(bill.allocations.map((a) => [a.unitId, a.amount])));
+    setEditingAllocations(true);
+  }
+  function cancelEdit() {
+    setDraftAmounts({});
+    setEditingAllocations(false);
+  }
+  async function saveEdit() {
+    const newAllocations = bill.allocations.map((a) => {
+      const amount = draftAmounts[a.unitId] ?? a.amount;
+      const share = bill.totalAmount > 0 ? amount / bill.totalAmount : 0;
+      return { ...a, amount: Math.round(amount * 100) / 100, share };
+    });
+    await onUpdate({ allocations: newAllocations });
+    cancelEdit();
+  }
+
+  const draftTotal = editingAllocations
+    ? bill.allocations.reduce((s, a) => s + (draftAmounts[a.unitId] ?? a.amount), 0)
+    : 0;
+  const draftDelta = editingAllocations
+    ? Math.round((draftTotal - bill.totalAmount) * 100) / 100
+    : 0;
 
   const totalAllocated = bill.allocations.reduce((s, a) => s + a.amount, 0);
   const totalTenants = bill.allocations.reduce((s, a) => s + (a.occupants || 0), 0);
@@ -668,8 +707,34 @@ function BillDetailView({
 
       {/* Allocations Table */}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
-        <div className="p-5 border-b border-border">
+        <div className="p-5 border-b border-border flex items-center justify-between gap-3 flex-wrap">
           <h2 className="font-semibold">Unit Allocations</h2>
+          {bill.allocations.length > 0 && bill.status !== "posted" && (
+            !editingAllocations ? (
+              <button
+                onClick={startEdit}
+                className="text-xs text-accent hover:underline"
+              >
+                Edit amounts
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 text-xs">
+                <span className={draftDelta === 0 ? "text-muted-foreground" : "text-amber-700"}>
+                  Draft total ${draftTotal.toFixed(2)} of ${bill.totalAmount.toFixed(2)}
+                  {draftDelta !== 0 && ` (${draftDelta > 0 ? "+" : ""}$${draftDelta.toFixed(2)})`}
+                </span>
+                <button onClick={cancelEdit} className="text-muted-foreground hover:underline">
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEdit}
+                  className="px-2 py-1 bg-accent text-white rounded hover:bg-accent/90"
+                >
+                  Save
+                </button>
+              </div>
+            )
+          )}
         </div>
         {bill.allocations.length > 0 ? (
           <div className="overflow-x-auto">
@@ -684,17 +749,40 @@ function BillDetailView({
                 </tr>
               </thead>
               <tbody>
-                {bill.allocations.map((a) => (
-                  <tr key={a.unitId} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-medium">{a.unitName}</td>
-                    <td className="px-4 py-3 text-right text-muted-foreground">{a.occupants}</td>
-                    {showSqft && (
-                      <td className="px-4 py-3 text-right text-muted-foreground">{a.sqft.toLocaleString()}</td>
-                    )}
-                    <td className="px-4 py-3 text-right text-muted-foreground">{(a.share * 100).toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right font-medium">${a.amount.toFixed(2)}</td>
-                  </tr>
-                ))}
+                {bill.allocations.map((a) => {
+                  const draftAmt = draftAmounts[a.unitId] ?? a.amount;
+                  const draftShare = bill.totalAmount > 0 ? draftAmt / bill.totalAmount : a.share;
+                  return (
+                    <tr key={a.unitId} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 font-medium">{a.unitName}</td>
+                      <td className="px-4 py-3 text-right text-muted-foreground">{a.occupants}</td>
+                      {showSqft && (
+                        <td className="px-4 py-3 text-right text-muted-foreground">{a.sqft.toLocaleString()}</td>
+                      )}
+                      <td className="px-4 py-3 text-right text-muted-foreground">
+                        {(editingAllocations ? draftShare * 100 : a.share * 100).toFixed(1)}%
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {editingAllocations ? (
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={draftAmt}
+                            onChange={(e) =>
+                              setDraftAmounts((prev) => ({
+                                ...prev,
+                                [a.unitId]: parseFloat(e.target.value) || 0,
+                              }))
+                            }
+                            className="w-24 text-right border border-border rounded px-2 py-1"
+                          />
+                        ) : (
+                          `$${a.amount.toFixed(2)}`
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted">
@@ -735,6 +823,15 @@ function BillDetailView({
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
             Mark as Posted
+          </button>
+        )}
+        {bill.status === "posted" && (
+          <button
+            onClick={() => onUpdate({ status: "calculated" })}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+            title="Allow further edits and re-export"
+          >
+            Mark Unposted
           </button>
         )}
       </div>
