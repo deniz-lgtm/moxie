@@ -38,7 +38,14 @@ import {
   generateAppFolioExport,
   getExportTotal,
 } from "@/lib/rubs-appfolio-export";
-import { uploadBillPdf, deleteAllBillPdfs, hashFile } from "@/lib/rubs-storage";
+import {
+  uploadBillPdf,
+  deleteAllBillPdfs,
+  hashFile,
+  listBillPdfs,
+  deleteBillPdf,
+  type StoredBillFile,
+} from "@/lib/rubs-storage";
 
 // ─── Main Page ─────────────────────────────────────────────────
 
@@ -50,6 +57,7 @@ export default function RubsPage() {
   const [selected, setSelected] = useState<RubsBill | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showPdfLibrary, setShowPdfLibrary] = useState(false);
   const [loading, setLoading] = useState(true);
   const [seeded, setSeeded] = useState(true);
   const [filterMonth, setFilterMonth] = useState("");
@@ -329,7 +337,13 @@ export default function RubsPage() {
             </button>
           )}
           <button
-            onClick={() => { setShowExport(!showExport); setShowImport(false); }}
+            onClick={() => { setShowPdfLibrary(!showPdfLibrary); setShowImport(false); setShowExport(false); }}
+            className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            {showPdfLibrary ? "Hide PDFs" : "Stored PDFs"}
+          </button>
+          <button
+            onClick={() => { setShowExport(!showExport); setShowImport(false); setShowPdfLibrary(false); }}
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
           >
             {showExport ? "Cancel Export" : "Export to AppFolio"}
@@ -433,6 +447,11 @@ export default function RubsPage() {
           occupancy={occupancy}
           aliases={aliases}
         />
+      )}
+
+      {/* Stored PDFs Panel */}
+      {showPdfLibrary && (
+        <StoredPdfsPanel bills={bills} />
       )}
 
       {/* Filters */}
@@ -1541,6 +1560,162 @@ function ImportBillsFlow({
 }
 
 // ─── AppFolio Export Panel ────────────────────────────────────
+
+// ─── Stored PDFs Library ──────────────────────────────────────
+// Shows every PDF currently in Supabase Storage, joined with the bills
+// table by sourceFile so each row shows whether it has been imported.
+// Lets you view originals and clean up orphan files (uploaded but never
+// imported, or imported then bill-deleted).
+
+function StoredPdfsPanel({ bills }: { bills: RubsBill[] }) {
+  const [files, setFiles] = useState<StoredBillFile[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState<"all" | "imported" | "orphan">("all");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const billsBySourceFile = new Map(bills.filter((b) => b.sourceFile).map((b) => [b.sourceFile!, b]));
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const list = await listBillPdfs();
+      setFiles(list);
+    } catch (err: any) {
+      setError(err.message || "Failed to list stored PDFs");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleDelete(path: string) {
+    if (!confirm(`Delete ${path}? This removes the PDF from cloud storage permanently.`)) return;
+    setBusy(path);
+    try {
+      await deleteBillPdf(path);
+      setFiles((prev) => (prev ? prev.filter((f) => f.name !== path) : prev));
+    } catch (err: any) {
+      setError(err.message || `Failed to delete ${path}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (loading && !files) {
+    return (
+      <div className="bg-card rounded-xl border border-border p-5">
+        <p className="text-sm text-muted-foreground">Loading stored PDFs...</p>
+      </div>
+    );
+  }
+
+  const list = files || [];
+  const filtered = list.filter((f) => {
+    if (filter === "imported") return billsBySourceFile.has(f.name);
+    if (filter === "orphan") return !billsBySourceFile.has(f.name);
+    return true;
+  });
+  const importedCount = list.filter((f) => billsBySourceFile.has(f.name)).length;
+  const orphanCount = list.length - importedCount;
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <div className="p-5 border-b border-border flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="font-semibold">Stored PDFs ({list.length})</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {importedCount} imported · {orphanCount} orphan{orphanCount !== 1 ? "s" : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as "all" | "imported" | "orphan")}
+            className="border border-border rounded px-2 py-1 bg-card"
+          >
+            <option value="all">All ({list.length})</option>
+            <option value="imported">Imported ({importedCount})</option>
+            <option value="orphan">Orphan ({orphanCount})</option>
+          </select>
+          <button onClick={load} className="text-accent hover:underline">Refresh</button>
+        </div>
+      </div>
+      {error && <p className="px-5 py-3 text-sm text-red-500">{error}</p>}
+      {filtered.length === 0 ? (
+        <p className="p-5 text-sm text-muted-foreground">
+          {list.length === 0 ? "No PDFs uploaded yet." : "No PDFs match this filter."}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted">
+                <th className="text-left px-4 py-3 font-medium">File</th>
+                <th className="text-left px-4 py-3 font-medium">Status</th>
+                <th className="text-left px-4 py-3 font-medium">Linked Bill</th>
+                <th className="text-right px-4 py-3 font-medium">Size</th>
+                <th className="text-left px-4 py-3 font-medium">Modified</th>
+                <th className="text-right px-4 py-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((f) => {
+                const linked = billsBySourceFile.get(f.name);
+                return (
+                  <tr key={f.name} className="border-b border-border last:border-0">
+                    <td className="px-4 py-2 text-xs max-w-xs">
+                      <a
+                        href={`/api/rubs/pdf?file=${encodeURIComponent(f.name)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent hover:underline truncate block"
+                        title={f.name}
+                      >
+                        {f.name}
+                      </a>
+                    </td>
+                    <td className="px-4 py-2">
+                      {linked ? (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">Imported</span>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Orphan</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {linked
+                        ? `${linked.propertyName} · ${linked.meterType} · ${linked.month}`
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-right text-xs text-muted-foreground">
+                      {(f.size / 1024).toFixed(0)} KB
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {new Date(f.modified).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap">
+                      {!linked && (
+                        <button
+                          onClick={() => handleDelete(f.name)}
+                          disabled={busy === f.name}
+                          className="text-xs text-red-500 hover:underline disabled:opacity-50"
+                        >
+                          {busy === f.name ? "Deleting..." : "Delete"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Export All Panel (top-level /rubs export) ────────────────
 
