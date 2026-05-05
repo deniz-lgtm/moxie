@@ -45,6 +45,18 @@ function groupCompletion(group: ApplicationGroup): {
   return { done, total, pct, blockers };
 }
 
+// "Closed" applications are ones we don't need to nudge on anymore — every
+// applicant in the group is in a terminal state (already approved/converted
+// to a lease, or denied/cancelled). We hide these by default so the page
+// stays focused on apps that still need work.
+function isClosedGroup(group: ApplicationGroup): boolean {
+  if (group.applicants.length === 0) return true;
+  return group.applicants.every((a) => {
+    const s = (a.applicationStatus || "").toLowerCase();
+    return /approved|converted|denied|cancelled|canceled|withdrawn|rejected/.test(s);
+  });
+}
+
 export default function ApplicationsPage() {
   const { portfolioId } = usePortfolio();
   const [allGroups, setAllGroups] = useState<ApplicationGroup[]>([]);
@@ -52,6 +64,7 @@ export default function ApplicationsPage() {
   const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterStage, setFilterStage] = useState<string>("all");
+  const [showClosed, setShowClosed] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -75,9 +88,15 @@ export default function ApplicationsPage() {
     }
   }, [allGroups, selectedGroup]);
 
+  const closedCount = useMemo(
+    () => allGroups.filter(isClosedGroup).length,
+    [allGroups]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return allGroups.filter((g) => {
+      if (!showClosed && isClosedGroup(g)) return false;
       if (filterStatus !== "all" && g.status !== filterStatus) return false;
       if (filterStage !== "all") {
         const hit = g.applicants.some((a) => applicantStage(a).key === filterStage);
@@ -418,6 +437,14 @@ export default function ApplicationsPage() {
           <option value="started">Has steps pending</option>
           <option value="approved">Has approved</option>
         </select>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground border border-border rounded-lg px-3 py-2 bg-card cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showClosed}
+            onChange={(e) => setShowClosed(e.target.checked)}
+          />
+          Show closed ({closedCount})
+        </label>
       </div>
 
       {loading ? (
