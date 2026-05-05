@@ -242,6 +242,8 @@ export type AnnotationUpdate = {
   ai_priority?: string | null;
   ai_title?: string | null;
   ai_classified_at?: string | null;
+  meeting_summary?: string | null;
+  meeting_summary_at?: string | null;
 };
 
 /**
@@ -281,6 +283,8 @@ export async function saveAnnotation(
     ai_priority: update.ai_priority ?? existing?.ai_priority ?? null,
     ai_title: update.ai_title ?? existing?.ai_title ?? null,
     ai_classified_at: update.ai_classified_at ?? existing?.ai_classified_at ?? null,
+    meeting_summary: update.meeting_summary ?? existing?.meeting_summary ?? null,
+    meeting_summary_at: update.meeting_summary_at ?? existing?.meeting_summary_at ?? null,
   };
 
   const { data, error } = await sb
@@ -290,6 +294,49 @@ export async function saveAnnotation(
     .single();
   if (error) throw new Error(`[work-orders-db] saveAnnotation: ${error.message}`);
   return data as DbWorkOrderAnnotation;
+}
+
+/**
+ * Bulk-fetch the cached meeting summaries for a batch of work order ids.
+ * Returns a map keyed by id so the summarize endpoint can short-circuit
+ * any items that already have a stored summary.
+ */
+export async function getMeetingSummaries(
+  ids: string[]
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  const sb = getSupabase();
+  if (!sb) return out;
+  const { data, error } = await sb
+    .from("work_order_annotations")
+    .select("id,meeting_summary")
+    .in("id", ids);
+  if (error) {
+    if (!isMissingTableError(error)) {
+      console.warn("[work-orders-db] getMeetingSummaries:", error.message);
+    }
+    return out;
+  }
+  for (const row of (data ?? []) as { id: string; meeting_summary: string | null }[]) {
+    if (row.meeting_summary) out.set(row.id, row.meeting_summary);
+  }
+  return out;
+}
+
+/**
+ * Persist a freshly-generated meeting summary for a work order. Upserts
+ * onto work_order_annotations so the summary survives across browsers
+ * and users (the maintenance summarize endpoint calls this on every new
+ * generation).
+ */
+export async function saveMeetingSummary(id: string, summary: string): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  await saveAnnotation(id, {
+    meeting_summary: summary,
+    meeting_summary_at: new Date().toISOString(),
+  });
 }
 
 function isMissingTableError(error: { code?: string; message?: string } | null | undefined): boolean {

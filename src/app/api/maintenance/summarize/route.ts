@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getMeetingSummaries, saveMeetingSummary } from "@/lib/work-orders-db";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
@@ -12,25 +13,55 @@ type Item = { id: string; text: string };
  * Tenant-written work order descriptions are often long, rambling, and
  * full of typos. This endpoint asks Claude Haiku to compress each one
  * to a short, scannable phrase suitable for a meeting agenda row.
+ *
+ * Summaries are cached on `work_order_annotations.meeting_summary` so
+ * the AI call only ever happens once per work order — every subsequent
+ * request short-circuits to the cached value, regardless of which
+ * browser or teammate triggered the original.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const items = Array.isArray(body?.items) ? (body.items as Item[]) : [];
     const valid = items
-      .filter((i) => i && typeof i.id === "string" && typeof i.text === "string" && i.text.trim().length > 0)
+      .filter(
+        (i) =>
+          i &&
+          typeof i.id === "string" &&
+          typeof i.text === "string" &&
+          i.text.trim().length > 0
+      )
       .slice(0, 30);
     if (valid.length === 0) {
       return NextResponse.json({ summaries: [] });
     }
 
-    if (!ANTHROPIC_API_KEY) {
-      return NextResponse.json({
-        summaries: valid.map((i) => ({ id: i.id, summary: fallbackTrim(i.text) })),
-      });
+    // Server-side cache lookup. Anything already summarized is returned
+    // verbatim; only items still missing flow into the AI request.
+    const cached = await getMeetingSummaries(valid.map((i) => i.id));
+    const toGenerate = valid.filter((i) => !cached.has(i.id));
+
+    const summaries: { id: string; summary: string }[] = [];
+    for (const i of valid) {
+      const cachedSummary = cached.get(i.id);
+      if (cachedSummary) summaries.push({ id: i.id, summary: cachedSummary });
     }
 
-    const numbered = valid
+    if (toGenerate.length === 0) {
+      return NextResponse.json({ summaries });
+    }
+
+    if (!ANTHROPIC_API_KEY) {
+      // No API key — synthesize a fallback so callers always get
+      // something. Don't persist these (they aren't AI-generated, and
+      // we want a real summary the next time the key is configured).
+      for (const i of toGenerate) {
+        summaries.push({ id: i.id, summary: fallbackTrim(i.text) });
+      }
+      return NextResponse.json({ summaries });
+    }
+
+    const numbered = toGenerate
       .map((i, idx) => `${idx + 1}. ${i.text.slice(0, 800)}`)
       .join("\n");
 
@@ -64,9 +95,10 @@ ${numbered}`,
     });
 
     if (!response.ok) {
-      return NextResponse.json({
-        summaries: valid.map((i) => ({ id: i.id, summary: fallbackTrim(i.text) })),
-      });
+      for (const i of toGenerate) {
+        summaries.push({ id: i.id, summary: fallbackTrim(i.text) });
+      }
+      return NextResponse.json({ summaries });
     }
 
     const data = await response.json();
@@ -79,13 +111,25 @@ ${numbered}`,
       parsed = [];
     }
 
-    const summaries = valid.map((i, idx) => ({
-      id: i.id,
-      summary: (parsed[idx] || fallbackTrim(i.text)).trim(),
-    }));
+    // Persist new summaries in parallel — don't block the response on
+    // it, but await them so callers see the cache populated immediately.
+    await Promise.all(
+      toGenerate.map(async (i, idx) => {
+        const summary = (parsed[idx] || fallbackTrim(i.text)).trim();
+        summaries.push({ id: i.id, summary });
+        try {
+          await saveMeetingSummary(i.id, summary);
+        } catch {
+          // Swallow persistence errors — the client still gets the
+          // summary back, we just may regenerate it next time.
+        }
+      })
+    );
+
     return NextResponse.json({ summaries });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

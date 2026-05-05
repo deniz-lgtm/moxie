@@ -222,6 +222,11 @@ export type DbWorkOrderAnnotation = {
   ai_priority: string | null;
   ai_title: string | null;
   ai_classified_at: string | null;
+  // Cached output of /api/maintenance/summarize — see
+  // 20260505_work_order_meeting_summaries.sql. Persists the
+  // meeting-agenda headline so it isn't regenerated per browser.
+  meeting_summary: string | null;
+  meeting_summary_at: string | null;
   created_at: string;
   updated_at: string;
 };
