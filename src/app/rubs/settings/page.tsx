@@ -602,6 +602,7 @@ function MappingForm({
   const [splitMethod, setSplitMethod] = useState<SplitMethod>(existing?.splitMethod || "sqft");
   const [meterId, setMeterId] = useState(existing?.meterId || prefill?.meterId || "");
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set(existing?.unitIds || []));
+  const [ownerAbsorbsVacancy, setOwnerAbsorbsVacancy] = useState<boolean>(existing?.ownerAbsorbsVacancy ?? false);
 
   const propUnits = units.filter((u) => u.propertyName === propertyName);
 
@@ -629,6 +630,7 @@ function MappingForm({
       meterId,
       unitIds: Array.from(selectedUnitIds),
       splitMethod,
+      ownerAbsorbsVacancy,
     };
     onSave(mapping);
   }
@@ -695,6 +697,21 @@ function MappingForm({
             onChange={(e) => setMeterId(e.target.value)}
             className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
           />
+        </div>
+        <div className="md:col-span-2">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={ownerAbsorbsVacancy}
+              onChange={(e) => setOwnerAbsorbsVacancy(e.target.checked)}
+              className="rounded"
+            />
+            <span>Owner absorbs vacant-unit share</span>
+          </label>
+          <p className="text-xs text-muted-foreground mt-1 ml-6">
+            When checked, vacant units are excluded from the split — the owner pays
+            their share instead of redistributing it across the remaining tenants.
+          </p>
         </div>
       </div>
 

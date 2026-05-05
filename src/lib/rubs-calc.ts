@@ -18,8 +18,15 @@ export function calculateAllocations(input: CalcInput): RubsAllocation[] {
   const { totalAmount, mapping, units, splitMethod } = input;
   const method = splitMethod || mapping.splitMethod;
 
-  // Filter to units assigned to this meter
-  const assignedUnits = units.filter((u) => mapping.unitIds.includes(u.id));
+  // Filter to units assigned to this meter, optionally dropping vacant ones
+  // so the owner absorbs their share instead of redistributing to tenants.
+  let assignedUnits = units.filter((u) => mapping.unitIds.includes(u.id));
+  if (mapping.ownerAbsorbsVacancy) {
+    const occupied = assignedUnits.filter((u) => countOccupants(u) > 0);
+    // Only filter when at least one occupied unit exists; otherwise the
+    // bill would have nowhere to go and we'd return [].
+    if (occupied.length > 0) assignedUnits = occupied;
+  }
   if (assignedUnits.length === 0) return [];
 
   // Calculate raw shares based on method

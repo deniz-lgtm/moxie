@@ -44,6 +44,7 @@ function mappingToDb(m: MeterMapping): Omit<DbMeterMapping, "created_at" | "upda
     unit_ids: m.unitIds,
     split_method: m.splitMethod,
     custom_shares: m.customShares || null,
+    owner_absorbs_vacancy: m.ownerAbsorbsVacancy ?? null,
   };
 }
 
@@ -57,6 +58,7 @@ function mappingFromDb(row: DbMeterMapping): MeterMapping {
     unitIds: row.unit_ids || [],
     splitMethod: row.split_method,
     customShares: row.custom_shares || undefined,
+    ownerAbsorbsVacancy: row.owner_absorbs_vacancy ?? undefined,
   };
 }
 

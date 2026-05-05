@@ -107,6 +107,7 @@ export type DbMeterMapping = {
   unit_ids: string[];
   split_method: "sqft" | "occupancy" | "equal" | "custom";
   custom_shares: Record<string, number> | null;
+  owner_absorbs_vacancy: boolean | null;
   created_at: string;
   updated_at: string;
 };
