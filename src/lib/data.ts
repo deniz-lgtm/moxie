@@ -1092,42 +1092,28 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
   const moxie = await filterToPortfolio(rows, portfolioId);
   if (moxie.length === 0) return null;
 
-  // Try a set of candidate group-id field names (AppFolio v2 column names
-  // vary by account). We prefer the one that actually has a value.
-  const groupIdCandidates = [
-    "rental_application_group_id",
-    "rental_application_id",
-    "application_group_id",
-    "application_id",
-    "rental_app_id",
-  ];
-  const getGroupId = (r: any): string => {
-    for (const k of groupIdCandidates) {
-      if (r[k] != null && r[k] !== "") return String(r[k]);
+  // Group rows by AppFolio's rental_application_group_id when present.
+  // That column is sparsely populated in practice — only set when AppFolio
+  // explicitly knows two applicants share an application. When empty we
+  // cluster by unit so roommates still group, even though they each have
+  // their own rental_application_id.
+  const groupKey = (r: any): { gid: string; realGroupId?: string } => {
+    const real = pick(r, ["rental_application_group_id", "application_group_id"]);
+    if (real != null && real !== "") {
+      return { gid: `g:${real}`, realGroupId: String(real) };
     }
-    // Last resort: property+unit to keep roommates together, same as the
-    // legacy path. This should only fire if AppFolio changes their column
-    // naming — flagged in the warn below for visibility.
     const propId = pick(r, ["property_id", "PropertyId"]) ?? "";
     const unitId = pick(r, ["unit_id", "UnitId", "unit"]) ?? "";
-    return `fallback:${propId}:${unitId}`;
+    return { gid: `u:${propId}:${unitId}` };
   };
 
-  // Warn once if we had to fall back to the synthetic grouping.
-  const anyFallback = moxie.some((r) => getGroupId(r).startsWith("fallback:"));
-  if (anyFallback) {
-    console.warn(
-      "[applications] rental_application_detail response is missing a group_id column; " +
-        "sample keys:",
-      Object.keys(moxie[0] || {}).slice(0, 30).join(", ")
-    );
-  }
-
   const byGroup = new Map<string, any[]>();
+  const realGroupIds = new Map<string, string | undefined>();
   for (const r of moxie) {
-    const gid = getGroupId(r);
+    const { gid, realGroupId } = groupKey(r);
     if (!byGroup.has(gid)) byGroup.set(gid, []);
     byGroup.get(gid)!.push(r);
+    if (realGroupId && !realGroupIds.get(gid)) realGroupIds.set(gid, realGroupId);
   }
 
   const groups: ApplicationGroup[] = [];
@@ -1156,16 +1142,36 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
         "Status",
         "status",
       ]);
+      const rentalAppId = pick(r, ["rental_application_id", "application_id", "rental_app_id"]);
+      const tenantId = pick(r, ["tenant_id", "TenantId", "applicant_id", "rental_applicant_id"]);
+      const screening = pick(r, [
+        "screening_status",
+        "ScreeningStatus",
+        "rental_application_screening_status",
+        "background_check_status",
+        "screening",
+      ]);
+      const leadSource = pick(r, ["lead_source", "LeadSource", "source"]);
+      const desiredMoveIn = pick(r, [
+        "desired_move_in",
+        "desired_move_in_date",
+        "move_in",
+        "MoveInDate",
+      ]);
+      const received = pick(r, [
+        "received_at",
+        "rental_application_received_date",
+        "submitted_at",
+        "application_date",
+        "ApplicationDate",
+        "created_at",
+        "CreatedAt",
+      ]);
       return {
-        id: String(
-          pick(r, [
-            "applicant_id",
-            "rental_applicant_id",
-            "tenant_id",
-            "TenantId",
-          ]) ?? `${gid}-${i}`
-        ),
+        id: String(rentalAppId ?? tenantId ?? `${gid}-${i}`),
         groupId: gid,
+        rentalApplicationId: rentalAppId != null ? String(rentalAppId) : undefined,
+        tenantId: tenantId != null ? String(tenantId) : undefined,
         name: String(name || "Unknown"),
         email: String(pick(r, ["email", "Email", "applicant_email", "tenant_email"]) ?? ""),
         phone:
@@ -1179,15 +1185,12 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
           normalizeAppStatus(appStatus) === "approved"
             ? "complete"
             : "in_progress",
-        startedAt: String(
-          pick(r, [
-            "submitted_at",
-            "application_date",
-            "ApplicationDate",
-            "created_at",
-            "CreatedAt",
-          ]) ?? new Date().toISOString()
-        ),
+        applicationStatus: appStatus != null ? String(appStatus) : undefined,
+        screeningStatus: screening != null ? String(screening) : undefined,
+        leadSource: leadSource != null ? String(leadSource) : undefined,
+        desiredMoveIn: desiredMoveIn != null ? String(desiredMoveIn) : undefined,
+        receivedAt: received != null ? String(received) : undefined,
+        startedAt: String(received ?? new Date().toISOString()),
       };
     });
 
@@ -1202,14 +1205,17 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
     const monthlyRent =
       rawRent != null && rawRent !== "" && !isNaN(Number(rawRent)) ? Number(rawRent) : 0;
 
+    const groupDesiredMoveIn = applicants.find((a) => a.desiredMoveIn)?.desiredMoveIn;
     groups.push({
       id: gid,
+      rentalApplicationGroupId: realGroupIds.get(gid),
+      unitId: pick(first, ["unit_id", "UnitId"]) ? String(pick(first, ["unit_id", "UnitId"])) : undefined,
       propertyId: String(pick(first, ["property_id", "PropertyId"]) ?? ""),
       propertyName: String(pick(first, ["property_name", "PropertyName"]) ?? ""),
       unitNumber: String(unitName),
       unitDetails: "",
       leaseCycle: "fall_2026",
-      targetMoveIn: "08/15/2026",
+      targetMoveIn: groupDesiredMoveIn || "08/15/2026",
       monthlyRent,
       applicants,
       status: normalizeAppStatus(rawStatus),
