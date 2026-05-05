@@ -1130,11 +1130,22 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
 
     // Each row is one applicant on the application. Build Applicant[].
     const applicants: Applicant[] = rowsInGroup.map((r, i) => {
-      const name =
-        pick(r, ["applicant_name", "tenant_name", "TenantName", "Name"]) ??
-        [pick(r, ["applicant_first_name", "first_name"]), pick(r, ["applicant_last_name", "last_name"])]
-          .filter(Boolean)
-          .join(" ");
+      // AppFolio's report column "Applicant(s)" comes back as `applicants`.
+      // We try a wide list of candidates because the exact key drifts
+      // between report versions / accounts.
+      const directName = pick(r, [
+        "applicants",
+        "applicant_name",
+        "applicant",
+        "tenant_name",
+        "TenantName",
+        "name",
+        "Name",
+      ]);
+      const first = pick(r, ["applicant_first_name", "first_name", "FirstName"]);
+      const last = pick(r, ["applicant_last_name", "last_name", "LastName"]);
+      const composed = [first, last].filter(Boolean).join(" ");
+      const name = directName || composed;
       const appStatus = pick(r, [
         "application_status",
         "rental_application_status",
@@ -1263,19 +1274,34 @@ async function fetchApplicationsFromTenantDirectory(portfolioId: string): Promis
     );
     const groupId = `grp-${key || idx}`;
 
-    const applicants: Applicant[] = members.map((m: any, i: number) => ({
-      id: String(m.TenantId || m.tenant_id || `${groupId}-${i}`),
-      groupId,
-      name: String(m.TenantName || m.tenant_name || m.Name || "Unknown"),
-      email: String(m.Email || m.TenantEmail || m.email || ""),
-      phone: m.Phone || m.TenantPhone || m.phone || undefined,
-      role: (i === 0 ? "primary" : "co_applicant") as ApplicantRole,
-      steps: buildApplicantSteps(m, groupId, i),
-      documents: [],
-      nudges: [],
-      status: "in_progress",
-      startedAt: m.ApplicationDate || m.application_date || m.CreatedAt || new Date().toISOString(),
-    }));
+    const applicants: Applicant[] = members.map((m: any, i: number) => {
+      const directName = pick(m, [
+        "TenantName",
+        "tenant_name",
+        "Name",
+        "name",
+        "applicants",
+        "applicant_name",
+      ]);
+      const fname = pick(m, ["FirstName", "first_name"]);
+      const lname = pick(m, ["LastName", "last_name"]);
+      const composed = [fname, lname].filter(Boolean).join(" ");
+      return {
+        id: String(m.TenantId || m.tenant_id || `${groupId}-${i}`),
+        groupId,
+        tenantId: m.TenantId ? String(m.TenantId) : m.tenant_id ? String(m.tenant_id) : undefined,
+        name: String(directName || composed || "Unknown"),
+        email: String(m.Email || m.TenantEmail || m.email || ""),
+        phone: m.Phone || m.TenantPhone || m.phone || undefined,
+        role: (i === 0 ? "primary" : "co_applicant") as ApplicantRole,
+        steps: buildApplicantSteps(m, groupId, i),
+        documents: [],
+        nudges: [],
+        status: "in_progress",
+        applicationStatus: m.TenantStatus || m.tenant_status || m.Status || undefined,
+        startedAt: m.ApplicationDate || m.application_date || m.CreatedAt || new Date().toISOString(),
+      };
+    });
 
     const rawStatus =
       members.find((m) => m.TenantStatus || m.tenant_status || m.Status)?.TenantStatus ??
