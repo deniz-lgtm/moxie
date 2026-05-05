@@ -431,6 +431,10 @@ export interface Nudge {
 export interface Applicant {
   id: string;
   groupId: string;
+  // AppFolio's per-applicant rental_application_id — what we target when
+  // nudging a single person in a group whose roommates are already done.
+  rentalApplicationId?: string;
+  tenantId?: string;
   name: string;
   email: string;
   phone?: string;
@@ -440,12 +444,21 @@ export interface Applicant {
   documents: DocumentUpload[];
   nudges: Nudge[];
   status: "not_started" | "in_progress" | "complete";
+  applicationStatus?: string;
+  screeningStatus?: string;
+  leadSource?: string;
+  desiredMoveIn?: string;
+  receivedAt?: string;
   startedAt?: string;
   completedAt?: string;
 }
 
 export interface ApplicationGroup {
   id: string;
+  // AppFolio's rental_application_group_id when present; otherwise we
+  // synthesize one from unit_id so roommates still cluster.
+  rentalApplicationGroupId?: string;
+  unitId?: string;
   propertyId: string;
   propertyName: string;
   unitNumber: string;
