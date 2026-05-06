@@ -26,6 +26,7 @@ import type {
   Applicant,
   ApplicantRole,
   ApplicantStep,
+  StepStatus,
   ApplicationGroup,
   ApplicationGroupStatus,
   AcademicYear,
@@ -1033,49 +1034,72 @@ function normalizeAppStatus(raw: unknown): ApplicationGroupStatus {
   return "incomplete";
 }
 
-function normalizeApplicantStepFromScreening(raw: unknown): "complete" | "in_review" | "pending" {
-  const s = String(raw ?? "").toLowerCase();
-  if (/complete|passed|approved|cleared/.test(s)) return "complete";
-  if (/review|pending|processing/.test(s)) return "in_review";
-  return "pending";
-}
-
+// Build the only real "steps" we can know from AppFolio's
+// rental_application_detail report: did we receive the application, has
+// screening run, and has a decision been made. Anything beyond that
+// (income docs, lease signing) isn't carried by this report, so we don't
+// fabricate it.
 function buildApplicantSteps(row: any, groupKey: string, idx: number): ApplicantStep[] {
-  const screeningStatus =
+  const received = pick(row, [
+    "received_at",
+    "rental_application_received_date",
+    "submitted_at",
+    "application_date",
+    "ApplicationDate",
+    "created_at",
+    "CreatedAt",
+  ]);
+  const screeningRaw = String(
     pick(row, [
       "screening_status",
       "ScreeningStatus",
       "background_check_status",
       "rental_application_screening_status",
-    ]) ?? "";
+      "screening",
+    ]) ?? ""
+  ).toLowerCase();
+  const decisionRaw = String(
+    pick(row, [
+      "application_status",
+      "rental_application_status",
+      "tenant_status",
+      "Status",
+      "status",
+    ]) ?? ""
+  ).toLowerCase();
+
+  const screeningStatus: StepStatus = /done|complete|passed|cleared/.test(screeningRaw)
+    ? "complete"
+    : screeningRaw
+      ? "in_review"
+      : "pending";
+  const decisionStatus: StepStatus = /approved|converted/.test(decisionRaw)
+    ? "complete"
+    : /denied|rejected|cancelled|canceled|withdrawn/.test(decisionRaw)
+      ? "rejected"
+      : "pending";
+
   return [
     {
       id: `${groupKey}-s${idx}-1`,
-      name: "Application Submitted",
-      description: "Complete online application",
+      name: "Application received",
+      description: received ? `Received ${String(received)}` : "Awaiting submission",
       required: true,
-      status: "complete",
+      status: received ? "complete" : "pending",
     },
     {
       id: `${groupKey}-s${idx}-2`,
-      name: "Background Check",
-      description: "Credit and background screening",
+      name: "Screening",
+      description: screeningRaw ? `Reported as "${screeningRaw}"` : "Not reported by AppFolio",
       required: true,
-      status: normalizeApplicantStepFromScreening(screeningStatus),
+      status: screeningStatus,
     },
     {
       id: `${groupKey}-s${idx}-3`,
-      name: "Income Verification",
-      description: "Verify income documentation",
+      name: "Decision",
+      description: decisionRaw ? `Application status: ${decisionRaw}` : "No decision yet",
       required: true,
-      status: "pending",
-    },
-    {
-      id: `${groupKey}-s${idx}-4`,
-      name: "Lease Signing",
-      description: "Sign the lease agreement",
-      required: true,
-      status: "pending",
+      status: decisionStatus,
     },
   ];
 }
@@ -1236,7 +1260,7 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
       unitNumber: String(unitName),
       unitDetails: "",
       leaseCycle: "fall_2026",
-      targetMoveIn: groupDesiredMoveIn || "08/15/2026",
+      targetMoveIn: groupDesiredMoveIn || "",
       monthlyRent,
       applicants,
       status: normalizeAppStatus(rawStatus),
@@ -1349,7 +1373,7 @@ async function fetchApplicationsFromTenantDirectory(portfolioId: string): Promis
       unitNumber: unitName,
       unitDetails: "",
       leaseCycle: "fall_2026",
-      targetMoveIn: "08/15/2026",
+      targetMoveIn: "",
       monthlyRent: 0,
       applicants,
       status: normalizeAppStatus(rawStatus),
