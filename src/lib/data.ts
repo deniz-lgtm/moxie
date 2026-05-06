@@ -1101,14 +1101,18 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
   // applications, not one party of 18.
   const groupKey = (r: any): { gid: string; realGroupId?: string } => {
     const real = pick(r, ["rental_application_group_id", "application_group_id"]);
-    if (real != null && real !== "") {
-      return { gid: `g:${real}`, realGroupId: String(real) };
+    // AppFolio sometimes returns 0 / "0" / "null" as a placeholder for "no
+    // group" — guard against treating those as real shared group ids,
+    // otherwise dozens of unrelated solo applications collapse into one
+    // fake "group of N".
+    const realStr = real == null ? "" : String(real).trim();
+    if (realStr && realStr !== "0" && realStr.toLowerCase() !== "null") {
+      return { gid: `g:${realStr}`, realGroupId: realStr };
     }
     const rentalAppId = pick(r, ["rental_application_id", "application_id", "rental_app_id"]);
-    if (rentalAppId != null && rentalAppId !== "") {
+    if (rentalAppId != null && String(rentalAppId).trim() !== "") {
       return { gid: `a:${rentalAppId}` };
     }
-    // Last resort if AppFolio gave us neither id.
     const tenantId = pick(r, ["tenant_id", "TenantId"]);
     return { gid: `t:${tenantId ?? Math.random().toString(36).slice(2)}` };
   };
