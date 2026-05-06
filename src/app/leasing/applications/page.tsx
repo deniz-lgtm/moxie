@@ -6,29 +6,28 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { ApplicationGroup, Applicant } from "@/lib/types";
 
-// Categorize an applicant by where they are in the funnel. We key nudges
-// off this — a "needs_screening" applicant gets a different push than a
-// "needs_income" one.
+// Categorize an applicant using only real AppFolio fields — application
+// status and screening status. We don't have document/income/lease-step
+// data here, so we don't pretend to.
 function applicantStage(a: Applicant): {
-  key: "approved" | "screening" | "docs" | "started" | "stalled";
+  key: "approved" | "denied" | "screening" | "decision" | "submitted";
   label: string;
 } {
   const status = (a.applicationStatus || "").toLowerCase();
   if (/approved|converted/.test(status)) return { key: "approved", label: "Approved" };
+  if (/denied|rejected|cancelled|canceled|withdrawn/.test(status)) {
+    return { key: "denied", label: status.charAt(0).toUpperCase() + status.slice(1) };
+  }
 
   const screening = (a.screeningStatus || "").toLowerCase();
   if (screening && !/done|complete|passed|cleared/.test(screening)) {
-    return { key: "screening", label: "Screening incomplete" };
+    return { key: "screening", label: `Screening: ${a.screeningStatus}` };
+  }
+  if (screening) {
+    return { key: "decision", label: "Awaiting decision" };
   }
 
-  const docsMissing = a.documents.some((d) => d.status === "missing");
-  if (docsMissing) return { key: "docs", label: "Documents missing" };
-
-  if (a.steps.some((s) => s.status === "pending" && s.required)) {
-    return { key: "started", label: "Steps pending" };
-  }
-
-  return { key: "stalled", label: "Awaiting review" };
+  return { key: "submitted", label: "Submitted" };
 }
 
 function groupCompletion(group: ApplicationGroup): {
@@ -153,27 +152,25 @@ function ApplicationsView() {
   }, [allGroups, filterStatus, filterStage, search]);
 
   const totals = useMemo(() => {
-    let pending = 0;
+    let submitted = 0;
     let screening = 0;
+    let decision = 0;
     let approved = 0;
     for (const g of allGroups) {
       for (const a of g.applicants) {
         const s = applicantStage(a).key;
         if (s === "approved") approved++;
+        else if (s === "decision") decision++;
         else if (s === "screening") screening++;
-        else pending++;
+        else if (s === "submitted") submitted++;
       }
     }
-    return { pending, screening, approved };
+    return { submitted, screening, decision, approved };
   }, [allGroups]);
 
   // ─── Applicant Detail View ───
   if (selectedApplicant && selectedGroup) {
     const stage = applicantStage(selectedApplicant);
-    const completedSteps = selectedApplicant.steps.filter((s) => s.status === "complete").length;
-    const totalSteps = selectedApplicant.steps.length;
-    const pct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
-    const uploadedDocs = selectedApplicant.documents.filter((d) => d.status !== "missing").length;
 
     return (
       <div className="space-y-6">
@@ -189,7 +186,7 @@ function ApplicationsView() {
           <div>
             <h1 className="text-2xl font-bold">{selectedApplicant.name}</h1>
             <p className="text-muted-foreground mt-1">
-              {selectedApplicant.email}
+              {selectedApplicant.email || "—"}
               {selectedApplicant.phone && ` · ${selectedApplicant.phone}`}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -210,42 +207,31 @@ function ApplicationsView() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-card rounded-xl border border-border p-4">
-            <p className="text-sm text-muted-foreground">Steps Complete</p>
-            <p className="text-2xl font-bold mt-1">{completedSteps}/{totalSteps}</p>
-            <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${pct}%` }} />
-            </div>
+            <p className="text-xs text-muted-foreground">Application status</p>
+            <p className="text-sm font-medium mt-1 capitalize">{selectedApplicant.applicationStatus || "—"}</p>
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
-            <p className="text-sm text-muted-foreground">Documents</p>
-            <p className="text-2xl font-bold mt-1">{uploadedDocs}/{selectedApplicant.documents.length}</p>
+            <p className="text-xs text-muted-foreground">Screening</p>
+            <p className="text-sm font-medium mt-1 capitalize">{selectedApplicant.screeningStatus || "—"}</p>
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
-            <p className="text-sm text-muted-foreground">Screening</p>
-            <p className="text-sm font-medium mt-2 capitalize">{selectedApplicant.screeningStatus || "—"}</p>
+            <p className="text-xs text-muted-foreground">Lead source</p>
+            <p className="text-sm font-medium mt-1">{selectedApplicant.leadSource || "—"}</p>
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
-            <p className="text-sm text-muted-foreground">Lead Source</p>
-            <p className="text-sm font-medium mt-2">{selectedApplicant.leadSource || "—"}</p>
+            <p className="text-xs text-muted-foreground">Desired move-in</p>
+            <p className="text-sm font-medium mt-1">{selectedApplicant.desiredMoveIn || "—"}</p>
           </div>
         </div>
 
         <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <div className="p-5 border-b border-border flex items-center justify-between">
-            <h2 className="font-semibold">Application Checklist</h2>
-            <button
-              className="px-3 py-1.5 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
-              disabled={!selectedApplicant.rentalApplicationId}
-              title={
-                selectedApplicant.rentalApplicationId
-                  ? `Send nudge for application ${selectedApplicant.rentalApplicationId}`
-                  : "No rental_application_id available"
-              }
-            >
-              Nudge {selectedApplicant.name.split(" ")[0]}
-            </button>
+          <div className="p-5 border-b border-border">
+            <h2 className="font-semibold">What AppFolio knows</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              These three steps are the only ones we get from the rental_application_detail report. Income docs and lease signing aren't in this feed.
+            </p>
           </div>
           <div className="divide-y divide-border">
             {selectedApplicant.steps.map((step, i) => (
@@ -253,14 +239,14 @@ function ApplicationsView() {
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-sm font-medium ${
                   step.status === "complete" ? "bg-green-100 text-green-700" :
                   step.status === "in_review" ? "bg-purple-100 text-purple-700" :
+                  step.status === "rejected" ? "bg-red-100 text-red-700" :
                   "bg-slate-100 text-slate-500"
                 }`}>
-                  {step.status === "complete" ? "✓" : i + 1}
+                  {step.status === "complete" ? "✓" : step.status === "rejected" ? "✕" : i + 1}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-medium ${step.status === "complete" ? "text-muted-foreground line-through" : ""}`}>
                     {step.name}
-                    {step.required && <span className="text-red-500 ml-1">*</span>}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">{step.description}</p>
                 </div>
@@ -268,34 +254,6 @@ function ApplicationsView() {
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <div className="p-5 border-b border-border">
-            <h2 className="font-semibold">Nudge History</h2>
-          </div>
-          {selectedApplicant.nudges.length > 0 ? (
-            <div className="divide-y divide-border">
-              {selectedApplicant.nudges.map((nudge) => (
-                <div key={nudge.id} className="p-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${nudge.channel === "email" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"}`}>
-                        {nudge.channel.toUpperCase()}
-                      </span>
-                      <StatusBadge value={nudge.status} />
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {nudge.sentAt ? new Date(nudge.sentAt).toLocaleString() : `Scheduled: ${new Date(nudge.scheduledAt).toLocaleString()}`}
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-2">{nudge.message}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-5 text-sm text-muted-foreground">No nudges sent yet.</div>
-          )}
         </div>
       </div>
     );
@@ -320,14 +278,15 @@ function ApplicationsView() {
               {selectedGroup.propertyName} #{selectedGroup.unitNumber}
             </h1>
             <p className="text-muted-foreground mt-1">
-              {selectedGroup.unitDetails || "—"} · ${selectedGroup.monthlyRent.toLocaleString()}/mo
+              {selectedGroup.applicants.length} applicant{selectedGroup.applicants.length === 1 ? "" : "s"}
+              {selectedGroup.monthlyRent > 0 && ` · $${selectedGroup.monthlyRent.toLocaleString()}/mo`}
               {selectedGroup.targetMoveIn && ` · Move-in: ${selectedGroup.targetMoveIn}`}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
               {selectedGroup.rentalApplicationGroupId ? (
                 <span>Group ID: <span className="font-mono">{selectedGroup.rentalApplicationGroupId}</span></span>
               ) : (
-                <span className="italic">No AppFolio group_id — clustered by unit</span>
+                <span className="italic">Solo application (no AppFolio group_id)</span>
               )}
               {selectedGroup.unitId && (
                 <span>Unit ID: <span className="font-mono">{selectedGroup.unitId}</span></span>
@@ -363,16 +322,8 @@ function ApplicationsView() {
         </div>
 
         <div className="bg-card rounded-xl border border-border overflow-hidden">
-          <div className="p-5 border-b border-border flex items-center justify-between">
+          <div className="p-5 border-b border-border">
             <h2 className="font-semibold">Applicants ({selectedGroup.applicants.length})</h2>
-            {blockers.length > 0 && (
-              <button
-                className="px-3 py-1.5 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
-                title={`Send nudge to ${blockers.length} applicant${blockers.length === 1 ? "" : "s"} who are behind`}
-              >
-                Nudge {blockers.length} behind
-              </button>
-            )}
           </div>
           <div className="divide-y divide-border">
             {selectedGroup.applicants.map((a) => {
@@ -387,8 +338,9 @@ function ApplicationsView() {
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                         stage.key === "approved" ? "bg-green-100 text-green-700" :
+                        stage.key === "denied" ? "bg-red-100 text-red-700" :
                         stage.key === "screening" ? "bg-amber-100 text-amber-700" :
-                        stage.key === "docs" ? "bg-red-100 text-red-700" :
+                        stage.key === "decision" ? "bg-purple-100 text-purple-700" :
                         "bg-slate-100 text-slate-700"
                       }`}>
                         {a.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
@@ -423,18 +375,22 @@ function ApplicationsView() {
       <div>
         <h1 className="text-2xl font-bold">Applications</h1>
         <p className="text-muted-foreground mt-1">
-          Track rental applications by unit and group, and nudge individual applicants who are behind.
+          Active rental applications grouped by AppFolio rental_application_group_id. Approved applications and units that are already leased are hidden by default.
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-card rounded-xl border border-border p-4">
-          <p className="text-sm text-muted-foreground">Pending applicants</p>
-          <p className="text-2xl font-bold mt-1">{totals.pending}</p>
+          <p className="text-sm text-muted-foreground">Submitted</p>
+          <p className="text-2xl font-bold mt-1">{totals.submitted}</p>
         </div>
         <div className="bg-card rounded-xl border border-border p-4">
           <p className="text-sm text-muted-foreground">In screening</p>
           <p className="text-2xl font-bold mt-1">{totals.screening}</p>
+        </div>
+        <div className="bg-card rounded-xl border border-border p-4">
+          <p className="text-sm text-muted-foreground">Awaiting decision</p>
+          <p className="text-2xl font-bold mt-1">{totals.decision}</p>
         </div>
         <div className="bg-card rounded-xl border border-border p-4">
           <p className="text-sm text-muted-foreground">Approved</p>
@@ -467,10 +423,11 @@ function ApplicationsView() {
           className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">Any Stage</option>
-          <option value="screening">Has screening incomplete</option>
-          <option value="docs">Has missing documents</option>
-          <option value="started">Has steps pending</option>
-          <option value="approved">Has approved</option>
+          <option value="submitted">Submitted, no screening yet</option>
+          <option value="screening">Screening incomplete</option>
+          <option value="decision">Awaiting decision</option>
+          <option value="approved">Approved</option>
+          <option value="denied">Denied / withdrawn</option>
         </select>
         <label className="flex items-center gap-2 text-sm text-muted-foreground border border-border rounded-lg px-3 py-2 bg-card cursor-pointer">
           <input
@@ -533,8 +490,9 @@ function ApplicationsView() {
                         <span
                           className={`px-2 py-0.5 rounded-full whitespace-nowrap ${
                             stage.key === "approved" ? "bg-green-100 text-green-700" :
+                            stage.key === "denied" ? "bg-red-100 text-red-700" :
                             stage.key === "screening" ? "bg-amber-100 text-amber-700" :
-                            stage.key === "docs" ? "bg-red-100 text-red-700" :
+                            stage.key === "decision" ? "bg-purple-100 text-purple-700" :
                             "bg-slate-100 text-slate-700"
                           }`}
                         >
