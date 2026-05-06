@@ -1092,19 +1092,25 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
   const moxie = await filterToPortfolio(rows, portfolioId);
   if (moxie.length === 0) return null;
 
-  // Group rows by AppFolio's rental_application_group_id when present.
-  // That column is sparsely populated in practice — only set when AppFolio
-  // explicitly knows two applicants share an application. When empty we
-  // cluster by unit so roommates still group, even though they each have
-  // their own rental_application_id.
+  // Group strictly by rental_application_group_id. AppFolio sets that only
+  // when they explicitly know two applicants share an application — i.e.
+  // co-applicants on the same lease. Solo applicants get their own group
+  // keyed by their per-applicant rental_application_id, even when several
+  // unrelated solo applications exist for the same unit. Lumping them by
+  // unit was wrong: 18 individuals competing for one unit are 18
+  // applications, not one party of 18.
   const groupKey = (r: any): { gid: string; realGroupId?: string } => {
     const real = pick(r, ["rental_application_group_id", "application_group_id"]);
     if (real != null && real !== "") {
       return { gid: `g:${real}`, realGroupId: String(real) };
     }
-    const propId = pick(r, ["property_id", "PropertyId"]) ?? "";
-    const unitId = pick(r, ["unit_id", "UnitId", "unit"]) ?? "";
-    return { gid: `u:${propId}:${unitId}` };
+    const rentalAppId = pick(r, ["rental_application_id", "application_id", "rental_app_id"]);
+    if (rentalAppId != null && rentalAppId !== "") {
+      return { gid: `a:${rentalAppId}` };
+    }
+    // Last resort if AppFolio gave us neither id.
+    const tenantId = pick(r, ["tenant_id", "TenantId"]);
+    return { gid: `t:${tenantId ?? Math.random().toString(36).slice(2)}` };
   };
 
   const byGroup = new Map<string, any[]>();
@@ -1243,7 +1249,31 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
     });
   }
 
-  return groups;
+  // Per-unit dedup: once any application on a unit is approved/converted,
+  // the unit is taken — every other application on that same unit is no
+  // longer eligible. Drop them so the page only shows live competition
+  // for units that haven't been won yet. ("Converted" in AppFolio means
+  // the applicant rolled into a tenant — a lease has been signed.)
+  const wonUnits = new Set<string>();
+  for (const g of groups) {
+    if (!g.unitId) continue;
+    const won = g.applicants.some((a) => {
+      const s = (a.applicationStatus || "").toLowerCase();
+      return /approved|converted/.test(s);
+    });
+    if (won) wonUnits.add(g.unitId);
+  }
+  const filtered = groups.filter((g) => {
+    if (!g.unitId || !wonUnits.has(g.unitId)) return true;
+    // Keep only the winning group on a won unit so the UI can still show
+    // who got it. Other competing applications drop out.
+    return g.applicants.some((a) => {
+      const s = (a.applicationStatus || "").toLowerCase();
+      return /approved|converted/.test(s);
+    });
+  });
+
+  return filtered;
 }
 
 async function fetchApplicationsFromTenantDirectory(portfolioId: string): Promise<ApplicationGroup[]> {
