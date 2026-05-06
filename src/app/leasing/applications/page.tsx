@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { usePortfolio } from "@/contexts/PortfolioContext";
 import type { ApplicationGroup, Applicant } from "@/lib/types";
@@ -58,15 +59,57 @@ function isClosedGroup(group: ApplicationGroup): boolean {
 }
 
 export default function ApplicationsPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-muted-foreground">Loading…</div>}>
+      <ApplicationsView />
+    </Suspense>
+  );
+}
+
+function ApplicationsView() {
   const { portfolioId } = usePortfolio();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [allGroups, setAllGroups] = useState<ApplicationGroup[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<ApplicationGroup | null>(null);
-  const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterStage, setFilterStage] = useState<string>("all");
   const [showClosed, setShowClosed] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // Selection lives in the URL so the browser back button traverses
+  // applicant → group → list naturally instead of jumping all the way
+  // out of the page.
+  const selectedGroupId = searchParams.get("group");
+  const selectedApplicantId = searchParams.get("applicant");
+  const selectedGroup = useMemo(
+    () => (selectedGroupId ? allGroups.find((g) => g.id === selectedGroupId) ?? null : null),
+    [allGroups, selectedGroupId]
+  );
+  const selectedApplicant = useMemo(
+    () =>
+      selectedGroup && selectedApplicantId
+        ? selectedGroup.applicants.find((a) => a.id === selectedApplicantId) ?? null
+        : null,
+    [selectedGroup, selectedApplicantId]
+  );
+
+  const navigate = useCallback(
+    (params: { group?: string | null; applicant?: string | null }) => {
+      const next = new URLSearchParams(searchParams.toString());
+      if ("group" in params) {
+        if (params.group) next.set("group", params.group);
+        else next.delete("group");
+      }
+      if ("applicant" in params) {
+        if (params.applicant) next.set("applicant", params.applicant);
+        else next.delete("applicant");
+      }
+      const qs = next.toString();
+      router.push(qs ? `?${qs}` : "?");
+    },
+    [router, searchParams]
+  );
 
   useEffect(() => {
     fetch(`/api/appfolio/applications?portfolio_id=${portfolioId}`)
@@ -79,14 +122,6 @@ export default function ApplicationsPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [portfolioId]);
-
-  // Refresh selected group reference when underlying data changes.
-  useEffect(() => {
-    if (selectedGroup) {
-      const fresh = allGroups.find((g) => g.id === selectedGroup.id);
-      if (fresh && fresh !== selectedGroup) setSelectedGroup(fresh);
-    }
-  }, [allGroups, selectedGroup]);
 
   const closedCount = useMemo(
     () => allGroups.filter(isClosedGroup).length,
@@ -143,7 +178,7 @@ export default function ApplicationsPage() {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-2 text-sm">
-          <button onClick={() => setSelectedApplicant(null)} className="text-accent hover:underline">
+          <button onClick={() => navigate({ applicant: null })} className="text-accent hover:underline">
             &larr; {selectedGroup.propertyName} #{selectedGroup.unitNumber}
           </button>
           <span className="text-muted-foreground">/</span>
@@ -273,7 +308,7 @@ export default function ApplicationsPage() {
     return (
       <div className="space-y-6">
         <button
-          onClick={() => { setSelectedGroup(null); setSelectedApplicant(null); }}
+          onClick={() => navigate({ group: null, applicant: null })}
           className="text-sm text-accent hover:underline"
         >
           &larr; Back to Applications
@@ -345,7 +380,7 @@ export default function ApplicationsPage() {
               return (
                 <button
                   key={a.id}
-                  onClick={() => setSelectedApplicant(a)}
+                  onClick={() => navigate({ applicant: a.id })}
                   className="w-full text-left p-4 hover:bg-muted/50 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center justify-between">
@@ -456,7 +491,7 @@ export default function ApplicationsPage() {
             return (
               <button
                 key={group.id}
-                onClick={() => setSelectedGroup(group)}
+                onClick={() => navigate({ group: group.id })}
                 className="w-full text-left bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow cursor-pointer"
               >
                 <div className="flex items-start justify-between gap-4">
