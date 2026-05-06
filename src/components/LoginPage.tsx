@@ -50,7 +50,7 @@ export function LoginPage() {
           </button>
 
           <p className="text-xs text-muted-foreground text-center">
-            Only @bramanagement.com and @moxieusc.com accounts can sign in.
+            Only @bradmanagement.com and @moxieusc.com accounts can sign in.
           </p>
         </div>
 

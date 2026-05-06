@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import type { User, Session } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 
-const ALLOWED_EMAIL_DOMAINS = ["bramanagement.com", "moxieusc.com"];
+const ALLOWED_EMAIL_DOMAINS = ["bradmanagement.com", "moxieusc.com"];
 
 function isAllowedEmail(email: string | undefined | null): boolean {
   if (!email) return false;
@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(null);
         setUser(null);
         setAuthError(
-          "Your account isn't authorized for Moxie. Sign in with a @bramanagement.com or @moxieusc.com address."
+          "Your account isn't authorized for Moxie. Sign in with a @bradmanagement.com or @moxieusc.com address."
         );
         return;
       }
