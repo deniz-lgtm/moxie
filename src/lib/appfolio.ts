@@ -217,13 +217,28 @@ export async function getRentRoll(propertyId?: string) {
 
 // --- Rental Applications (v2 rental_application_detail) ---
 // One row per applicant, with a rental_application_id / group reference
-// that's stable across syncs — which `tenant_directory?status=applicant`
-// doesn't give us. Caller should treat a 404/empty response as "fall
-// back to tenant_directory".
-export async function getRentalApplications(propertyId?: string) {
+// that's stable across syncs.
+//
+// AppFolio v2 requires `from_date` on this report and rejects calls that
+// omit it with a misleading 400 "Id is not a valid report" error. We
+// default to ~2 years back so we capture the full active leasing window
+// without forcing every caller to think about it.
+export async function getRentalApplications(opts?: {
+  propertyId?: string;
+  fromDate?: string;
+  toDate?: string;
+}) {
   const body: Record<string, string> = {};
-  if (propertyId) body.property_id = propertyId;
+  if (opts?.propertyId) body.property_id = opts.propertyId;
+  body.from_date = opts?.fromDate ?? defaultRentalAppFromDate();
+  if (opts?.toDate) body.to_date = opts.toDate;
   return appfolioFetchAll("/reports/rental_application_detail.json", body);
+}
+
+function defaultRentalAppFromDate(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 2);
+  return d.toISOString().slice(0, 10);
 }
 
 // --- Aged Receivables ---
