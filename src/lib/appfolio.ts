@@ -215,7 +215,7 @@ export async function getRentRoll(propertyId?: string) {
   return appfolioFetchAll("/reports/rent_roll.json", body);
 }
 
-// --- Rental Applications (v2 rental_application_detail) ---
+// --- Rental Applications (v2 rental_applications) ---
 // One row per applicant, with a rental_application_id / group reference
 // that's stable across syncs.
 //
@@ -223,6 +223,10 @@ export async function getRentRoll(propertyId?: string) {
 // omit it with a misleading 400 "Id is not a valid report" error. We
 // default to ~2 years back so we capture the full active leasing window
 // without forcing every caller to think about it.
+//
+// NOTE: the report id is `rental_applications`, not `rental_application_detail`
+// (an earlier version of this code called the wrong endpoint and the
+// 400 was misread as a credentials problem).
 export async function getRentalApplications(opts?: {
   propertyId?: string;
   fromDate?: string;
@@ -232,7 +236,7 @@ export async function getRentalApplications(opts?: {
   if (opts?.propertyId) body.property_id = opts.propertyId;
   body.from_date = opts?.fromDate ?? defaultRentalAppFromDate();
   if (opts?.toDate) body.to_date = opts.toDate;
-  return appfolioFetchAll("/reports/rental_application_detail.json", body);
+  return appfolioFetchAll("/reports/rental_applications.json", body);
 }
 
 function defaultRentalAppFromDate(): string {
