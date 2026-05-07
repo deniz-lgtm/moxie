@@ -151,12 +151,15 @@ function ApplicationsView() {
     });
   }, [allGroups, filterStatus, filterStage, search]);
 
+  // Counts reflect the visible/filtered set — otherwise stats include
+  // closed and leased applications that the list deliberately hides,
+  // which produces "Approved: 30" while zero approved cards are shown.
   const totals = useMemo(() => {
     let submitted = 0;
     let screening = 0;
     let decision = 0;
     let approved = 0;
-    for (const g of allGroups) {
+    for (const g of filtered) {
       for (const a of g.applicants) {
         const s = applicantStage(a).key;
         if (s === "approved") approved++;
@@ -166,7 +169,7 @@ function ApplicationsView() {
       }
     }
     return { submitted, screening, decision, approved };
-  }, [allGroups]);
+  }, [filtered]);
 
   // ─── Applicant Detail View ───
   if (selectedApplicant && selectedGroup) {

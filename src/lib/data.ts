@@ -1304,98 +1304,13 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
   return filtered;
 }
 
-async function fetchApplicationsFromTenantDirectory(portfolioId: string): Promise<ApplicationGroup[]> {
-  // Legacy fallback: pull applicants from tenant_directory and group by
-  // unit. The group id is synthetic — the *first* PR (#52) tries the
-  // dedicated rental_application_detail report before this, so this path
-  // only fires if the dedicated report is unavailable on the account.
-  const allTenants = await afGetTenants({ status: "applicant" }).catch(() => [] as any[]);
-  const tenants = await filterToPortfolio(allTenants || [], portfolioId);
-
-  const groupMap = new Map<string, any[]>();
-  for (const t of tenants) {
-    const unitKey = String(
-      t.UnitStreetAddress1 || t["Unit Street Address 1"] || t.UnitId || t.Unit || ""
-    );
-    const key = `${t.PropertyId || t.property_id || ""}:${unitKey}`;
-    if (!groupMap.has(key)) groupMap.set(key, []);
-    groupMap.get(key)!.push(t);
-  }
-
-  const groups: ApplicationGroup[] = [];
-  let idx = 0;
-  for (const [key, members] of groupMap) {
-    idx++;
-    const first = members[0];
-    const unitName = String(
-      first.UnitStreetAddress1 || first["Unit Street Address 1"] || first.Unit || first.UnitName || ""
-    );
-    const groupId = `grp-${key || idx}`;
-
-    const applicants: Applicant[] = members.map((m: any, i: number) => {
-      const directName = pick(m, [
-        "TenantName",
-        "tenant_name",
-        "Name",
-        "name",
-        "applicants",
-        "applicant_name",
-      ]);
-      const fname = pick(m, ["FirstName", "first_name"]);
-      const lname = pick(m, ["LastName", "last_name"]);
-      const composed = [fname, lname].filter(Boolean).join(" ");
-      return {
-        id: String(m.TenantId || m.tenant_id || `${groupId}-${i}`),
-        groupId,
-        tenantId: m.TenantId ? String(m.TenantId) : m.tenant_id ? String(m.tenant_id) : undefined,
-        name: String(directName || composed || "Unknown"),
-        email: String(m.Email || m.TenantEmail || m.email || ""),
-        phone: m.Phone || m.TenantPhone || m.phone || undefined,
-        role: (i === 0 ? "primary" : "co_applicant") as ApplicantRole,
-        steps: buildApplicantSteps(m, groupId, i),
-        documents: [],
-        nudges: [],
-        status: "in_progress",
-        applicationStatus: m.TenantStatus || m.tenant_status || m.Status || undefined,
-        startedAt: m.ApplicationDate || m.application_date || m.CreatedAt || new Date().toISOString(),
-      };
-    });
-
-    const rawStatus =
-      members.find((m) => m.TenantStatus || m.tenant_status || m.Status)?.TenantStatus ??
-      members[0].tenant_status ??
-      members[0].Status;
-
-    groups.push({
-      id: groupId,
-      propertyId: String(first.PropertyId || first.property_id || ""),
-      propertyName: String(first.PropertyName || first.property_name || ""),
-      unitNumber: unitName,
-      unitDetails: "",
-      leaseCycle: "fall_2026",
-      targetMoveIn: "",
-      monthlyRent: 0,
-      applicants,
-      status: normalizeAppStatus(rawStatus),
-      createdAt: first.ApplicationDate || first.application_date || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  return groups;
-}
-
 export async function fetchApplications(portfolioId?: string): Promise<{
   data: ApplicationGroup[];
   source: "appfolio";
 }> {
   const pid = portfolioId ?? DEFAULT_PORTFOLIO_ID;
-  const primary = await fetchApplicationsFromRentalAppDetail(pid);
-  if (primary && primary.length > 0) {
-    return { data: primary, source: "appfolio" };
-  }
-  const fallback = await fetchApplicationsFromTenantDirectory(pid);
-  return { data: fallback, source: "appfolio" };
+  const groups = await fetchApplicationsFromRentalAppDetail(pid);
+  return { data: groups ?? [], source: "appfolio" };
 }
 
 /** Diagnostic: raw response + candidate group-id key detection. Used from
