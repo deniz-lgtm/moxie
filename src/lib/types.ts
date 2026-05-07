@@ -435,6 +435,9 @@ export interface Applicant {
   // nudging a single person in a group whose roommates are already done.
   rentalApplicationId?: string;
   tenantId?: string;
+  // Guest-card / showing the applicant came from. Lets us join applications
+  // back to the prospect funnel without re-keying off email.
+  inquiryId?: string;
   name: string;
   email: string;
   phone?: string;
@@ -447,8 +450,25 @@ export interface Applicant {
   applicationStatus?: string;
   screeningStatus?: string;
   leadSource?: string;
+  // What the applicant self-reported as their lead source on the app
+  // (often differs from the system-attributed `leadSource`).
+  reportedSource?: string;
   desiredMoveIn?: string;
   receivedAt?: string;
+  // Decision lifecycle timestamps direct from AppFolio.
+  screenedOn?: string;
+  approvedAt?: string;
+  deniedAt?: string;
+  canceledAt?: string;
+  decisionMadeAt?: string;
+  // Authoritative "lease signed" signals — populated by AppFolio only
+  // after a real lease exists for this applicant.
+  leaseStartDate?: string;
+  leaseEndDate?: string;
+  moveInDate?: string;
+  applicationFeePaid?: boolean;
+  reasonForStatus?: string;
+  assignedUser?: string;
   startedAt?: string;
   completedAt?: string;
 }

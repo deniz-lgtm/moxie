@@ -202,6 +202,9 @@ function ApplicationsView() {
               {selectedApplicant.tenantId && (
                 <span>Tenant ID: <span className="font-mono">{selectedApplicant.tenantId}</span></span>
               )}
+              {selectedApplicant.inquiryId && (
+                <span>Inquiry ID: <span className="font-mono">{selectedApplicant.inquiryId}</span></span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -214,26 +217,64 @@ function ApplicationsView() {
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-xs text-muted-foreground">Application status</p>
             <p className="text-sm font-medium mt-1 capitalize">{selectedApplicant.applicationStatus || "—"}</p>
+            {selectedApplicant.reasonForStatus && (
+              <p className="text-xs text-muted-foreground mt-1">{selectedApplicant.reasonForStatus}</p>
+            )}
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-xs text-muted-foreground">Screening</p>
             <p className="text-sm font-medium mt-1 capitalize">{selectedApplicant.screeningStatus || "—"}</p>
+            {selectedApplicant.screenedOn && (
+              <p className="text-xs text-muted-foreground mt-1">on {selectedApplicant.screenedOn}</p>
+            )}
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-xs text-muted-foreground">Lead source</p>
             <p className="text-sm font-medium mt-1">{selectedApplicant.leadSource || "—"}</p>
+            {selectedApplicant.reportedSource &&
+              selectedApplicant.reportedSource !== selectedApplicant.leadSource && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Self-reported: {selectedApplicant.reportedSource}
+                </p>
+              )}
           </div>
           <div className="bg-card rounded-xl border border-border p-4">
             <p className="text-xs text-muted-foreground">Desired move-in</p>
             <p className="text-sm font-medium mt-1">{selectedApplicant.desiredMoveIn || "—"}</p>
           </div>
+          <div className="bg-card rounded-xl border border-border p-4">
+            <p className="text-xs text-muted-foreground">Application fee</p>
+            <p className="text-sm font-medium mt-1">
+              {selectedApplicant.applicationFeePaid === true
+                ? "Paid"
+                : selectedApplicant.applicationFeePaid === false
+                  ? "Not paid"
+                  : "—"}
+            </p>
+          </div>
+          <div className="bg-card rounded-xl border border-border p-4">
+            <p className="text-xs text-muted-foreground">Assigned to</p>
+            <p className="text-sm font-medium mt-1">{selectedApplicant.assignedUser || "Unassigned"}</p>
+          </div>
+          <div className="bg-card rounded-xl border border-border p-4">
+            <p className="text-xs text-muted-foreground">Lease dates</p>
+            <p className="text-sm font-medium mt-1">
+              {selectedApplicant.leaseStartDate
+                ? `${selectedApplicant.leaseStartDate}${selectedApplicant.leaseEndDate ? ` → ${selectedApplicant.leaseEndDate}` : ""}`
+                : "—"}
+            </p>
+          </div>
+          <div className="bg-card rounded-xl border border-border p-4">
+            <p className="text-xs text-muted-foreground">Move-in</p>
+            <p className="text-sm font-medium mt-1">{selectedApplicant.moveInDate || "—"}</p>
+          </div>
         </div>
 
         <div className="bg-card rounded-xl border border-border overflow-hidden">
           <div className="p-5 border-b border-border">
-            <h2 className="font-semibold">What AppFolio knows</h2>
+            <h2 className="font-semibold">Where they are in the funnel</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              These three steps are the only ones we get from the rental_application_detail report. Income docs and lease signing aren't in this feed.
+              Pulled from AppFolio&apos;s rental_applications report. Income docs aren&apos;t in this feed.
             </p>
           </div>
           <div className="divide-y divide-border">
