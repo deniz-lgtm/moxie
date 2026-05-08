@@ -1011,8 +1011,8 @@ export async function fetchMaintenanceRequests(
 }
 
 // --- Applications ---
-// Prefer AppFolio's v2 `rental_application_detail` — it carries a stable
-// rental_application_id that roommates sharing one application all share,
+// AppFolio v2 `rental_applications` report. One row per applicant; carries
+// a stable rental_application_id and the rental_application_group_id roommates
 // which is what the automations keying off ApplicationGroup.id need. If
 // that report is unavailable on this account (404 / empty), we fall back
 // to the legacy path: group `tenant_directory?status=applicant` rows by
@@ -1035,38 +1035,13 @@ function normalizeAppStatus(raw: unknown): ApplicationGroupStatus {
 }
 
 // Build the only real "steps" we can know from AppFolio's
-// rental_application_detail report: did we receive the application, has
-// screening run, and has a decision been made. Anything beyond that
-// (income docs, lease signing) isn't carried by this report, so we don't
-// fabricate it.
+// rental_applications report: did we receive the application, has
+// screening run, has a decision been made, and is there a real lease.
 function buildApplicantSteps(row: any, groupKey: string, idx: number): ApplicantStep[] {
-  const received = pick(row, [
-    "received_at",
-    "rental_application_received_date",
-    "submitted_at",
-    "application_date",
-    "ApplicationDate",
-    "created_at",
-    "CreatedAt",
-  ]);
-  const screeningRaw = String(
-    pick(row, [
-      "screening_status",
-      "ScreeningStatus",
-      "background_check_status",
-      "rental_application_screening_status",
-      "screening",
-    ]) ?? ""
-  ).toLowerCase();
-  const decisionRaw = String(
-    pick(row, [
-      "application_status",
-      "rental_application_status",
-      "tenant_status",
-      "Status",
-      "status",
-    ]) ?? ""
-  ).toLowerCase();
+  const received = row.received;
+  const screeningRaw = String(row.screening ?? "").toLowerCase();
+  const decisionRaw = String(row.status ?? row.application_status ?? "").toLowerCase();
+  const hasLease = !!row.lease_start_date;
 
   const screeningStatus: StepStatus = /done|complete|passed|cleared/.test(screeningRaw)
     ? "complete"
@@ -1101,6 +1076,15 @@ function buildApplicantSteps(row: any, groupKey: string, idx: number): Applicant
       required: true,
       status: decisionStatus,
     },
+    {
+      id: `${groupKey}-s${idx}-4`,
+      name: "Lease signed",
+      description: hasLease
+        ? `Lease ${row.lease_start_date}${row.lease_end_date ? ` → ${row.lease_end_date}` : ""}`
+        : "No lease on file",
+      required: true,
+      status: hasLease ? "complete" : "pending",
+    },
   ];
 }
 
@@ -1109,7 +1093,7 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
   try {
     rows = await afGetRentalApplications();
   } catch (err) {
-    console.warn("[applications] rental_application_detail unavailable:", (err as Error).message);
+    console.warn("[applications] rental_applications unavailable:", (err as Error).message);
     return null;
   }
   if (!Array.isArray(rows) || rows.length === 0) return null;
@@ -1153,110 +1137,74 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
   const groups: ApplicationGroup[] = [];
   for (const [gid, rowsInGroup] of byGroup) {
     const first = rowsInGroup[0];
-    const unitName =
-      pick(first, [
-        "unit_street_address_1",
-        "UnitStreetAddress1",
-        "unit",
-        "Unit",
-        "unit_name",
-      ]) ?? "";
+    // Canonical AppFolio field names verified against
+    // /api/v2/reports/rental_applications.json on this account
+    // (see ?debug=1 sample row). Stick to these exact keys.
+    const unitName = String(first.unit_name ?? first.applying_for ?? "");
 
-    // Each row is one applicant on the application. Build Applicant[].
     const applicants: Applicant[] = rowsInGroup.map((r, i) => {
-      // AppFolio's report column "Applicant(s)" comes back as `applicants`.
-      // We try a wide list of candidates because the exact key drifts
-      // between report versions / accounts.
-      const directName = pick(r, [
-        "applicants",
-        "applicant_name",
-        "applicant",
-        "tenant_name",
-        "TenantName",
-        "name",
-        "Name",
-      ]);
-      const first = pick(r, ["applicant_first_name", "first_name", "FirstName"]);
-      const last = pick(r, ["applicant_last_name", "last_name", "LastName"]);
-      const composed = [first, last].filter(Boolean).join(" ");
-      const name = directName || composed;
-      const appStatus = pick(r, [
-        "application_status",
-        "rental_application_status",
-        "tenant_status",
-        "Status",
-        "status",
-      ]);
-      const rentalAppId = pick(r, ["rental_application_id", "application_id", "rental_app_id"]);
-      const tenantId = pick(r, ["tenant_id", "TenantId", "applicant_id", "rental_applicant_id"]);
-      const screening = pick(r, [
-        "screening_status",
-        "ScreeningStatus",
-        "rental_application_screening_status",
-        "background_check_status",
-        "screening",
-      ]);
-      const leadSource = pick(r, ["lead_source", "LeadSource", "source"]);
-      const desiredMoveIn = pick(r, [
-        "desired_move_in",
-        "desired_move_in_date",
-        "move_in",
-        "MoveInDate",
-      ]);
-      const received = pick(r, [
-        "received_at",
-        "rental_application_received_date",
-        "submitted_at",
-        "application_date",
-        "ApplicationDate",
-        "created_at",
-        "CreatedAt",
-      ]);
+      const rentalAppId = r.rental_application_id;
+      const status = r.status ?? r.application_status;
       return {
-        id: String(rentalAppId ?? tenantId ?? `${gid}-${i}`),
+        id: String(rentalAppId ?? r.tenant_id ?? `${gid}-${i}`),
         groupId: gid,
         rentalApplicationId: rentalAppId != null ? String(rentalAppId) : undefined,
-        tenantId: tenantId != null ? String(tenantId) : undefined,
-        name: String(name || "Unknown"),
-        email: String(pick(r, ["email", "Email", "applicant_email", "tenant_email"]) ?? ""),
-        phone:
-          pick(r, ["phone", "Phone", "applicant_phone", "tenant_phone", "phone_numbers"]) ??
-          undefined,
+        tenantId: r.tenant_id != null ? String(r.tenant_id) : undefined,
+        inquiryId: r.inquiry_id != null ? String(r.inquiry_id) : undefined,
+        name: String(r.applicants ?? "Unknown"),
+        email: String(r.email ?? ""),
+        phone: r.phone_number ?? undefined,
         role: (i === 0 ? "primary" : "co_applicant") as ApplicantRole,
         steps: buildApplicantSteps(r, gid, i),
         documents: [],
         nudges: [],
         status:
-          normalizeAppStatus(appStatus) === "approved"
-            ? "complete"
-            : "in_progress",
-        applicationStatus: appStatus != null ? String(appStatus) : undefined,
-        screeningStatus: screening != null ? String(screening) : undefined,
-        leadSource: leadSource != null ? String(leadSource) : undefined,
-        desiredMoveIn: desiredMoveIn != null ? String(desiredMoveIn) : undefined,
-        receivedAt: received != null ? String(received) : undefined,
-        startedAt: String(received ?? new Date().toISOString()),
+          normalizeAppStatus(status) === "approved" ? "complete" : "in_progress",
+        applicationStatus: status != null ? String(status) : undefined,
+        screeningStatus: r.screening != null ? String(r.screening) : undefined,
+        leadSource: r.lead_source != null ? String(r.lead_source) : undefined,
+        reportedSource:
+          r.applicant_reported_source != null
+            ? String(r.applicant_reported_source)
+            : undefined,
+        desiredMoveIn:
+          r.desired_move_in != null ? String(r.desired_move_in) : undefined,
+        receivedAt: r.received != null ? String(r.received) : undefined,
+        screenedOn: r.screened_on != null ? String(r.screened_on) : undefined,
+        approvedAt: r.approved_at != null ? String(r.approved_at) : undefined,
+        deniedAt: r.denied_at != null ? String(r.denied_at) : undefined,
+        canceledAt: r.canceled_at != null ? String(r.canceled_at) : undefined,
+        decisionMadeAt:
+          r.decision_made_at != null ? String(r.decision_made_at) : undefined,
+        leaseStartDate:
+          r.lease_start_date != null ? String(r.lease_start_date) : undefined,
+        leaseEndDate:
+          r.lease_end_date != null ? String(r.lease_end_date) : undefined,
+        moveInDate: r.move_in_date != null ? String(r.move_in_date) : undefined,
+        applicationFeePaid:
+          r.application_fee_paid != null
+            ? String(r.application_fee_paid).toLowerCase() === "yes"
+            : undefined,
+        reasonForStatus:
+          r.reason_for_status != null ? String(r.reason_for_status) : undefined,
+        assignedUser:
+          r.assigned_user && r.assigned_user !== "--"
+            ? String(r.assigned_user)
+            : undefined,
+        startedAt: String(r.received ?? new Date().toISOString()),
       };
     });
 
-    const rawStatus = pick(first, [
-      "application_status",
-      "rental_application_status",
-      "tenant_status",
-      "Status",
-      "status",
-    ]);
-    const rawRent = pick(first, ["rent", "market_rent", "monthly_rent"]);
-    const monthlyRent =
-      rawRent != null && rawRent !== "" && !isNaN(Number(rawRent)) ? Number(rawRent) : 0;
+    const rawStatus = first.status ?? first.application_status;
+    const monthlyRent = 0; // not on this report
 
     const groupDesiredMoveIn = applicants.find((a) => a.desiredMoveIn)?.desiredMoveIn;
     groups.push({
       id: gid,
       rentalApplicationGroupId: realGroupIds.get(gid),
-      unitId: pick(first, ["unit_id", "UnitId"]) ? String(pick(first, ["unit_id", "UnitId"])) : undefined,
-      propertyId: String(pick(first, ["property_id", "PropertyId"]) ?? ""),
-      propertyName: String(pick(first, ["property_name", "PropertyName"]) ?? ""),
+      unitId: first.unit_id != null ? String(first.unit_id) : undefined,
+      propertyId: first.property_id != null ? String(first.property_id) : "",
+      propertyName: String(first.property_name ?? ""),
       unitNumber: String(unitName),
       unitDetails: "",
       leaseCycle: "fall_2026",
@@ -1264,41 +1212,26 @@ async function fetchApplicationsFromRentalAppDetail(portfolioId: string): Promis
       monthlyRent,
       applicants,
       status: normalizeAppStatus(rawStatus),
-      createdAt: String(
-        pick(first, [
-          "submitted_at",
-          "application_date",
-          "ApplicationDate",
-          "created_at",
-          "CreatedAt",
-        ]) ?? new Date().toISOString()
-      ),
+      createdAt: String(first.received ?? new Date().toISOString()),
       updatedAt: new Date().toISOString(),
     });
   }
 
-  // Per-unit dedup: once any application on a unit is approved/converted,
-  // the unit is taken — every other application on that same unit is no
-  // longer eligible. Drop them so the page only shows live competition
-  // for units that haven't been won yet. ("Converted" in AppFolio means
-  // the applicant rolled into a tenant — a lease has been signed.)
+  // Per-unit dedup: once any applicant on a unit has a lease_start_date
+  // (authoritative "lease signed" signal from AppFolio), the unit is gone
+  // — drop every other application for that unit. We prefer this to the
+  // older Approved/Converted status proxy because lease_start_date only
+  // appears once a real lease document exists, with no lag.
   const wonUnits = new Set<string>();
   for (const g of groups) {
     if (!g.unitId) continue;
-    const won = g.applicants.some((a) => {
-      const s = (a.applicationStatus || "").toLowerCase();
-      return /approved|converted/.test(s);
-    });
-    if (won) wonUnits.add(g.unitId);
+    if (g.applicants.some((a) => !!a.leaseStartDate)) wonUnits.add(g.unitId);
   }
   const filtered = groups.filter((g) => {
     if (!g.unitId || !wonUnits.has(g.unitId)) return true;
-    // Keep only the winning group on a won unit so the UI can still show
-    // who got it. Other competing applications drop out.
-    return g.applicants.some((a) => {
-      const s = (a.applicationStatus || "").toLowerCase();
-      return /approved|converted/.test(s);
-    });
+    // Keep the winning group on a won unit so the UI can show who got it;
+    // drop other competing applications for that unit.
+    return g.applicants.some((a) => !!a.leaseStartDate);
   });
 
   return filtered;
