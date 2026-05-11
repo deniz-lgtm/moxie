@@ -76,11 +76,31 @@ function PositionChange({ current, previous }: { current: number; previous: numb
 }
 
 function SeoTab() {
+  const [metrics, setMetrics] = useState(mockSeoMetrics);
+  const [source, setSource] = useState<"mock" | "ga4">("mock");
+
+  useEffect(() => {
+    fetch("/api/marketing/seo")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.metrics) {
+          setMetrics(data.metrics);
+          setSource("ga4");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="space-y-6">
+      {source === "mock" && (
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Showing sample data. Configure GA4 (GA4_PROPERTY_ID, GOOGLE_SERVICE_ACCOUNT_JSON) to see live metrics.
+        </div>
+      )}
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        {mockSeoMetrics.map((metric) => (
+        {metrics.map((metric) => (
           <div
             key={metric.label}
             className="bg-card rounded-2xl border border-border p-5"

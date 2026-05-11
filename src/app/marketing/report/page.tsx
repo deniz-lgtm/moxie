@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { mockMonthlyReport } from "@/lib/marketing";
+import type { MonthlyReportData } from "@/lib/marketing";
 import {
   ArrowLeft,
   Download,
@@ -42,7 +44,20 @@ function StatCard({
 }
 
 export default function MonthlyReportPage() {
-  const report = mockMonthlyReport;
+  const [report, setReport] = useState<MonthlyReportData>(mockMonthlyReport);
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/marketing/report")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.month) {
+          setReport({ ...mockMonthlyReport, ...data });
+          setIsLive(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const organicPct = report.websiteVisits > 0
     ? Math.round((report.organicTraffic / report.websiteVisits) * 100)
@@ -61,7 +76,10 @@ export default function MonthlyReportPage() {
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Monthly Marketing Report</h1>
-            <p className="text-sm text-muted-foreground mt-1">{report.month}</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {report.month}
+              {!isLive && <span className="ml-2 text-amber-600">(sample data)</span>}
+            </p>
           </div>
           <button className="inline-flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-lg text-sm font-medium hover:bg-muted/50 transition-colors">
             <Download size={16} /> Download PDF
