@@ -985,6 +985,15 @@ function ImportBillsFlow({
     }
   }
 
+  // Auto-scan the bucket on open so users don't have to click "Refresh"
+  // to discover PDFs they've already uploaded. Without this the import
+  // screen looks like a fresh upload dropzone even when there are
+  // hundreds of PDFs sitting in storage waiting to be parsed.
+  useEffect(() => {
+    scanFolder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function parseSelected(filenames?: string[], extraHashes?: Record<string, string>) {
     const filesToParse = filenames ?? Array.from(selectedFiles);
     if (filesToParse.length === 0) return;
@@ -1219,6 +1228,9 @@ function ImportBillsFlow({
 
         {files.length > 0 && (
           <>
+            <div className="text-xs font-medium text-muted-foreground">
+              Already in storage ({files.length}) — pick which to parse:
+            </div>
             <div className="border border-border rounded-lg divide-y divide-border max-h-64 overflow-y-auto">
               {files.map((f) => (
                 <label
