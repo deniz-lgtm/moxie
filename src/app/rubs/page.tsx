@@ -1564,8 +1564,9 @@ function ImportBillsFlow({
 // ─── Stored PDFs Library ──────────────────────────────────────
 // Shows every PDF currently in Supabase Storage, joined with the bills
 // table by sourceFile so each row shows whether it has been imported.
-// Lets you view originals and clean up orphan files (uploaded but never
-// imported, or imported then bill-deleted).
+// Lets you view originals and clean up PDFs that haven't been imported
+// (either freshly uploaded but never parsed/imported, or imported then
+// later bill-deleted).
 
 function StoredPdfsPanel({ bills }: { bills: RubsBill[] }) {
   const [files, setFiles] = useState<StoredBillFile[] | null>(null);
@@ -1627,7 +1628,7 @@ function StoredPdfsPanel({ bills }: { bills: RubsBill[] }) {
         <div>
           <h2 className="font-semibold">Stored PDFs ({list.length})</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {importedCount} imported · {orphanCount} orphan{orphanCount !== 1 ? "s" : ""}
+            {importedCount} imported · {orphanCount} not yet imported
           </p>
         </div>
         <div className="flex items-center gap-3 text-xs">
@@ -1638,7 +1639,7 @@ function StoredPdfsPanel({ bills }: { bills: RubsBill[] }) {
           >
             <option value="all">All ({list.length})</option>
             <option value="imported">Imported ({importedCount})</option>
-            <option value="orphan">Orphan ({orphanCount})</option>
+            <option value="orphan">Not imported ({orphanCount})</option>
           </select>
           <button onClick={load} className="text-accent hover:underline">Refresh</button>
         </div>
@@ -1681,7 +1682,7 @@ function StoredPdfsPanel({ bills }: { bills: RubsBill[] }) {
                       {linked ? (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">Imported</span>
                       ) : (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Orphan</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">Not imported</span>
                       )}
                     </td>
                     <td className="px-4 py-2 text-xs text-muted-foreground">
