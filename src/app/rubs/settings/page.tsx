@@ -516,7 +516,25 @@ export default function RubsSettingsPage() {
                         ))}
                       </select>
                     </td>
-                    <td className="px-4 py-2 text-xs font-mono text-muted-foreground">{m.meterId}</td>
+                    <td className="px-4 py-2 text-xs font-mono">
+                      <input
+                        type="text"
+                        defaultValue={m.meterId}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim();
+                          if (next && next !== m.meterId) handleInlineUpdate(m.id, { meterId: next });
+                          else e.target.value = m.meterId;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") {
+                            (e.target as HTMLInputElement).value = m.meterId;
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        className="text-xs border border-border rounded px-2 py-1 bg-card font-mono w-36"
+                      />
+                    </td>
                     <td className="px-4 py-2 text-right">{m.unitIds.length}</td>
                     <td className="px-4 py-2 text-right whitespace-nowrap">
                       <button
