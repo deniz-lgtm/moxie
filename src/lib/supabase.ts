@@ -704,8 +704,10 @@ export type ActionItemCategory =
 
 export type DbMeetingActionItem = {
   id: string;
-  meeting_id: string;
+  meeting_id: string | null;
   property_id: string | null;
+  ai_next_step?: string | null;
+  ai_next_step_at?: string | null;
   title: string;
   description: string | null;
   assigned_to: string | null;
