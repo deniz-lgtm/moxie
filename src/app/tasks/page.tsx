@@ -61,6 +61,71 @@ export default function TasksPage() {
   const [query, setQuery] = useState("");
 
   const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [showNewTask, setShowNewTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskAssignee, setNewTaskAssignee] = useState("");
+  const [newTaskDue, setNewTaskDue] = useState("");
+  const [newTaskSaving, setNewTaskSaving] = useState(false);
+  const [aiBusy, setAiBusy] = useState<Set<string>>(new Set());
+
+  async function handleCreateTask() {
+    const title = newTaskTitle.trim();
+    if (!title || newTaskSaving) return;
+    setNewTaskSaving(true);
+    try {
+      const r = await fetch(`/api/meetings/action-items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          title,
+          assigned_to: newTaskAssignee || null,
+          due_date: newTaskDue || null,
+          status: "open",
+          source: "manual",
+        }),
+      });
+      const j = await r.json();
+      if (j.item) {
+        setItems((prev) => [j.item, ...prev]);
+        setNewTaskTitle("");
+        setNewTaskAssignee("");
+        setNewTaskDue("");
+        setShowNewTask(false);
+      } else if (j.error) {
+        alert(`Create failed: ${j.error}`);
+      }
+    } finally {
+      setNewTaskSaving(false);
+    }
+  }
+
+  async function handleSuggestNextStep(id: string) {
+    setAiBusy((prev) => new Set(prev).add(id));
+    try {
+      const r = await fetch(`/api/tasks/suggest-next-step?id=${encodeURIComponent(id)}`, {
+        method: "POST",
+      });
+      const j = await r.json();
+      if (j.suggestion) {
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === id
+              ? { ...i, ai_next_step: j.suggestion, ai_next_step_at: j.generatedAt }
+              : i,
+          ),
+        );
+      } else if (j.error) {
+        alert(`AI suggestion failed: ${j.error}`);
+      }
+    } finally {
+      setAiBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
 
   const loadAll = useCallback(async () => {
     setRefreshing(true);
@@ -128,7 +193,7 @@ export default function TasksPage() {
           i.title,
           i.description || "",
           i.assigned_to || "",
-          meetingsById[i.meeting_id]?.title || "",
+          (i.meeting_id ? meetingsById[i.meeting_id]?.title : "") || "",
         ]
           .join(" ")
           .toLowerCase();
@@ -220,7 +285,7 @@ export default function TasksPage() {
   // active contacts so anyone realistic can be assigned.
   const modalAttendees = useMemo(() => {
     if (!openItem) return [] as string[];
-    const m = meetingsById[openItem.meeting_id];
+    const m = openItem.meeting_id ? meetingsById[openItem.meeting_id] : undefined;
     const set = new Set<string>(m?.attendees ?? []);
     for (const c of contacts) if (c.isActive !== false && c.name) set.add(c.name);
     return [...set];
@@ -239,15 +304,61 @@ export default function TasksPage() {
             comment, assign, link a work order, or attach a file.
           </p>
         </div>
-        <button
-          onClick={loadAll}
-          disabled={refreshing}
-          className="px-3 py-2 border border-border rounded-lg hover:bg-muted disabled:opacity-50 inline-flex items-center gap-2 text-sm font-medium"
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowNewTask((v) => !v)}
+            className="px-3 py-2 bg-accent text-white rounded-lg hover:bg-accent/90 inline-flex items-center gap-2 text-sm font-medium"
+          >
+            {showNewTask ? "Cancel" : "+ New task"}
+          </button>
+          <button
+            onClick={loadAll}
+            disabled={refreshing}
+            className="px-3 py-2 border border-border rounded-lg hover:bg-muted disabled:opacity-50 inline-flex items-center gap-2 text-sm font-medium"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {showNewTask && (
+        <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+          <input
+            autoFocus
+            value={newTaskTitle}
+            onChange={(e) => setNewTaskTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreateTask(); }}
+            placeholder="Task title (required)"
+            className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={newTaskAssignee}
+              onChange={(e) => setNewTaskAssignee(e.target.value)}
+              className="text-sm border border-border rounded-lg px-3 py-2 bg-background"
+            >
+              <option value="">Unassigned</option>
+              {owners.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={newTaskDue}
+              onChange={(e) => setNewTaskDue(e.target.value)}
+              className="text-sm border border-border rounded-lg px-3 py-2 bg-background"
+            />
+            <button
+              onClick={handleCreateTask}
+              disabled={!newTaskTitle.trim() || newTaskSaving}
+              className="ml-auto px-3 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 disabled:opacity-50"
+            >
+              {newTaskSaving ? "Creating…" : "Create task"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stat strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -317,9 +428,11 @@ export default function TasksPage() {
               <TaskRow
                 key={item.id}
                 item={item}
-                meeting={meetingsById[item.meeting_id]}
+                meeting={item.meeting_id ? meetingsById[item.meeting_id] : undefined}
                 onToggleDone={() => toggleDone(item)}
                 onOpen={() => setOpenItemId(item.id)}
+                onSuggestNextStep={() => handleSuggestNextStep(item.id)}
+                aiBusy={aiBusy.has(item.id)}
               />
             ))}
           </ul>
@@ -371,17 +484,23 @@ function TaskRow({
   meeting,
   onToggleDone,
   onOpen,
+  onSuggestNextStep,
+  aiBusy,
 }: {
   item: DbMeetingActionItem;
   meeting: DbPropertyMeeting | undefined;
   onToggleDone: () => void;
   onOpen: () => void;
+  onSuggestNextStep: () => void;
+  aiBusy: boolean;
 }) {
   const overdue = isOverdue(item);
   const commentCount = item.comments?.length ?? 0;
   const attachmentCount = item.attachments?.length ?? 0;
   const linkedCount = item.linked_action_item_ids?.length ?? 0;
   const isDone = item.status === "completed";
+  const latestComment = commentCount > 0 ? item.comments[commentCount - 1] : undefined;
+  const nextStep = item.ai_next_step;
 
   return (
     <li>
@@ -420,6 +539,21 @@ function TaskRow({
           {item.description && (
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
               {item.description}
+            </p>
+          )}
+          {latestComment && (
+            <p
+              className="text-xs text-muted-foreground mt-1 line-clamp-1 italic"
+              title={latestComment.text}
+            >
+              <MessageSquare className="w-3 h-3 inline mr-1" />
+              {latestComment.author ? `${latestComment.author}: ` : ""}
+              {latestComment.text}
+            </p>
+          )}
+          {nextStep && (
+            <p className="text-xs mt-1 text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 inline-block">
+              <span className="font-semibold mr-1">Next:</span>{nextStep}
             </p>
           )}
           <div className="flex items-center gap-2 mt-2 flex-wrap text-xs text-muted-foreground">
@@ -462,6 +596,15 @@ function TaskRow({
               </span>
             )}
           </div>
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onSuggestNextStep(); }}
+          disabled={aiBusy}
+          className="shrink-0 text-xs text-indigo-700 hover:underline disabled:opacity-50 mr-3"
+          title="Use AI to suggest the next step for this task"
+        >
+          {aiBusy ? "Thinking…" : nextStep ? "Refresh AI" : "AI: next step"}
         </button>
         <div className="shrink-0 text-right">
           {meeting ? (
