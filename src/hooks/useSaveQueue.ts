@@ -22,6 +22,12 @@ interface UseSaveQueueReturn<T> {
   isDirty: boolean;
   /** Force an immediate save of the last queued data */
   flushSave: () => void;
+  /**
+   * Force an immediate save and await the result. Resolves once the data is
+   * persisted, rejects if the save fails after all retries. Use this when the
+   * UI must not advance until the write is confirmed (e.g. marking complete).
+   */
+  flushSaveAsync: () => Promise<void>;
   /** Last error message if status is "error" */
   lastError: string | null;
   /** Retry the last failed save */
@@ -45,8 +51,9 @@ export function useSaveQueue<T>({
 
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const executeSave = useCallback(async () => {
-    if (isSavingRef.current || pendingDataRef.current === null) return;
+  // Resolves with whether the save ultimately succeeded.
+  const executeSave = useCallback(async (): Promise<boolean> => {
+    if (isSavingRef.current || pendingDataRef.current === null) return true;
 
     const data = pendingDataRef.current;
     pendingDataRef.current = null;
@@ -74,7 +81,7 @@ export function useSaveQueue<T>({
           isSavingRef.current = false;
           // Keep data as pending so retry can pick it up
           pendingDataRef.current = data;
-          return;
+          return false;
         }
       }
     }
@@ -89,8 +96,9 @@ export function useSaveQueue<T>({
 
     // If more data was queued while saving, save it now
     if (pendingDataRef.current !== null) {
-      executeSave();
+      return executeSave();
     }
+    return true;
   }, [maxRetries]);
 
   const queueSave = useCallback(
@@ -110,6 +118,17 @@ export function useSaveQueue<T>({
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     executeSave();
   }, [executeSave]);
+
+  const flushSaveAsync = useCallback(async () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    // If a save is already in flight, wait for it to settle before flushing
+    // the latest pending data so we don't early-return on a stale write.
+    while (isSavingRef.current) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const ok = await executeSave();
+    if (!ok) throw new Error(lastError || "Save failed");
+  }, [executeSave, lastError]);
 
   const retrySave = useCallback(() => {
     if (pendingDataRef.current !== null) {
@@ -138,5 +157,5 @@ export function useSaveQueue<T>({
     };
   }, []);
 
-  return { queueSave, saveStatus, isDirty, flushSave, lastError, retrySave };
+  return { queueSave, saveStatus, isDirty, flushSave, flushSaveAsync, lastError, retrySave };
 }

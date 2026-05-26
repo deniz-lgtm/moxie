@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SaveIndicator } from "@/components/SaveIndicator";
+import { Combobox } from "@/components/Combobox";
 import { InspectionErrorBoundary } from "@/components/InspectionErrorBoundary";
 import { InspectionCamera, type CameraRoom } from "@/components/InspectionCamera";
 import { FloorPlanPreview, isPdfUrl } from "@/components/FloorPlanPreview";
@@ -21,6 +22,7 @@ import type {
   InspectionPhoto,
   ConditionRating,
   Unit,
+  Vendor,
 } from "@/lib/types";
 
 const CONDITIONS: ConditionRating[] = ["excellent", "good", "fair", "poor", "damaged"];
@@ -53,6 +55,41 @@ function itemsForRoom(roomName: string): InspectionItem[] {
 
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Upload a photo data URL to Supabase Storage and return its public URL.
+ * Retries on transient failures with short backoff. Throws if it can't get a
+ * storage URL — callers must NOT fall back to embedding the base64 data URL in
+ * the inspection, or autosave payloads balloon and start failing.
+ */
+async function uploadPhotoToStorage(
+  dataUrl: string,
+  inspectionId: string,
+  photoId: string,
+  attempts = 3,
+): Promise<string> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch("/api/inspections/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl, inspectionId, photoId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `Upload failed (${res.status})` }));
+        throw new Error(err.error || `Upload failed (${res.status})`);
+      }
+      const data = await res.json();
+      if (!data.url) throw new Error("Upload returned no URL");
+      return data.url as string;
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Upload failed");
 }
 
 /** Calculate total deductions for an inspection (per-photo + item-level) */
@@ -222,8 +259,14 @@ function MoveOutInspectionContent() {
   const [selectedTenants, setSelectedTenants] = useState<Set<number>>(new Set());
   const [loadingTenants, setLoadingTenants] = useState(false);
 
+  // Contractor invoice: pick which vendor the invoice is billed from, with an
+  // editable hourly rate (defaults to the vendor's saved rate or $75).
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [selectedVendorId, setSelectedVendorId] = useState<string>("");
+  const [invoiceRate, setInvoiceRate] = useState<number>(75);
+
   // ─── Save queue with retry & debounce ──────────────
-  const { queueSave, saveStatus, isDirty, flushSave, lastError, retrySave } = useSaveQueue<Inspection>({
+  const { queueSave, saveStatus, isDirty, flushSaveAsync, lastError, retrySave } = useSaveQueue<Inspection>({
     saveFn: async (insp) => {
       const body = JSON.stringify({ inspection: insp });
 
@@ -410,6 +453,43 @@ function MoveOutInspectionContent() {
       .finally(() => setLoadingTenants(false));
   }, [step, activeInspection]);
 
+  // Load vendors for the contractor-invoice picker. Default to a vendor named
+  // "DJA" if present, so the invoice generated at completion still works while
+  // the user can switch contractors on the documents step and re-download.
+  useEffect(() => {
+    fetch("/api/vendors")
+      .then((r) => r.json())
+      .then((data) => {
+        const list: Vendor[] = data.vendors || [];
+        setVendors(list);
+        const dja = list.find((v) => /dja/i.test(v.name));
+        const def = dja || list[0];
+        if (def) {
+          setSelectedVendorId(def.id);
+          setInvoiceRate(def.laborRate ?? 75);
+        }
+      })
+      .catch((err) => console.error("[MoveOut] Failed to load vendors:", err));
+  }, []);
+
+  function contractorInvoiceOpts() {
+    const vendor = vendors.find((v) => v.id === selectedVendorId);
+    return {
+      contractorName: vendor?.name || "DJA CO.",
+      contractorAddress: vendor?.address || "",
+      contractorPhone: vendor?.phone || "",
+      contractorEmail: vendor?.email || "",
+      contractorLicense: vendor?.licenseNumber || "",
+      laborRatePerHour: invoiceRate,
+    };
+  }
+
+  function invoiceFileLabel() {
+    const vendor = vendors.find((v) => v.id === selectedVendorId);
+    const name = (vendor?.name || "DJA").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+    return name || "Contractor";
+  }
+
   function saveInspection(insp: Inspection) {
     const updated = inspections.map((i) => (i.id === insp.id ? insp : i));
     if (!inspections.find((i) => i.id === insp.id)) updated.push(insp);
@@ -434,6 +514,17 @@ function MoveOutInspectionContent() {
     }
     setStep(targetStep);
     setSelectedRoomIdx(0);
+  }
+
+  // Re-fetch the move-out list from the server so the table reflects DB truth
+  // rather than stale in-memory state (e.g. after completing an inspection).
+  async function refreshInspections() {
+    try {
+      const res = await fetch("/api/inspections/crud?type=move_out").then((r) => r.json());
+      if (res.inspections) setInspections(res.inspections);
+    } catch (err) {
+      console.error("[MoveOut] Refresh failed:", err);
+    }
   }
 
   function deleteInspection(id: string) {
@@ -786,18 +877,18 @@ function MoveOutInspectionContent() {
 
       const photoId = newId();
 
-      // Upload to storage
-      let photoUrl = dataUrl;
+      // Upload to storage. We must NOT fall back to keeping the base64 data
+      // URL in the inspection — embedding many ~100-300KB images bloats every
+      // autosave payload until the CRUD save fails ("Save failed"). If storage
+      // upload fails after retries, surface an error and drop the photo so the
+      // saved inspection only ever carries small storage URLs.
+      let photoUrl: string;
       try {
-        const uploadRes = await fetch("/api/inspections/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dataUrl, inspectionId: activeInspection.id, photoId }),
-        });
-        const uploadData = await uploadRes.json();
-        if (uploadData.url) photoUrl = uploadData.url;
-      } catch {
-        // Keep compressed data URL as fallback
+        photoUrl = await uploadPhotoToStorage(dataUrl, activeInspection.id, photoId);
+      } catch (err) {
+        console.error("[MoveOut] Photo upload failed:", err);
+        setUploadError("Photo failed to upload. Check your connection and add it again.");
+        return;
       }
 
       const photo: InspectionPhoto = {
@@ -830,19 +921,45 @@ function MoveOutInspectionContent() {
     }));
   }
 
-  function handleCameraRoomsChange(cameraRooms: CameraRoom[]) {
+  async function handleCameraRoomsChange(cameraRooms: CameraRoom[]) {
     if (!activeInspection) return;
+
+    // Camera photos arrive as base64 data URLs. Upload each new one to storage
+    // first so the saved inspection only carries small storage URLs — otherwise
+    // dozens of embedded images bloat the autosave payload and it starts
+    // failing. Map photoId -> storage URL; drop photos that fail to upload.
+    const existingIds = new Set(
+      activeInspection.rooms.flatMap((r) => r.items.flatMap((item) => item.photos.map((p) => p.id)))
+    );
+    const urlById = new Map<string, string>();
+    let anyUploadFailed = false;
+    for (const cRoom of cameraRooms) {
+      for (const photo of cRoom.photos) {
+        if (existingIds.has(photo.id)) continue;
+        if (!photo.url.startsWith("data:")) { urlById.set(photo.id, photo.url); continue; }
+        try {
+          urlById.set(photo.id, await uploadPhotoToStorage(photo.url, activeInspection.id, photo.id));
+        } catch (err) {
+          console.error("[MoveOut] Camera photo upload failed:", err);
+          anyUploadFailed = true;
+        }
+      }
+    }
+    if (anyUploadFailed) {
+      setUploadError("Some photos failed to upload. Check your connection and recapture them.");
+    }
+
     const rooms = activeInspection.rooms.map((room, idx) => {
       const cRoom = cameraRooms[idx];
       if (!cRoom) return room;
-      const existingPhotoIds = new Set(room.items.flatMap((item) => item.photos.map((p) => p.id)));
-      const newPhotos = cRoom.photos.filter((p) => !existingPhotoIds.has(p.id));
+      const newPhotos = cRoom.photos.filter((p) => !existingIds.has(p.id) && urlById.has(p.id));
       if (newPhotos.length === 0) return room;
 
       const items = [...room.items];
 
       // If photos have AI analysis, create new checklist items per detected issue
       for (const photo of newPhotos) {
+        const storageUrl = urlById.get(photo.id)!;
         const ai = photo.aiAnalysis;
         if (ai && ai.item) {
           // Create a new checklist item from AI detection
@@ -854,7 +971,7 @@ function MoveOutInspectionContent() {
             notes: ai.description,
             photos: [{
               id: photo.id,
-              url: photo.url,
+              url: storageUrl,
               aiAnalysis: ai.description,
               createdAt: photo.timestamp,
             }],
@@ -866,7 +983,7 @@ function MoveOutInspectionContent() {
           // No AI analysis — add photo to first item
           const firstItem = { ...items[0], photos: [...items[0].photos, {
             id: photo.id,
-            url: photo.url,
+            url: storageUrl,
             aiAnalysis: null,
             createdAt: photo.timestamp,
           }] };
@@ -1098,8 +1215,8 @@ function MoveOutInspectionContent() {
       }
       const contractorPdf = generateContractorReportPDF(pdfData, floorPlanBase64);
       downloadPDF(contractorPdf, `ContractorReport-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-      const invoicePdf = generateContractorInvoicePDF(pdfData);
-      downloadPDF(invoicePdf, `DJA-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+      const invoicePdf = generateContractorInvoicePDF(pdfData, contractorInvoiceOpts());
+      downloadPDF(invoicePdf, `${invoiceFileLabel()}-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
 
       saveInspection({
         ...activeInspection,
@@ -1109,16 +1226,23 @@ function MoveOutInspectionContent() {
         invoiceTotal: totalDed,
         updatedAt: new Date().toISOString(),
       });
-      // Skip the 500ms debounce for the final completion save — the user
-      // may navigate away immediately after hitting "complete".
-      flushSave();
+      // Confirm the completion write before showing the "done" screen. If it
+      // fails, stay on this step and surface the error — otherwise the user
+      // sees "complete" but a refresh shows the inspection as unsaved.
+      try {
+        await flushSaveAsync();
+      } catch (saveErr) {
+        console.error("Completion save failed:", saveErr);
+        setPdfError("Couldn't save the completed inspection. Check your connection and try again.");
+        return;
+      }
       setStep("completed");
     } catch (err) {
       console.error("PDF generation failed:", err);
       setPdfError("PDF generation failed. Please try again.");
+    } finally {
+      setGeneratingPDF(false);
     }
-
-    setGeneratingPDF(false);
   }
 
   /**
@@ -1591,44 +1715,41 @@ function MoveOutInspectionContent() {
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Property *</label>
-                  <select
+                  <Combobox
                     value={selectedProperty}
-                    onChange={(e) => {
-                      setSelectedProperty(e.target.value);
+                    options={propertyNames}
+                    onChange={(name) => {
+                      setSelectedProperty(name);
                       setNewForm({ ...newForm, unitId: "", depositAmount: 0 });
                     }}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
-                  >
-                    <option value="">Select a property...</option>
-                    {propertyNames.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
+                    placeholder="Type to search a property..."
+                    emptyLabel="No matching property"
+                  />
                 </div>
 
                 <div className="sm:col-span-2">
                   <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Select Unit *</label>
-                  <select
-                    value={newForm.unitId}
-                    onChange={(e) => {
-                      const unitId = e.target.value;
-                      const unit = units.find((u) => u.id === unitId);
-                      setNewForm({
-                        ...newForm,
-                        unitId,
-                        depositAmount: unit?.deposit ?? 0,
-                      });
-                    }}
-                    disabled={!selectedProperty}
-                    className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors disabled:opacity-40"
-                  >
-                    <option value="">{selectedProperty ? "Select a unit..." : "Select a property first"}</option>
-                    {filteredUnits.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.unitName || u.displayName}
-                      </option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const unitNames = filteredUnits.map((u) => u.unitName || u.displayName);
+                    const selectedUnitName = filteredUnits.find((u) => u.id === newForm.unitId);
+                    return (
+                      <Combobox
+                        value={selectedUnitName ? (selectedUnitName.unitName || selectedUnitName.displayName) : ""}
+                        options={unitNames}
+                        onChange={(name) => {
+                          const unit = filteredUnits.find((u) => (u.unitName || u.displayName) === name);
+                          setNewForm({
+                            ...newForm,
+                            unitId: unit?.id ?? "",
+                            depositAmount: unit?.deposit ?? 0,
+                          });
+                        }}
+                        disabled={!selectedProperty}
+                        placeholder={selectedProperty ? "Type to search a unit..." : "Select a property first"}
+                        emptyLabel="No matching unit"
+                      />
+                    );
+                  })()}
                 </div>
 
                 <div>
@@ -2284,7 +2405,7 @@ function MoveOutInspectionContent() {
 
     return (
       <div className="space-y-6">
-        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); }} className="inline-flex items-center min-h-[44px] text-xs font-medium text-accent hover:underline">
+        <button onClick={() => { setShowList(true); setActiveInspection(null); setUnitTenants([]); setSelectedTenants(new Set()); refreshInspections(); }} className="inline-flex items-center min-h-[44px] text-xs font-medium text-accent hover:underline">
           &larr; Back to list
         </button>
         <StepProgressBar currentStep={step} onStepClick={navigateToStep} inspectionStatus={activeInspection.status} />
@@ -2443,19 +2564,54 @@ function MoveOutInspectionContent() {
             <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
             <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
           </button>
-          <button
-            onClick={async () => {
-              const { generateContractorInvoicePDF, downloadPDF } = await import("@/lib/pdf-invoice");
-              const logo = await loadLogoBase64();
-              const pdfData = await buildPdfData(activeInspection, logo);
-              const invoicePdf = generateContractorInvoicePDF(pdfData);
-              downloadPDF(invoicePdf, `DJA-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
-          >
-            <span className="font-medium group-hover:text-accent transition-colors">Download DJA CO. Invoice</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">Contractor invoice with hours & materials — §1950.5 supporting document</span>
-          </button>
+          <div className="px-4 py-4 border border-border rounded-xl text-sm space-y-3">
+            <div>
+              <span className="font-medium">Contractor Invoice</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Contractor invoice with hours & materials — §1950.5 supporting document</span>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Contractor</label>
+                <select
+                  value={selectedVendorId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedVendorId(id);
+                    const v = vendors.find((x) => x.id === id);
+                    setInvoiceRate(v?.laborRate ?? 75);
+                  }}
+                  className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                >
+                  {vendors.length === 0 && <option value="">DJA CO. (default)</option>}
+                  {vendors.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider block mb-1.5">Labor Rate ($/hr)</label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={invoiceRate || ""}
+                  onChange={(e) => setInvoiceRate(parseFloat(e.target.value) || 0)}
+                  className="w-full text-sm border border-border rounded-xl px-3.5 py-3 min-h-[48px] bg-card focus:border-accent focus:ring-1 focus:ring-accent/20 transition-colors"
+                />
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                const { generateContractorInvoicePDF, downloadPDF } = await import("@/lib/pdf-invoice");
+                const logo = await loadLogoBase64();
+                const pdfData = await buildPdfData(activeInspection, logo);
+                const invoicePdf = generateContractorInvoicePDF(pdfData, contractorInvoiceOpts());
+                downloadPDF(invoicePdf, `${invoiceFileLabel()}-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
+              }}
+              className="w-full sm:w-auto min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
+            >
+              Download Contractor Invoice
+            </button>
+          </div>
           <button
             onClick={async () => {
               const { generatePhotoPackagePDF, downloadPDF } = await import("@/lib/pdf-invoice");
