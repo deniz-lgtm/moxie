@@ -122,6 +122,7 @@ export async function POST() {
           notion_page_id: fields.notion_page_id,
           notion_last_synced_at: fields.notion_last_edited || nowIso,
           logo_url: null,
+          labor_rate: null,
           raw: fields.raw,
         });
         pulled++;
@@ -156,6 +157,7 @@ export async function POST() {
           notion_page_id: fields.notion_page_id,
           notion_last_synced_at: fields.notion_last_edited || nowIso,
           logo_url: existing.logoUrl ?? null,
+          labor_rate: existing.laborRate ?? null,
           raw: fields.raw,
         });
         pulled++;

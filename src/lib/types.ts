@@ -357,6 +357,8 @@ export interface Vendor {
   contactName?: string;
   licenseNumber?: string;
   insuranceExpiry?: string;
+  /** Default hourly labor rate used when generating this contractor's invoices. */
+  laborRate?: number;
   logoUrl?: string;
   status?: VendorStatus;
   rating?: number;

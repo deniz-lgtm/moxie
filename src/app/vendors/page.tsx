@@ -396,6 +396,21 @@ export default function VendorsPage() {
               />
             </div>
             <EditableField label="License Number" value={selected.licenseNumber || ""} onBlurSave={(v) => updateVendor(selected.id, "licenseNumber", v || undefined)} />
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Labor Rate ($/hr)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder="75"
+                defaultValue={selected.laborRate ?? ""}
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  updateVendor(selected.id, "laborRate", raw === "" ? undefined : parseFloat(raw));
+                }}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">Default hourly rate used on this contractor&apos;s move-out invoices.</p>
+            </div>
             <div className="pt-3 border-t border-border text-sm space-y-1">
               <p><span className="text-muted-foreground">Jobs Completed:</span> <span className="font-medium">{m.jobsCompleted}</span></p>
               <p>
