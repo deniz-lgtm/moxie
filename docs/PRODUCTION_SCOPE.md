@@ -234,13 +234,30 @@ length-validation on AI batch responses (register #O5), Notion soft-deletes.
 
 ### 3.5 Marketing / "SEO" (~1,500 LOC) — prototype
 
+**Purpose & goal.** The intent is to **replace Moxie's external SEO/marketing
+agency** — the group that currently handles all SEO, content creation, social
+media, and blog posts to keep Moxie ranking high in search for off-campus USC
+housing. The vision is an in-house, AI-driven suite that **does that whole job**
+(keyword/ranking visibility, blog and social content generation, a content
+calendar/scheduler) so that work — and its cost — comes in-house. Lead-source
+tracking already shows where applicants come from, which is the start of closing
+the loop from "marketing spend" to "applications."
+
+**Reality check for the estimate:** this is the **largest gap between ambition
+and current state** in the app. As built it's mostly a polished **mockup** —
+
 Polished UI, but: SEO metrics, keywords, content library/calendar, monthly
 report are all hardcoded mock data; the "AI generator" is a 2-second fake
 delay with canned copy (no Claude call); nothing persists (no tables, no write
 routes). The only real feature is prospect/lead-source tracking
 (`/api/appfolio/prospect-sources`). There is also no actual SEO machinery
 (no `generateMetadata`, sitemap, robots, structured data) anywhere in the app.
-**Decision needed: build it for real (~3–4 wks) or descope.**
+**To truly replace an agency this is close to a greenfield build** (real
+content generation wired to Claude, persistence + scheduling, integrations with
+GA4 / Search Console / a rank tracker / social APIs, and actual on-site SEO).
+Budget it as a net-new product (~several weeks minimum), or stage it: start with
+the pieces that move rankings (real on-site SEO + blog generation) and expand
+into social/scheduling later.
 
 ### 3.6 Secondary modules
 
@@ -335,13 +352,19 @@ backoff.
    completion + parallel AI analysis + PDF memory fix.
 3. **Phase 2 — ops (~2–3 wks):** maintenance cron sync + O5; leasing O2, O9,
    O15 + public signing portal + applicant intake (or explicit descope).
-4. **Phase 3 — marketing decision (0 or ~3–4 wks):** build real or descope.
+4. **Phase 3 — marketing build (net-new):** the goal is to **replace the
+   external SEO/marketing agency**, so treat this as its own product track
+   sized separately from the platform/hardening work above — stage it
+   (on-site SEO + blog generation first, social/scheduling later) rather than
+   trying to land it all at once.
 
 ## 6. Open questions for the team
 
 - Single-org forever, or multi-tenant? (Drives the entire auth/RLS design.)
 - AppFolio write scope beyond guest cards?
-- Marketing/SEO: real build or descope?
+- Marketing/SEO: the goal is to replace the outside agency — what's the MVP
+  that meaningfully moves rankings/leads, and which existing tools (GA4, Search
+  Console, rank tracker, social schedulers) do we integrate vs. rebuild?
 - Confirm RUBS bills can move 100% to in-app upload (retire Windows box).
 - Compliance posture: PII retention/encryption; legal review of generated
   §1950.5 documents and e-sign flow.
