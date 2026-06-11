@@ -11,6 +11,20 @@ const MOXIE_PORTFOLIO_ID = "24";
 export async function POST() {
   try {
     const rows = await fetchMoxieWorkOrderRows();
+
+    // Guard: an empty fetch (AppFolio outage, report glitch) must not run
+    // reconciliation — it would flip every stored work order to "closed".
+    if (rows.length === 0) {
+      const syncedAt = await getLastSyncTime();
+      return NextResponse.json({
+        ok: true,
+        count: 0,
+        closedCount: 0,
+        syncedAt,
+        warning: "AppFolio returned no work orders; reconciliation skipped",
+      });
+    }
+
     const count = await upsertWorkOrders(rows);
 
     // Reconcile: any stored row whose property is in our portfolio but

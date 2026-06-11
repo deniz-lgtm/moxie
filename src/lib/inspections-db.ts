@@ -138,8 +138,11 @@ export async function uploadPhoto(dataUrl: string, inspectionId: string, photoId
   });
 
   if (error) {
-    console.error("[Moxie] Photo upload failed:", error.message);
-    return dataUrl; // fallback
+    // Never fall back to returning the base64 data URL: callers embed the
+    // returned value in the inspection row, and a multi-MB base64 string
+    // makes every subsequent autosave balloon until saves start failing
+    // (especially on slow cellular connections).
+    throw new Error(`Photo upload failed: ${error.message}`);
   }
 
   const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
@@ -162,8 +165,7 @@ export async function uploadFloorPlan(dataUrl: string, inspectionId: string): Pr
   });
 
   if (error) {
-    console.error("[Moxie] Floor plan upload failed:", error.message);
-    return dataUrl;
+    throw new Error(`Floor plan upload failed: ${error.message}`);
   }
 
   const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
@@ -185,8 +187,7 @@ export async function uploadPanorama(dataUrl: string, inspectionId: string, room
   });
 
   if (error) {
-    console.error("[Moxie] Panorama upload failed:", error.message);
-    return dataUrl;
+    throw new Error(`Panorama upload failed: ${error.message}`);
   }
 
   const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
@@ -238,7 +239,10 @@ export async function saveInspectionToDb(insp: Inspection): Promise<void> {
     }, { onConflict: "id" });
 
   if (error) {
-    console.error("[Moxie] saveInspection error:", error.message);
+    // Propagate so the API route returns 500 and the client save queue
+    // retries / surfaces the failure. Swallowing this made the UI report
+    // "saved" while nothing was persisted.
+    throw new Error(`saveInspection failed: ${error.message}`);
   }
 }
 
@@ -253,7 +257,7 @@ export async function deleteInspectionFromDb(id: string): Promise<void> {
 
   const { error } = await sb.from("inspections").delete().eq("id", id);
   if (error) {
-    console.error("[Moxie] deleteInspection error:", error.message);
+    throw new Error(`deleteInspection failed: ${error.message}`);
   }
 }
 
@@ -284,7 +288,7 @@ export async function bulkCreateInspections(inspections: Inspection[]): Promise<
     .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
 
   if (error) {
-    console.error("[Moxie] bulkCreateInspections error:", error.message);
+    throw new Error(`bulkCreateInspections failed: ${error.message}`);
   }
 }
 

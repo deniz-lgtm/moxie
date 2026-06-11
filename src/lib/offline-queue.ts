@@ -13,6 +13,13 @@ export interface QueuedSave {
   method: string;
   body: string;
   timestamp: string;
+  /**
+   * Optional logical key (e.g. "inspection:<id>"). Enqueueing with an existing
+   * key replaces the older entry so the queue only ever holds the latest
+   * snapshot per record — replaying a stale snapshot after a newer live save
+   * would silently roll back the user's work.
+   */
+  dedupeKey?: string;
 }
 
 /** Get all queued saves */
@@ -25,9 +32,12 @@ export function getOfflineQueue(): QueuedSave[] {
   }
 }
 
-/** Add a save to the offline queue */
+/** Add a save to the offline queue. Replaces any entry with the same dedupeKey. */
 export function enqueueOfflineSave(save: Omit<QueuedSave, "id" | "timestamp">): void {
-  const queue = getOfflineQueue();
+  let queue = getOfflineQueue();
+  if (save.dedupeKey) {
+    queue = queue.filter((q) => q.dedupeKey !== save.dedupeKey);
+  }
   queue.push({
     ...save,
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -37,6 +47,19 @@ export function enqueueOfflineSave(save: Omit<QueuedSave, "id" | "timestamp">): 
     localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
   } catch (err) {
     console.error("[OfflineQueue] Failed to persist queue:", err);
+  }
+}
+
+/** Drop queued entries for a key after a newer live save succeeded. */
+export function removeQueuedByKey(dedupeKey: string): void {
+  const queue = getOfflineQueue();
+  const filtered = queue.filter((q) => q.dedupeKey !== dedupeKey);
+  if (filtered.length !== queue.length) {
+    try {
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(filtered));
+    } catch (err) {
+      console.error("[OfflineQueue] Failed to persist queue:", err);
+    }
   }
 }
 
@@ -68,6 +91,9 @@ export async function replayOfflineQueue(): Promise<{ succeeded: number; failed:
         method: item.method,
         headers: { "Content-Type": "application/json" },
         body: item.body,
+        // Bound each replay so one stalled request (common on weak cellular,
+        // where the browser still reports "online") doesn't hang the loop.
+        signal: AbortSignal.timeout(30_000),
       });
       if (res.ok) {
         removeFromQueue(item.id);

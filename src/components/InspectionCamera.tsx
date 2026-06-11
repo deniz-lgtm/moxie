@@ -130,6 +130,9 @@ export function InspectionCamera({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoBase64: photoUrl, roomName, itemName: "auto-detect" }),
+        // Bounded so one stalled request on weak cellular doesn't hang the
+        // whole analysis batch; failure returns null → manual review.
+        signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) return null;
       const data = await res.json();

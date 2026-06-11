@@ -195,13 +195,10 @@ ${sharedRules}`;
   } catch (err: any) {
     clearTimeout(timeout);
     if (err?.name === "AbortError") {
-      return {
-        description: "AI analysis timed out (30s). Manual inspection recommended.",
-        inspector_review: "",
-        condition: "fair" as const,
-        damage_items: [],
-        total_estimated_cost: 0,
-      };
+      // Throw instead of fabricating a "fair" assessment: a timed-out
+      // analysis recorded as a real condition silently hides damage in the
+      // deposit-deduction documents. Callers track failures and offer retry.
+      throw new Error("AI analysis timed out (30s)");
     }
     throw err;
   } finally {
@@ -211,13 +208,7 @@ ${sharedRules}`;
   if (!response.ok) {
     const err = await response.text();
     console.error("[AI Analysis] API error:", err);
-    return {
-      description: `AI analysis failed: ${response.status}`,
-      inspector_review: "",
-      condition: "fair",
-      damage_items: [],
-      total_estimated_cost: 0,
-    };
+    throw new Error(`AI analysis failed: ${response.status}`);
   }
 
   const data = await response.json();
@@ -241,13 +232,10 @@ ${sharedRules}`;
     console.error("[AI Analysis] Failed to parse response:", text);
   }
 
-  return {
-    description: text.slice(0, 200),
-    inspector_review: "",
-    condition: "fair",
-    damage_items: [],
-    total_estimated_cost: 0,
-  };
+  // Truncated or non-JSON response (common when a slow connection cuts the
+  // body short) — fail loudly so the photo is queued for retry rather than
+  // recorded with an invented condition.
+  throw new Error("AI analysis returned an unreadable response");
 }
 
 /**

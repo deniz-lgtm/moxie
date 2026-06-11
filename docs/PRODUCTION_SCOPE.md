@@ -1,280 +1,240 @@
-# Moxie — Production Readiness Scope
+# Moxie — Engineering Handoff & Production Readiness Scope
 
-**Purpose:** A handoff document for an engineer evaluating what it takes to bring
-the Moxie property-management app to production. It describes each major module
-(what it does, what is real vs. prototype, the gaps that block production) plus
-the platform-wide issues that cut across everything. Rough effort ranges are
-given to support a proposal/estimate — they are order-of-magnitude, not a quote.
+**Audience:** the engineer taking over this codebase. This document covers
+(1) what the system is and how it's wired, (2) a module-by-module scope of
+what's real vs. prototype, (3) a register of audited defects — those already
+fixed on this branch and those still open — and (4) a recommended plan to
+production with rough effort. Effort ranges are order-of-magnitude planning
+inputs, not a quote.
 
-> Status snapshot: this is a working internal tool / advanced prototype. The core
-> workflows demo well and several are genuinely useful day-to-day, but there is
-> **no server-side authentication, no test suite, no CI, and several features run
-> on browser localStorage only.** The foundational platform work below will likely
-> dominate the budget more than any single feature.
-
----
-
-## 1. System overview
-
-- **Stack:** Next.js 16 (App Router) + React 19, TypeScript (strict), Tailwind v4.
-- **Backend:** Supabase (Postgres + Storage + Auth) — single project, ref
-  `muqogvuahmuaayrjhxft`. ~40 SQL migrations, applied **by hand** via the Supabase
-  MCP tool (no migration CI; see `CLAUDE.md`).
-- **External integrations:**
-  - **AppFolio** (property-management system) — read-only reports API, single
-    hardcoded portfolio (`portfolio_id = 24`), HTTP Basic auth. One write path
-    exists: creating guest cards from showing registrations.
-  - **Anthropic Claude** (Haiku 4.5) — photo damage analysis, utility-bill
-    parsing, work-order classification/summarization/translation, meeting action
-    extraction, task next-step suggestions.
-  - **Dropbox Sign / HelloSign** — e-signature (one template wired today).
-  - **Notion** — vendor directory sync, roadmap.
-  - **Bill-downloader** — a Node/Express service that runs on an **always-on
-    Windows desktop** and is exposed to the app via an **ngrok tunnel** (see
-    `services/bill-downloader/`).
-- **Deployment:** Vercel (assumed; no `vercel.json`, empty `next.config.ts`).
-- **Code size:** ~35–40k LOC of app/lib code. No tests.
-
-### Top platform-blocking risks (read this first)
-
-| # | Risk | Why it blocks production |
-|---|------|--------------------------|
-| 1 | **No server-side auth on API routes.** The `AuthGate` is a client-side UI gate only; every `/api/**` route runs with no session/user check. | Anyone who can reach the URLs can read or modify *all* company data — inspections, RUBS billing, work orders, vendors, signing requests. |
-| 2 | **RLS is effectively off.** Tables enable RLS but with permissive `using (true)` policies for `anon` + `authenticated`. | Supabase enforces no row-level isolation; the only thing standing between a caller and the data is app code that doesn't check identity. |
-| 3 | **localStorage is the system of record for ~10 features** (tours, comp-watch, vendors detail, reports, notices, unit-turns, capital projects, etc.). | No multi-user / multi-device sync; data lives in one browser and is lost when it's cleared. Breaks team collaboration. |
-| 4 | **RUBS bill ingestion depends on a Windows desktop + ngrok tunnel.** | A consumer machine and a free tunnel are a single point of failure for a money-touching workflow. |
-| 5 | **No tests, no CI, no monitoring/observability.** | Can't refactor or deploy safely; production failures are silent. |
-| 6 | **Uncontrolled Claude/AppFolio spend & failure modes.** No rate limits, quotas, caching guarantees, or graceful fallback when AppFolio is down. | Cost spikes; pages hard-fail on upstream outage. |
+> One-paragraph status: Moxie is a working internal tool / advanced prototype.
+> The core workflows (move-out inspections, RUBS billing, work-order ops,
+> showings) function end-to-end and are used day-to-day, but the platform has
+> **no server-side authentication, no tests, no CI, no observability**, and a
+> few features still persist only to browser localStorage. A field-reliability
+> audit (June 2026) fixed the worst cellular/network bugs (§4), but the
+> platform gaps in §2 dominate the work remaining.
 
 ---
 
-## 2. Platform / cross-cutting work (do this before or alongside feature hardening)
+## 1. System map
 
-These items are not owned by any one module; they affect all of them and are the
-backbone of the estimate.
+**Stack:** Next.js 16 (App Router) + React 19 + TypeScript (strict) + Tailwind 4.
+Deployed on Vercel (no `vercel.json`; defaults). ~35–40k LOC. Zero test files.
 
-1. **AuthN/AuthZ + RBAC.** Verify the Supabase session server-side on every API
-   route; introduce roles (admin / PM / read-only) and property-level scoping;
-   rewrite RLS policies to actually isolate rows. *~2–3 weeks.*
-2. **Data consolidation.** Migrate localStorage-only features into Supabase; add a
-   real sync/offline strategy (an `offline-queue.ts` exists but is only used by
-   inspections). *~2–3 weeks.*
-3. **Observability & resilience.** Error tracking (e.g. Sentry), structured logging,
-   error boundaries on all pages (only inspections has one today), and a cache/
-   fallback for AppFolio outages. *~1–2 weeks.*
-4. **CI/CD + testing.** GitHub Actions (lint, typecheck, test gates), a test suite
-   (currently zero), and **migration CI** so schema changes stop being applied by
-   hand. *~2–3 weeks.*
-5. **Cost & rate controls.** Rate limiting + de-duplication + spend tracking on
-   Claude and AppFolio calls; input size validation before sending images to AI.
-   *~1 week.*
-6. **Secrets & environments.** Establish staging vs. prod (today there is one
-   Supabase project and one AppFolio portfolio — schema changes hit live data
-   immediately); document Vercel env management. *~0.5–1 week.*
+**Persistence:** Supabase (Postgres + Storage + Auth), single project
+`muqogvuahmuaayrjhxft`, shared by dev and prod. ~40 SQL migrations in
+`supabase/migrations/` — the repo is the source of truth, but they are applied
+**manually** (see `CLAUDE.md`); there is no migration CI.
+⚠️ **There is no checked-in migration for the `inspections` table** — the
+deployed schema predates the convention. Reverse-engineer it into a migration
+before standing up any second environment.
 
-**Foundational subtotal: ~8–12 weeks** before/around feature-level hardening.
+**External integrations:**
+
+| Service | Use | Auth | Notes |
+|---|---|---|---|
+| AppFolio v2 Reports API | Properties, units, tenants, work orders, applications, showings | HTTP Basic (`APPFOLIO_CLIENT_ID/SECRET`) | Read-mostly; writes = guest-card creation. Hardcoded `portfolio_id = 24` in `src/lib/data.ts`. Rate limit 7 req/15s with backoff in `src/lib/appfolio.ts`. |
+| Anthropic Claude (Haiku 4.5) | Inspection photo analysis, floor-plan room detection, utility-bill parsing, work-order classify/summarize/translate, meeting action extraction | `ANTHROPIC_API_KEY` (server-side only) | No rate limiting, quotas, or spend tracking. |
+| Dropbox Sign | E-signature (1 template: deposit-refund) | `HELLOSIGN_API_KEY`; HMAC-verified webhook | `HELLOSIGN_TEST_MODE=1` default — must be unset in prod. |
+| Notion | Vendor directory two-way sync, roadmap | `NOTION_API_KEY` | Last-write-wins by timestamp. |
+| Bill-downloader (`services/bill-downloader/`) | Legacy RUBS PDF source | Shared bearer token | Node service on an always-on **Windows desktop behind an ngrok tunnel**. Newer flow uses Supabase Storage upload instead — finish that migration and retire this. |
+
+**Client/server split that matters:** the login (`AuthGate`/`AuthProvider`) is a
+client-side UI gate over Supabase Auth. **No API route verifies a session.**
+Supabase RLS is enabled but every policy is `using (true)` for `anon` +
+`authenticated`. Treat every endpoint and table as publicly writable today.
+
+---
+
+## 2. Platform gaps (the bulk of the work)
+
+1. **Server-side authN/authZ** — verify the Supabase JWT in every `/api/**`
+   route (clients must start sending the access token), add roles, rewrite RLS
+   for real isolation, signed URLs for the public `inspection-files` bucket.
+   *~2–3 wks.*
+2. **Data consolidation** — comp-watch, vendors detail, reports, notices,
+   unit-turns, capital projects and some tour data still localStorage-first;
+   migrate to Supabase (several `*-db.ts` libs + migrations already exist as
+   the pattern). *~2–3 wks.*
+3. **CI/CD + tests** — GitHub Actions (lint/typecheck/build), unit tests for
+   the money paths first (RUBS allocation, deduction math), migration CI.
+   *~2–3 wks.*
+4. **Observability** — Sentry (or similar), structured logs, error boundaries
+   beyond the single `InspectionErrorBoundary`, AppFolio outage fallback/cache.
+   *~1–2 wks.*
+5. **AI/infra cost controls** — rate limits + dedup on Claude endpoints; spend
+   alerts. *~1 wk.*
+6. **Environments** — a staging Supabase project + AppFolio sandbox story;
+   today schema changes hit live data. *~0.5–1 wk.*
+
+**Platform subtotal ≈ 8–12 weeks.**
 
 ---
 
 ## 3. Module scopes
 
-### 3.1 Move-out inspections (primary)
+### 3.1 Move-out inspections — flagship, ~85% complete (~7,300 LOC)
 
-**What it does.** A guided move-out workflow: pick a unit (auto-populated from
-AppFolio deposits) → upload a floor plan (PDF/image) → AI auto-detects rooms →
-room-by-room camera walk → **per-photo Claude Vision damage analysis** (forensic
-description + tenant-facing review + LA-market repair-cost estimate) → manual
-deduction review with edit history → generate CA Civil Code §1950.5-compliant
-PDFs (deposit deduction statement, disposition letter, contractor report,
-contractor invoice with vendor labor rate). Offline-capture with replay to
-Supabase. Four lighter inspection types also exist (move-in, quarterly, punch
-list, onboarding) — move-in is partial; the others are stubs.
+Wizard: unit select (auto-populated from AppFolio deposits) → floor-plan upload
++ AI room detection → guided camera walk (`InspectionCamera.tsx`, photos
+compressed to 1920px and timestamp-stamped) → per-photo Claude Vision damage
+analysis with LA-market cost estimates → human deduction review with edit
+history → four CA §1950.5 PDFs via jsPDF (`src/lib/pdf-invoice.ts`, includes
+contractor invoice using vendor labor rates). Offline-first: debounced save
+queue (`useSaveQueue`) + localStorage offline queue with replay.
 
-**Real vs. prototype.** Core move-out flow is ~85% functional end-to-end and is
-the most sophisticated part of the app (AI quality is high, offline-first is
-robust). **Stubbed/missing:** tenant email send (UI selects tenants but never
-dispatches), send-for-signature wiring, panorama capture.
+Still missing: tenant email dispatch (UI exists, no send), signature-panel
+wiring, panorama capture UI, the `inspections` table migration (above), photo
+pre-fetch for PDFs is memory-heavy at scale, AI analysis is serial (n photos =
+n × ~10–30s). Move-in is a lighter working page; quarterly/punch-list/
+onboarding are thin.
 
-**Production gaps.**
-- **No inspections table migration exists in the repo** — schema is assumed to
-  already live in the deployed DB. A new environment would fail. *(Confirm/author this migration.)*
-- No auth/validation on `/api/inspections/*` (CRUD accepts arbitrary JSON; upload
-  endpoint has no MIME/type check; storage URLs are public/guessable).
-- Serial AI calls (100 photos ≈ 50+ min, 100 billable calls, no rate limit).
-- PDF generation pre-loads all photos as base64 → browser OOM risk at scale.
-- AppFolio units fetch isn't paginated; AI failure silently returns "fair/no damage."
+### 3.2 RUBS — works end-to-end; money path (~6,300 LOC)
 
-**Size / effort.** ~7,300 LOC (move-out page alone is ~2,750; `pdf-invoice.ts`
-~1,683). Rough hardening: **~25–40 engineer-days** (auth, validation, migration,
-error handling, signature/email, perf, tests).
+Bills (LADWP/SoCal Gas PDFs) → Claude extraction (`rubs-bill-parser.ts`) →
+fuzzy property matching with aliases (`rubs-property-resolver.ts`) → meter→unit
+mappings (CSV import) → allocation (`rubs-calc.ts`: sqft/occupancy/equal/custom,
+integer-cent rounding, owner-absorbs-vacancy) → AppFolio Bulk-Charges CSV
+export with occupancy reconciliation. Dedup by SHA-256 + service period.
+**The allocation math was independently audited and is correct** (integer
+cents, remainder to largest fractional shares, sums exact).
 
----
+Priorities: retire the Windows/ngrok downloader (Supabase Storage path already
+exists); add an audit log (who changed which bill); unit-test the calc; tighten
+the fuzzy matcher (see register #O4); periodic occupancy sync from AppFolio.
 
-### 3.2 RUBS — utility bill allocation (money-touching)
+### 3.3 Leasing / applications / signing (~3,600 LOC)
 
-**What it does.** Ingests utility bills (LADWP, SoCal Gas), parses them with Claude
-Vision (provider, address, amount, period, meter), fuzzy-matches to properties,
-maps meters → units, then **allocates each bill across tenants** (by sqft /
-occupancy / equal / custom) with penny-accurate rounding and an
-"owner-absorbs-vacancy" option. De-dupes by file hash + service period. Exports
-AppFolio "Bulk Charges" CSV after reconciling against occupancy. Bills arrive
-either via Supabase Storage upload (newer) or the Windows bill-downloader (legacy).
+Working: open-house slots with public signup (`/s/[token]`), capacity logic,
+AppFolio 1-on-1 showing shadows + promotion, push-to-AppFolio guest cards,
+Dropbox Sign send + HMAC-verified webhook + signed-PDF storage.
+Prototype: `/leasing/applications` is a read-only AppFolio view; `/apply/[id]`
+is mock data (intended to become a token-authed public portal); the public
+signing page `/s/[token]/signing` is not built; only one signing template.
+Public-route hardening needed: token entropy/rate limiting, registration
+validation, a registration capacity transaction (register #O2).
 
-**Real vs. prototype.** Core workflow works end-to-end and has been used on real
-bills. Calculation, dedup, property resolver, CSV import, and AppFolio export are
-all functional.
+### 3.4 Maintenance & vendors (~8,500 LOC incl. shared data layer)
 
-**Production gaps.**
-- **Bill-downloader on a Windows desktop behind ngrok** is the headline risk —
-  fragile, manual (tunnel URL changes on restart), unmonitored. **Recommend
-  retiring it entirely in favor of Supabase Storage upload.**
-- Permissive RLS + shared bearer token; no per-user isolation or audit trail of
-  who changed a bill (this is financial data → it needs an audit log).
-- No validation at save (negative totals, split method vs. meter type), no unit
-  tests on allocation math, occupancy sync from AppFolio is manual/one-way.
+Working: manual AppFolio work-order sync into `work_orders` +
+`work_order_annotations` overlay (Moxie edits survive re-sync), Claude
+classify/summarize/translate with keyword fallbacks and server-side caching,
+analytics dashboard, vendor directory with two-way Notion sync and labor rates.
+Needed: a cron schedule for sync (Vercel Cron), reconciliation audit trail,
+length-validation on AI batch responses (register #O5), Notion soft-deletes.
 
-**Size / effort.** ~6,300 LOC (UI ~3,300; lib ~2,200; routes ~500; service ~160).
-Rough hardening: **~44–72 hours (≈1.5–2 weeks)** — retire downloader (~1–2d),
-RLS/audit (~2–3d), allocation tests + monitoring (~2–3d), validation/docs.
+### 3.5 Marketing / "SEO" (~1,500 LOC) — prototype
 
----
+Polished UI, but: SEO metrics, keywords, content library/calendar, monthly
+report are all hardcoded mock data; the "AI generator" is a 2-second fake
+delay with canned copy (no Claude call); nothing persists (no tables, no write
+routes). The only real feature is prospect/lead-source tracking
+(`/api/appfolio/prospect-sources`). There is also no actual SEO machinery
+(no `generateMetadata`, sitemap, robots, structured data) anywhere in the app.
+**Decision needed: build it for real (~3–4 wks) or descope.**
 
-### 3.3 Applications / leasing & signing
+### 3.6 Secondary modules
 
-**What it does.** A prospect-to-tenant pipeline in three layers: (1) **tours/
-showings** — schedule open-house slots, public signup at `/s/[token]`, dual-source
-with AppFolio 1-on-1 showings, and push registrations to AppFolio as guest cards
-(a real write path); (2) **applications** — a team view that *reads* the AppFolio
-application pipeline; (3) a **public applicant portal** at `/apply/[id]`. Plus
-**document signing** via Dropbox Sign (send + HMAC-verified webhook + signed-PDF
-storage).
-
-**Real vs. prototype.** Showings/tours and the AppFolio guest-card push are
-working. Signing send + webhook are built and HMAC verification is correct.
-**Prototype:** the applications view is read-only (no real intake/workflow); the
-public apply portal is **mock data only** (a code comment notes it should be a
-token-protected public route in prod); only one signing template exists and the
-public `/s/[token]/signing` UI is **not implemented**.
-
-**Production gaps.**
-- Public routes rely on token secrecy (no auth); validate token entropy and add
-  rate-limiting/brute-force protection.
-- `HELLOSIGN_TEST_MODE=1` by default — needs an explicit prod guard or signatures
-  won't be billable/legal.
-- PII (applicant/prospect data, signed PDFs) stored with no retention/encryption
-  policy. No auth on the signing/showings API routes.
-
-**Size / effort.** ~3,600 LOC. Rough hardening to finish intake + signing portal +
-secure public routes: **~3–5 weeks** (most of it is the missing applicant intake
-and the public signing UI, not the existing showings code).
+Meetings (Supabase, recorder + AI action items), Tasks (Supabase + AI next
+step), Floor-plan library (Supabase, feeds inspections), Portfolio dashboard
+(AppFolio read-only, biggest page), Capital projects / notices / unit-turns /
+comp-watch / reports / tours (functional UIs, several localStorage-only —
+roll into platform item 2), Users (Supabase service-role admin API), Team
+calendar, Notion roadmap.
 
 ---
 
-### 3.4 Maintenance & vendors
+## 4. June 2026 audit — defect register
 
-**What it does.** Syncs AppFolio work orders into Supabase (manual trigger),
-overlays Moxie annotations (status/assignment/vendor/follow-up/notes that survive
-re-sync), and adds AI: Claude **classification** (category/priority/title, with a
-keyword fallback), **summarization** (cached), and **Spanish translation** for
-tech dispatch. Includes a maintenance-analytics dashboard ("Resident Pulse") and a
-**vendor directory with bidirectional Notion sync** (last-write-wins) and labor
-rates feeding the inspection invoices.
+A code audit (all main modules + shared infra) was run on 2026-06-11,
+triggered in part by a field report: **“works on WiFi but not on cellular.”**
 
-**Real vs. prototype.** Largely feature-complete for internal use and well
-architected (clean Supabase schema, JSONB `raw` for extensibility, AI fallbacks).
+### 4.1 Cellular root cause (diagnosed, fixed)
 
-**Production gaps.**
-- **Sync is manual only — no scheduler.** Needs Vercel Cron (or similar) for
-  periodic sync; reconciliation that flips rows to "closed" stores no reason
-  (hard to debug false positives).
-- No auth on `/api/maintenance/*` and `/api/vendors/*`; permissive RLS.
-- AI endpoints aren't rate-limited; Notion last-write-wins can silently overwrite
-  on clock skew and has no soft-delete/tombstone.
-- Portfolio `24` hardcoded (a same-named portfolio `10`/`25` is unsupported).
+The inspection flow is the cellular-heavy path (photos captured in the field).
+Four compounding defects explain WiFi-works/cellular-fails:
 
-**Size / effort.** ~8,500 LOC across UI/lib/routes (UI dominates; `data.ts` and
-`appfolio.ts` are shared infra). Rough hardening: **~2–3 weeks** (auth, cron sync,
-logging, tests, Notion edge cases).
+1. **Failed photo uploads silently embedded multi-MB base64 into the
+   inspection record.** `uploadPhoto()` in `src/lib/inspections-db.ts`
+   returned the base64 data URL as the "uploaded URL" whenever Supabase
+   Storage errored — and the server upload route happily returned it with
+   HTTP 200. From then on, *every* autosave carried megabytes of inline
+   images. WiFi absorbed it; cellular requests stalled or failed.
+2. **The autosave used `keepalive: true` unconditionally.** Browsers reject
+   keepalive bodies over ~64KB with an immediate "Failed to fetch", so once an
+   inspection grew past that (AI text + edit history — even without bug #1),
+   saves failed deterministically.
+3. **No fetch had a timeout.** On weak cellular, `navigator.onLine` stays
+   `true` while sockets stall for minutes; the save queue sat in "saving"
+   forever and the offline queue never engaged (it only armed on the browser's
+   `offline` event, which cellular rarely fires).
+4. **Failures were reported as success.** `saveInspectionToDb()` logged
+   Supabase errors and returned normally, so the API returned `{ok:true}` and
+   the UI showed "saved" for writes that never happened. Similarly, AI
+   analysis timeouts/truncations were recorded as a fabricated
+   `condition: "fair", damage_items: []` — i.e. slow networks could silently
+   erase damage findings from legal deduction documents.
 
----
+### 4.2 Fixed on this branch (commit-by-commit in PR #131)
 
-### 3.5 Marketing / "SEO"
+| # | Fix | Files |
+|---|-----|-------|
+| F1 | Storage/DB failures now **throw** instead of returning fake success or base64 fallbacks (uploads, save, delete, bulk-create) | `src/lib/inspections-db.ts` |
+| F2 | Autosave: `keepalive` only for <60KB bodies; 30s `AbortSignal.timeout`; network-level failures persist the snapshot to the offline queue and surface the error | `src/app/inspections/move-out/page.tsx` |
+| F3 | Offline queue: per-inspection `dedupeKey` (latest snapshot only — a stale replay can no longer roll back newer data); queued entries cleared on successful live save; 30s timeout per replay; **replay now runs on mount + every 60s**, not only on the `online` event | `src/lib/offline-queue.ts`, move-out page |
+| F4 | Photo upload + AI analyze fetches bounded with 60s timeouts (camera component and both analyze loops) so one stalled request can't hang a batch | move-out page, `src/components/InspectionCamera.tsx` |
+| F5 | AI analysis **throws** on timeout / API error / truncated JSON instead of fabricating "fair, no damage" — failed photos land in the existing failed-list with per-item retry UI | `src/lib/ai-analysis.ts` |
+| F6 | AppFolio pagination failure now throws instead of silently returning a **partial** dataset (previously: missing units/tenants/work orders with no signal) | `src/lib/appfolio.ts` |
+| F7 | Work-order sync skips "mark missing as closed" reconciliation when AppFolio returns zero rows (an outage would have closed every work order) | `src/app/api/maintenance/sync/route.ts` |
+| F8 | Dropbox Sign webhook ACKs (200) on HMAC failure without processing — non-2xx responses cause Dropbox to disable the callback permanently | `src/app/api/webhooks/dropbox-sign/route.ts` |
+| F9 | RUBS calculate: rejects missing/empty `units` (400), refuses to mark a bill "calculated" with zero allocations (422), refuses to recalculate a **posted** bill (409) | `src/app/api/rubs/calculate/route.ts` |
+| F10 | Fire-and-forget saves on move-in/quarterly/punch-list/onboarding pages now catch and alert on failure | 4 inspection pages |
 
-**What it does (and doesn't).** Despite the name, this is **not a real SEO
-implementation** — there is no metadata/sitemap/robots/schema.org work at the app
-level. It's a polished dashboard with: a mock SEO metrics panel (organic sessions,
-rankings — all hardcoded), a content library/calendar (mock), an "AI content
-generator" that is a **2-second fake delay returning canned copy (no Claude
-wired)**, AI suggestions (mock, "Powered by Claude" badge is misleading), and a
-mock monthly marketing report. **The only real feature is prospect/lead-source
-tracking**, which pulls live AppFolio applications + Supabase showings.
+`npx tsc --noEmit` and `next build` pass after these changes.
 
-**Real vs. prototype.** ~90% prototype/mockup. Nothing persists (no DB tables, no
-`/api/marketing/*` write routes); users will quickly find "nothing sticks."
+### 4.3 Outstanding (audited, not yet fixed) — prioritized
 
-**Production gaps.** Build the backend from scratch: Supabase tables for content/
-calendar/suggestions, CRUD routes, real Claude integration, real metric sources
-(GA4 / Search Console / SE Ranking), and — if "SEO" is actually wanted —
-app-level `generateMetadata`/OpenGraph/sitemap. Plus auth and tests.
+| # | Issue | Where | Why it matters / suggested fix |
+|---|-------|-------|--------------------------------|
+| O1 | **No server-side auth anywhere** | all `/api/**`, RLS | §2 item 1. The defining production blocker. |
+| O2 | Showing registration capacity check is read-then-write — concurrent signups can overbook | `api/showings/registrations/route.ts:74-84` | Enforce in Postgres (constraint/trigger or `select … for update` RPC). Needs a migration. |
+| O3 | RUBS Supabase failures fall back to localStorage and report success | `src/lib/rubs-db.ts` (multiple) | Same class as F1; surface sync failures to the caller. |
+| O4 | Property fuzzy-matcher allows substring cross-matches ("Main St" ↔ "Main St Plaza") | `rubs-property-resolver.ts:216` | Human-confirmed in the import preview today, but tighten before automating; add tests with the real portfolio names. |
+| O5 | AI batch endpoints don't validate response length/shape — short responses silently fall back per item | `api/maintenance/classify/route.ts:136-154`, `summarize` | Validate `parsed.length === valid.length`; flag fallback results. |
+| O6 | Bill parser uses Claude JSON with minimal validation (only `totalAmount > 0`) | `rubs-bill-parser.ts:118` | Schema-validate required fields before save. |
+| O7 | CSV import: short rows silently become empty cells; account-number strip unvalidated | `rubs-csv-import.ts:148, 238` | Add row-length + `^\d+$` validation with warnings. |
+| O8 | Export total summed in floats; amounts round-trip through strings | `rubs-appfolio-export.ts:294, 322` | Sum in integer cents. |
+| O9 | Signed-PDF upload failure leaves `status='signed'` with no PDF and no retry path | `signing-db.ts:168-185`, webhook | Return structured result; add retry. |
+| O10 | Notion vendor sync: clock-skew can silently overwrite local edits; no tombstones | `api/vendors/sync/route.ts:139` | Tie-breaker + soft deletes. |
+| O11 | Page-level fetch hygiene: most pages use `Promise.all` + `.catch(() => ({}))` with no timeouts; dashboard hides timeout behind a blank screen | `portfolio/page.tsx:415`, `leasing/units:177`, `maintenance:334`, `page.tsx:138` | Introduce one `fetchJSON(url, {timeoutMs})` helper; `allSettled` + per-section skeletons. Biggest *remaining* cellular UX item. |
+| O12 | localStorage quota failures silent (portfolio choice, queue writes) | `PortfolioContext.tsx:35` | Surface a warning; relevant on photo-heavy devices. |
+| O13 | No `inspections` table migration in repo | `supabase/migrations/` | Blocks any new environment. |
+| O14 | Upload endpoint: no MIME whitelist; public bucket URLs guessable | `api/inspections/upload`, Storage | Whitelist + signed URLs (with §2 item 1). |
+| O15 | Duplicate-send risk on signing (no idempotency key) | `api/signing/send` | Accept idempotency key. |
 
-**Size / effort.** ~1,500 LOC (mostly UI shell). Rough effort to make it real:
-**~3–4 weeks**, and this is the module where scope should be confirmed with the
-team — much of it may be cheaper to rebuild than to retrofit.
-
----
-
-## 4. Secondary modules (for completeness / pricing)
-
-These weren't the headline asks but exist in the app and the engineer should price
-them. Most are functional UIs; several are localStorage-only (the recurring theme).
-
-| Module | State | Notes |
-|--------|-------|-------|
-| **Meetings** (`/meetings`) | Working, Supabase-backed | Recorder hook, AI action-item extraction, attachments. ~530 LOC + lib. |
-| **Tasks** (`/tasks`) | Working, Supabase-backed | Standalone tasks, AI next-step suggestion. |
-| **Floor plans** (`/floor-plans`) | Working, Supabase-backed | AI room detection; feeds inspections. ~1,050 LOC. |
-| **Portfolio** (`/portfolio`) | Working, AppFolio-backed | Largest dashboard (~1,800 LOC); read-only. |
-| **Showings** (`/showings`) | Working | Covered under leasing; ~1,300 LOC. |
-| **Capital projects / Notices / Unit-turns / Comp-watch / Reports / Tours** | Mixed; **localStorage-only** | Per `TODO.md`. Functional UIs but no multi-device sync — fold into the data-consolidation workstream. |
-| **Contacts / Users** | Partial | `users` uses the Supabase service-role admin API; `contacts` table exists but is largely unused. |
-| **Calendar / Notion roadmap** | Working integrations | Team calendar, Notion roadmap embed. |
-
----
-
-## 5. Suggested phasing for the proposal
-
-1. **Phase 0 — Platform foundation (≈8–12 wks):** server-side auth + RBAC, real
-   RLS, data consolidation off localStorage, CI/CD + first tests, observability,
-   cost controls, staging environment, migration CI. *Prerequisite for everything.*
-2. **Phase 1 — Money & legal paths first:** RUBS (retire the Windows downloader,
-   add audit log + allocation tests) and Move-out inspections (auth/validation,
-   inspections-table migration, signature/email, perf). These touch dollars and
-   legal documents, so they carry the most risk.
-3. **Phase 2 — Operations:** Maintenance (scheduled sync, auth, tests) and Leasing
-   (finish applicant intake + public signing portal, secure public routes).
-4. **Phase 3 — Growth/marketing:** decide build-vs-rebuild on Marketing/SEO; wire
-   real data sources and persistence, or descope.
-
-**Very rough total:** foundational ~8–12 weeks + module hardening ~9–14 weeks of
-focused work, overlapping in places. A single experienced full-stack engineer
-should treat this as a multi-month engagement; the platform gaps (auth, data,
-testing) are the dominant cost, not the feature code.
+Verified-correct in the audit (don't re-litigate): RUBS penny-rounding math,
+Dropbox HMAC crypto (timing-safe), Notion pagination, AppFolio rate-limit
+backoff.
 
 ---
 
-## 6. Open questions for the incoming engineer / team
+## 5. Suggested plan
 
-- **Multi-tenant or single-org?** Everything is hardcoded to one AppFolio
-  portfolio and one Supabase project. The auth/RLS design depends on this answer.
-- **AppFolio write scope** — is two-way sync (beyond guest cards) in scope, or
-  stays read-mostly?
-- **Marketing/SEO** — is the intent real content tooling + real SEO, or can it be
-  descoped? Biggest scope uncertainty.
-- **RUBS bill sourcing** — confirm full migration to in-app upload so the Windows
-  desktop + ngrok dependency can be retired.
-- **Is there an existing `inspections` table** in the deployed DB that needs to be
-  reverse-engineered into a checked-in migration?
-- **Compliance** — tenant PII retention/encryption and the legal standing of
-  generated §1950.5 deduction documents and e-signatures.
-</content>
-</invoke>
+1. **Phase 0 — platform (8–12 wks):** §2 items; fold in O1, O13, O14, O3, O11.
+2. **Phase 1 — money/legal hardening (~3–4 wks):** RUBS O4–O8 + audit log +
+   calc tests + retire ngrok downloader; inspections tenant-email/signature
+   completion + parallel AI analysis + PDF memory fix.
+3. **Phase 2 — ops (~2–3 wks):** maintenance cron sync + O5; leasing O2, O9,
+   O15 + public signing portal + applicant intake (or explicit descope).
+4. **Phase 3 — marketing decision (0 or ~3–4 wks):** build real or descope.
+
+## 6. Open questions for the team
+
+- Single-org forever, or multi-tenant? (Drives the entire auth/RLS design.)
+- AppFolio write scope beyond guest cards?
+- Marketing/SEO: real build or descope?
+- Confirm RUBS bills can move 100% to in-app upload (retire Windows box).
+- Compliance posture: PII retention/encryption; legal review of generated
+  §1950.5 documents and e-sign flow.
+- Anthropic + AppFolio budget ceilings (to size rate limits sensibly).

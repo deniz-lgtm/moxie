@@ -103,7 +103,15 @@ async function appfolioFetchAll(endpoint: string, body?: Record<string, string>)
       { headers: getAuthHeaders() },
       `${endpoint} [paginate]`
     );
-    if (!response.ok) break;
+    if (!response.ok) {
+      // Don't silently return a partial dataset — downstream consumers
+      // (move-out unit lists, RUBS occupancy, work-order sync) treat the
+      // result as the complete portfolio.
+      const text = await response.text();
+      throw new Error(
+        `AppFolio pagination failed for ${endpoint} (${response.status}): ${text.slice(0, 200)}`,
+      );
+    }
     result = await response.json();
     allResults = allResults.concat(result.results || []);
   }

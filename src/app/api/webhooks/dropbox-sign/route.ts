@@ -71,7 +71,10 @@ export async function POST(request: Request) {
       type: payload.event.event_type,
       time: payload.event.event_time,
     });
-    return new NextResponse("Hello API Event Received - signature invalid", { status: 401 });
+    // Ack with 200 but skip processing: Dropbox Sign disables the callback
+    // after repeated non-2xx responses, so a key mismatch would permanently
+    // kill event delivery. The event is logged above and NOT handled.
+    return new NextResponse(ACK_BODY, { status: 200 });
   }
 
   try {

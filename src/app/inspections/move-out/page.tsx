@@ -11,7 +11,7 @@ import { FloorPlanPreview, isPdfUrl } from "@/components/FloorPlanPreview";
 import { SendForSignaturePanel } from "@/components/SendForSignaturePanel";
 import { useSaveQueue } from "@/hooks/useSaveQueue";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
+import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue, removeQueuedByKey } from "@/lib/offline-queue";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
 import { validateImage, compressImage, isHeicFile, convertHeicToJpeg, stampPhoto } from "@/lib/image-utils";
 import { usePortfolio } from "@/contexts/PortfolioContext";
@@ -76,6 +76,9 @@ async function uploadPhotoToStorage(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataUrl, inspectionId, photoId }),
+        // On weak cellular the browser still reports "online" but requests
+        // stall indefinitely; without a deadline the retry loop never runs.
+        signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `Upload failed (${res.status})` }));
@@ -226,24 +229,40 @@ function MoveOutInspectionContent() {
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
 
-  // Sync offline queue when connectivity returns
+  // Sync offline queue when connectivity returns. Also runs on mount and on a
+  // slow interval: on weak cellular the browser never fires offline/online
+  // events (navigator.onLine stays true), so queued saves from a previous
+  // session or a stalled connection would otherwise sit forever.
+  const replayQueueIfNeeded = useCallback(() => {
+    if (!navigator.onLine) return;
+    const queue = getOfflineQueue();
+    if (queue.length === 0) {
+      setOfflineQueueCount(0);
+      return;
+    }
+    setSyncingOffline(true);
+    setOfflineQueueCount(queue.length);
+    replayOfflineQueue().then(({ succeeded }) => {
+      setSyncingOffline(false);
+      setOfflineQueueCount(getOfflineQueue().length);
+      if (succeeded > 0) {
+        console.log(`[MoveOut] Synced ${succeeded} offline changes`);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     if (wasOffline && isOnline) {
       clearWasOffline();
-      const queue = getOfflineQueue();
-      if (queue.length > 0) {
-        setSyncingOffline(true);
-        setOfflineQueueCount(queue.length);
-        replayOfflineQueue().then(({ succeeded }) => {
-          setSyncingOffline(false);
-          setOfflineQueueCount(getOfflineQueue().length);
-          if (succeeded > 0) {
-            console.log(`[MoveOut] Synced ${succeeded} offline changes`);
-          }
-        });
-      }
+      replayQueueIfNeeded();
     }
-  }, [wasOffline, isOnline, clearWasOffline]);
+  }, [wasOffline, isOnline, clearWasOffline, replayQueueIfNeeded]);
+
+  useEffect(() => {
+    replayQueueIfNeeded();
+    const interval = setInterval(replayQueueIfNeeded, 60_000);
+    return () => clearInterval(interval);
+  }, [replayQueueIfNeeded]);
 
   // New inspection form (tenant info is resolved at send time, not creation)
   const [newForm, setNewForm] = useState({
@@ -269,27 +288,49 @@ function MoveOutInspectionContent() {
   const { queueSave, saveStatus, isDirty, flushSaveAsync, lastError, retrySave } = useSaveQueue<Inspection>({
     saveFn: async (insp) => {
       const body = JSON.stringify({ inspection: insp });
+      const dedupeKey = `inspection:${insp.id}`;
+      const queueLocally = () => {
+        enqueueOfflineSave({ endpoint: "/api/inspections/crud", method: "POST", body, dedupeKey });
+        setOfflineQueueCount(getOfflineQueue().length);
+      };
 
       // If offline, queue locally and return success
       if (!navigator.onLine) {
-        enqueueOfflineSave({ endpoint: "/api/inspections/crud", method: "POST", body });
-        setOfflineQueueCount(getOfflineQueue().length);
+        queueLocally();
         return;
       }
 
-      const res = await fetch("/api/inspections/crud", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        // keepalive lets the request complete even if the tab/window is
-        // closing or the component unmounts mid-send. Critical for not
-        // losing the final "completed" save when the user navigates away.
-        keepalive: true,
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/inspections/crud", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          // keepalive lets the request complete even if the tab/window is
+          // closing or the component unmounts mid-send — but browsers reject
+          // keepalive bodies over ~64KB outright ("Failed to fetch"), so only
+          // request it for small payloads. Large inspections rely on the
+          // offline queue below instead.
+          keepalive: body.length < 60_000,
+          // Bound the request: on weak cellular, navigator.onLine stays true
+          // while fetches stall for minutes, freezing the save queue.
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (err) {
+        // Network-level failure (stall/timeout/connection drop) — persist the
+        // snapshot to the offline queue so the work survives navigation, then
+        // rethrow so the save queue retries and surfaces the state.
+        queueLocally();
+        throw err instanceof Error ? err : new Error("Network error");
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Network error" }));
         throw new Error(err.error || `Save failed (${res.status})`);
       }
+      // Live save succeeded — drop any older queued snapshot of this
+      // inspection so a later replay can't roll back newer data.
+      removeQueuedByKey(dedupeKey);
+      setOfflineQueueCount(getOfflineQueue().length);
     },
     debounceMs: 500,
     maxRetries: 3,
@@ -1052,6 +1093,7 @@ function MoveOutInspectionContent() {
             roomName: rooms[ri].name,
             itemName: item.item,
           }),
+          signal: AbortSignal.timeout(60_000),
         });
         const analysis = await res.json();
 
@@ -1130,6 +1172,7 @@ function MoveOutInspectionContent() {
             roomName: rooms[roomIdx].name,
             itemName: item.item,
           }),
+          signal: AbortSignal.timeout(60_000),
         });
         const analysis = await res.json();
         if (analysis.condition) {
