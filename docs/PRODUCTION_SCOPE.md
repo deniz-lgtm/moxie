@@ -17,6 +17,34 @@ inputs, not a quote.
 
 ---
 
+## 0. Business context (read this first)
+
+**Moxie Management is the premier off-campus student-housing property manager at
+USC.** That single fact drives almost every design decision in this app:
+
+- **Lean team, ~1,000+ units.** A small staff manages a very large portfolio,
+  so the product's core job is to let one person do what would normally take
+  several — heavy automation and AI assistance are not nice-to-haves, they're
+  the point.
+- **The entire portfolio turns over at once.** Students move out **July 31** and
+  the next cohort moves in **August 15**. Everything — move-out inspections,
+  deposit accounting, repairs/cleaning/turns, new leases — is compressed into a
+  ~2-week window across the whole portfolio, every year. Tools that are merely
+  "fine" at normal cadence fall over under this synchronized peak; throughput
+  and reliability during the turn are the real acceptance criteria.
+- **Legally regulated, adversarial counterparty.** Security-deposit handling is
+  governed by California law (Civil Code §1950.5: itemized deductions,
+  documentation, strict return deadlines). The tenants are tech-savvy students
+  who increasingly **use AI to dispute deductions** and to challenge late
+  returns. So outputs must be fast, consistent, well-documented, and
+  defensible — sloppy or late paperwork is a direct financial and legal risk.
+
+Keep this in mind reading the module scopes: features exist to collapse
+multi-person manual workflows into one-person, phone-first, AI-assisted ones,
+and to survive a once-a-year throughput spike under legal deadlines.
+
+---
+
 ## 1. System map
 
 **Stack:** Next.js 16 (App Router) + React 19 + TypeScript (strict) + Tailwind 4.
@@ -75,6 +103,30 @@ Supabase RLS is enabled but every policy is `using (true)` for `anon` +
 ## 3. Module scopes
 
 ### 3.1 Move-out inspections — flagship, ~85% complete (~7,300 LOC)
+
+**Purpose & goal.** This is the highest-stakes workflow in the business because
+of the synchronized July 31 move-out (§0). **The old process:** two property
+managers walk every unit together — one shooting photos, the other recording
+voice notes on what to clean/repair/deduct — across 1,000+ units in days. Then
+an admin replays the voice notes to guess deductions and amounts, schedules
+contractors/maintenance/cleaners per unit, and hand-prepares each tenant's legal
+deposit-return paperwork. Tenants then dispute the deductions (often with AI) and
+challenge any late deposit return. It's slow, two-person, error-prone, and
+legally exposed at the worst possible time of year.
+
+**What we're building:** collapse that into a **one-person, phone-only** flow.
+AppFolio pre-populates the units with a move-out; floor plans (pre-loaded before
+the turn, with AI naming the rooms — Bedroom 1, Bedroom 2, …) give the PM a
+ready room-by-room checklist. The PM walks each unit on their own phone,
+photographing only the items to repair or deduct, saves, and moves to the next
+unit. **Then, from a computer,** an admin reviews each inspection: AI proposes a
+deduction (description + amount) per photo, the admin accepts or edits it, and on
+finalize the system auto-generates the legally-compliant PDFs — disposition
+letter, itemized deposit return with explanations, and a **matching contractor
+invoice that ties to the deductions** — for the admin to send. The outcome we
+want: faster turns, consistent and defensible §1950.5 documentation, deposits
+returned on time, and far fewer successful disputes — all achievable by a lean
+team during the two-week crunch.
 
 Wizard: unit select (auto-populated from AppFolio deposits) → floor-plan upload
 + AI room detection → guided camera walk (`InspectionCamera.tsx`, photos
