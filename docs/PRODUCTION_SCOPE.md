@@ -144,6 +144,31 @@ onboarding are thin.
 
 ### 3.2 RUBS — works end-to-end; money path (~6,300 LOC)
 
+**Purpose & goal.** Run by the **admin**. Moxie recovers utility costs from
+students, but the **scattered-site portfolio makes the metering genuinely
+messy**: on one property a single water meter may cover *all* units while
+electric meters each cover only *some* units. That irregularity is exactly why
+off-the-shelf RUBS products have failed here in the past. **Today** the admin
+keeps an elementary spreadsheet encoding the mapping and splits (e.g. 3 units ×
+5 tenants = 15 tenants on this water meter), and every billing cycle (~monthly
+or every two months) she reads each bill off the utility websites, types the
+figures into her spreadsheet, downloads AppFolio's **blank charge template**
+(pre-filled with the right properties), fills it in by hand, and uploads it back
+to AppFolio — which is what actually charges the students. **This takes a couple
+of days each cycle and a lot of utilities get missed** (i.e. lost revenue) in
+the manual shuffle.
+
+**What we're building (and are close to):** a Cowork agent that already holds
+the utility logins downloads every bill automatically; the system imports the
+meter→unit mapping and the blank AppFolio template; the admin uploads the bills,
+and because everything is already mapped, metered, and templated, **a few clicks
+allocates every bill and writes the result straight back into the AppFolio
+spreadsheet, ready to upload as-is** — with a review step in between. The goal is
+to turn a ~2-day, error-prone monthly chore into a few minutes of clicking,
+while capturing utilities that previously slipped through. Because this posts
+real charges to students, **accuracy and an audit trail matter more than
+anywhere else in the app.**
+
 Bills (LADWP/SoCal Gas PDFs) → Claude extraction (`rubs-bill-parser.ts`) →
 fuzzy property matching with aliases (`rubs-property-resolver.ts`) → meter→unit
 mappings (CSV import) → allocation (`rubs-calc.ts`: sqft/occupancy/equal/custom,
