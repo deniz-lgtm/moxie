@@ -183,6 +183,25 @@ the fuzzy matcher (see register #O4); periodic occupancy sync from AppFolio.
 
 ### 3.3 Leasing / applications / signing (~3,600 LOC)
 
+**Purpose & goal.** *(Lower priority than inspections/RUBS.)* Moxie continues to
+run leasing **on AppFolio** — this module is not trying to replace it. The
+specific pain it targets is the **document-collection gap in the application
+process**. An application can have **multiple tenants tied to it** (groups of
+students sharing a unit), and partway through, the process **falls out of
+AppFolio**: applicants and their **parents/guarantors email documents to the
+admin**, where they pile up in a mailbox. Leasing staff then spend their time
+**chasing people** to submit the missing pieces so the application can be
+completed and the unit locked down — a real bottleneck when the whole portfolio
+is leasing toward the same Aug 15 move-in.
+
+**What we're building:** essentially a **leasing-application tracker** (similar
+in spirit to EliseAI's) that sits alongside AppFolio and (a) **auto-nudges**
+applicants/guarantors for outstanding items, and (b) gives students **one place
+to upload the required documents**, which then get **attached to the right
+application automatically** — getting docs out of the admin's inbox and shrinking
+the time-to-complete-and-sign. The outcome: fewer stalled applications, less
+manual chasing, faster lockdown of units.
+
 Working: open-house slots with public signup (`/s/[token]`), capacity logic,
 AppFolio 1-on-1 showing shadows + promotion, push-to-AppFolio guest cards,
 Dropbox Sign send + HMAC-verified webhook + signed-PDF storage.
