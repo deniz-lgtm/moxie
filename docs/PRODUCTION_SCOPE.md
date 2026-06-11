@@ -213,6 +213,18 @@ validation, a registration capacity transaction (register #O2).
 
 ### 3.4 Maintenance & vendors (~8,500 LOC incl. shared data layer)
 
+**Purpose & goal.** Today this module is about **getting proactive with
+maintenance** — it is intentionally not trying to replace AppFolio, which all
+work orders still flow through. **Step one (now):** let AI **learn and
+categorize** the maintenance issues coming in so the team can **see trends**
+(what's breaking, where, how often) and make decisions from that data — and
+surface **problem tenants** (repeat/abusive requesters). **Step two (next):**
+connect **WhatsApp** so the team can dispatch a maintenance tech a unit and the
+list of items to fix, **auto-translated into Spanish** so the tech understands
+it. The outcome: shift from reactive ticket-handling to data-driven, proactive
+maintenance, with faster and clearer dispatch to Spanish-speaking techs — all
+while AppFolio stays the system of record.
+
 Working: manual AppFolio work-order sync into `work_orders` +
 `work_order_annotations` overlay (Moxie edits survive re-sync), Claude
 classify/summarize/translate with keyword fallbacks and server-side caching,
