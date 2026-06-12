@@ -878,34 +878,54 @@ function BillDetailView({
         </div>
       </div>
 
-      {/* Recalculate */}
-      {bill.status !== "posted" && (
-        <div className="flex items-center gap-3">
-          <select
-            value={recalcMethod}
-            onChange={(e) => setRecalcMethod(e.target.value as SplitMethod)}
-            className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
-          >
-            <option value="">Recalculate with...</option>
-            {(Object.entries(SPLIT_METHOD_LABELS) as [SplitMethod, string][]).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          <button
-            onClick={async () => {
-              if (!recalcMethod) return;
-              setRecalculating(true);
-              await onRecalculate(recalcMethod);
-              setRecalculating(false);
-              setRecalcMethod("");
-            }}
-            disabled={!recalcMethod || recalculating}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
-          >
-            {recalculating ? "Calculating..." : "Recalculate"}
-          </button>
-        </div>
-      )}
+      {/* Status-aware next step — tells a first-time user what each status
+          means and what to do from here. */}
+      {(() => {
+        const hint =
+          bill.status === "draft"
+            ? { cls: "bg-amber-50 border-amber-200 text-amber-900", label: "Not split yet", text: "Choose a split method below to divide this bill across the units on its meter." }
+            : bill.status === "calculated"
+            ? { cls: "bg-blue-50 border-blue-200 text-blue-900", label: "Calculated", text: "Review the per-unit amounts below, then export to AppFolio to post the charges." }
+            : { cls: "bg-green-50 border-green-200 text-green-900", label: "Posted", text: "These charges have been exported to AppFolio and billed to tenants." };
+        return (
+          <div className={`rounded-lg border px-4 py-3 text-sm flex items-start gap-2.5 ${hint.cls}`}>
+            <span className="font-semibold shrink-0">{hint.label}:</span>
+            <span>{hint.text}</span>
+          </div>
+        );
+      })()}
+
+      {/* Calculate / recalculate split */}
+      {bill.status !== "posted" && (() => {
+        const isFirstCalc = bill.status === "draft" || bill.allocations.length === 0;
+        return (
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={recalcMethod}
+              onChange={(e) => setRecalcMethod(e.target.value as SplitMethod)}
+              className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
+            >
+              <option value="">{isFirstCalc ? "Choose split method…" : "Recalculate with…"}</option>
+              {(Object.entries(SPLIT_METHOD_LABELS) as [SplitMethod, string][]).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+            <button
+              onClick={async () => {
+                if (!recalcMethod) return;
+                setRecalculating(true);
+                await onRecalculate(recalcMethod);
+                setRecalculating(false);
+                setRecalcMethod("");
+              }}
+              disabled={!recalcMethod || recalculating}
+              className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors disabled:opacity-50"
+            >
+              {recalculating ? "Calculating…" : isFirstCalc ? "Calculate Split" : "Recalculate"}
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Allocations Table */}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
@@ -996,7 +1016,7 @@ function BillDetailView({
           </div>
         ) : (
           <div className="p-5 text-sm text-muted-foreground">
-            No allocations yet. Use the recalculate option above to split this bill across units.
+            Not split yet. Choose a split method above and click <strong>Calculate Split</strong> to divide this bill across the units on its meter.
           </div>
         )}
       </div>
