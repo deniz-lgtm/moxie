@@ -223,6 +223,7 @@ function MoveOutInspectionContent() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [savedFloorPlan, setSavedFloorPlan] = useState<{ id: string; storage_url: string; label: string; rooms?: string[] } | null>(null);
   const [loadingFloorPlan, setLoadingFloorPlan] = useState(false);
+  const [scanningFloorPlan, setScanningFloorPlan] = useState(false);
 
   // ─── Network status & offline sync ─────────────────
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
@@ -640,6 +641,7 @@ function MoveOutInspectionContent() {
       }
     }
     setUploadError(null);
+    setScanningFloorPlan(true);
 
     try {
       // Produce a data URL: compress images, pass PDFs through untouched.
@@ -719,6 +721,8 @@ function MoveOutInspectionContent() {
     } catch (err) {
       setUploadError("Failed to process file. Please try again.");
       console.error("[MoveOut] Floor plan processing failed:", err);
+    } finally {
+      setScanningFloorPlan(false);
     }
   }
 
@@ -1889,7 +1893,15 @@ function MoveOutInspectionContent() {
         )}
 
         <div className="bg-card rounded-xl border border-border p-4 sm:p-6 text-center space-y-4">
-          {activeInspection.floorPlanUrl ? (
+          {scanningFloorPlan ? (
+            <div className="py-12 flex flex-col items-center">
+              <div className="w-10 h-10 border-2 border-accent/30 border-t-accent rounded-full animate-spin mb-4" />
+              <p className="text-base font-semibold">Scanning floor plan…</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Uploading and detecting rooms with AI. This takes a few seconds.
+              </p>
+            </div>
+          ) : activeInspection.floorPlanUrl ? (
             <div>
               <FloorPlanPreview
                 url={activeInspection.floorPlanUrl}
@@ -1928,13 +1940,15 @@ function MoveOutInspectionContent() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="min-h-[48px] px-5 py-3 border border-border text-sm font-medium rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
+              disabled={scanningFloorPlan}
+              className="min-h-[48px] px-5 py-3 border border-border text-sm font-medium rounded-xl hover:bg-muted active:bg-muted/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {activeInspection.floorPlanUrl ? "Replace Floor Plan" : "Upload Floor Plan"}
             </button>
             <button
               onClick={activeInspection.rooms.length > 0 ? startWalk : skipFloorPlan}
-              className="min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 active:scale-[0.98] transition-all"
+              disabled={scanningFloorPlan}
+              className="min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {activeInspection.rooms.length > 0 ? "Start Walk →" : "Skip — Use Default Rooms →"}
             </button>
@@ -2001,9 +2015,22 @@ function MoveOutInspectionContent() {
           </div>
 
           {analyzing && analysisProgress && (
-            <p className="text-xs text-accent">
-              Analyzing: {analysisProgress.label}
-            </p>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-accent font-medium truncate">
+                  Analyzing: {analysisProgress.label}
+                </span>
+                <span className="text-muted-foreground tabular-nums shrink-0">
+                  {analysisProgress.current}/{analysisProgress.total}
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-1.5 bg-accent rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.round((analysisProgress.current / analysisProgress.total) * 100)}%` }}
+                />
+              </div>
+            </div>
           )}
 
           {/* Action buttons */}

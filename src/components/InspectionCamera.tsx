@@ -64,8 +64,10 @@ export function InspectionCamera({
   const [newRoomName, setNewRoomName] = useState("");
   const [showAddRoom, setShowAddRoom] = useState(false);
   const [analyzingCount, setAnalyzingCount] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(0);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
   const [showFloorPlan, setShowFloorPlan] = useState(false);
+  const [captureFlash, setCaptureFlash] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -171,6 +173,16 @@ export function InspectionCamera({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, w, h);
+
+    // Immediate capture confirmation for field use: a quick white flash plus a
+    // short haptic tick so the user knows the shot landed before the (async)
+    // stamping/compression finishes.
+    setCaptureFlash(true);
+    setTimeout(() => setCaptureFlash(false), 180);
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate(35);
+    }
+
     const rawDataUrl = canvas.toDataURL("image/jpeg", 0.85);
     try {
       const stamped = await stampPhoto(rawDataUrl, {
@@ -307,6 +319,7 @@ export function InspectionCamera({
     });
 
     setAnalyzingCount(photosToAnalyze.length);
+    setBatchTotal(photosToAnalyze.length);
     let updatedRooms = [...rooms.map((r) => ({ ...r, photos: [...r.photos] }))];
 
     // Analyze in parallel batches of 3
@@ -331,6 +344,7 @@ export function InspectionCamera({
 
     setIsBatchAnalyzing(false);
     setAnalyzingCount(0);
+    setBatchTotal(0);
     onComplete(updatedRooms);
   }
 
@@ -497,6 +511,12 @@ export function InspectionCamera({
               playsInline
               muted
               className="w-full h-full object-cover"
+            />
+            {/* Shutter flash — instant on, fades out */}
+            <div
+              className={`absolute inset-0 bg-white pointer-events-none z-20 transition-opacity duration-200 ${
+                captureFlash ? "opacity-80" : "opacity-0"
+              }`}
             />
             {/* Capture button overlay — safe-area inset on the bottom for notched phones */}
             <div
@@ -705,12 +725,26 @@ export function InspectionCamera({
 
       {/* Batch analysis overlay */}
       {isBatchAnalyzing && (
-        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-10 px-8">
           <Loader2 size={48} className="text-white animate-spin mb-4" />
           <h3 className="text-white text-xl font-bold">Analyzing Photos</h3>
-          <p className="text-white/60 text-sm mt-2">
-            {analyzingCount} photo{analyzingCount !== 1 ? "s" : ""} remaining...
-          </p>
+          {/* Determinate progress — reassures the user it's moving, not stuck */}
+          <div className="w-full max-w-xs mt-4">
+            <div className="h-2 w-full bg-white/15 rounded-full overflow-hidden">
+              <div
+                className="h-2 bg-yellow-400 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${batchTotal > 0 ? Math.round(((batchTotal - analyzingCount) / batchTotal) * 100) : 0}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between mt-2 text-xs">
+              <span className="text-white/60">
+                {Math.max(0, batchTotal - analyzingCount)} of {batchTotal} done
+              </span>
+              <span className="text-white/40 tabular-nums">
+                {batchTotal > 0 ? Math.round(((batchTotal - analyzingCount) / batchTotal) * 100) : 0}%
+              </span>
+            </div>
+          </div>
           <p className="text-white/40 text-xs mt-4">AI is detecting damage and estimating costs</p>
         </div>
       )}
