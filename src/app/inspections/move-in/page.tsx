@@ -78,7 +78,10 @@ export default function MoveInInspectionPage() {
     if (!inspections.find((i) => i.id === insp.id)) updated.push(insp);
     setInspections(updated);
     setActive(insp);
-    void saveInspectionToDb(insp);
+    saveInspectionToDb(insp).catch((err) => {
+      console.error("[Inspections] Save failed:", err);
+      alert("Save failed — your last change may not be persisted. Check your connection and try again.");
+    });
   }
 
   function createInspection() {

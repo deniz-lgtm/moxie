@@ -11,7 +11,7 @@ import { FloorPlanPreview, isPdfUrl } from "@/components/FloorPlanPreview";
 import { SendForSignaturePanel } from "@/components/SendForSignaturePanel";
 import { useSaveQueue } from "@/hooks/useSaveQueue";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue } from "@/lib/offline-queue";
+import { enqueueOfflineSave, replayOfflineQueue, getOfflineQueue, removeQueuedByKey } from "@/lib/offline-queue";
 import { loadLogoBase64 } from "@/lib/pdf-logo";
 import { validateImage, compressImage, isHeicFile, convertHeicToJpeg, stampPhoto } from "@/lib/image-utils";
 import { usePortfolio } from "@/contexts/PortfolioContext";
@@ -76,6 +76,9 @@ async function uploadPhotoToStorage(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataUrl, inspectionId, photoId }),
+        // On weak cellular the browser still reports "online" but requests
+        // stall indefinitely; without a deadline the retry loop never runs.
+        signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `Upload failed (${res.status})` }));
@@ -124,6 +127,18 @@ const WIZARD_STEPS: { key: WizardStep; label: string; shortLabel: string }[] = [
   { key: "team_review", label: "Team Review", shortLabel: "Team" },
   { key: "completed", label: "Complete", shortLabel: "Done" },
 ];
+
+/** Small inline spinner used on document-generation buttons. */
+function DocSpinner({ light = false }: { light?: boolean }) {
+  return (
+    <span
+      className={`shrink-0 w-4 h-4 rounded-full border-2 animate-spin ${
+        light ? "border-white/30 border-t-white" : "border-accent/30 border-t-accent"
+      }`}
+      aria-label="Generating"
+    />
+  );
+}
 
 function StepProgressBar({
   currentStep,
@@ -218,32 +233,53 @@ function MoveOutInspectionContent() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [pdfError, setPdfError] = useState<string | null>(null);
+  // Tracks which document is currently being generated on the completed screen
+  // so each button can show progress and we never leave the user staring at a
+  // dead button on a slow connection.
+  const [generatingDoc, setGeneratingDoc] = useState<string | null>(null);
   const [savedFloorPlan, setSavedFloorPlan] = useState<{ id: string; storage_url: string; label: string; rooms?: string[] } | null>(null);
   const [loadingFloorPlan, setLoadingFloorPlan] = useState(false);
+  const [scanningFloorPlan, setScanningFloorPlan] = useState(false);
 
   // ─── Network status & offline sync ─────────────────
   const { isOnline, wasOffline, clearWasOffline } = useNetworkStatus();
   const [syncingOffline, setSyncingOffline] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
 
-  // Sync offline queue when connectivity returns
+  // Sync offline queue when connectivity returns. Also runs on mount and on a
+  // slow interval: on weak cellular the browser never fires offline/online
+  // events (navigator.onLine stays true), so queued saves from a previous
+  // session or a stalled connection would otherwise sit forever.
+  const replayQueueIfNeeded = useCallback(() => {
+    if (!navigator.onLine) return;
+    const queue = getOfflineQueue();
+    if (queue.length === 0) {
+      setOfflineQueueCount(0);
+      return;
+    }
+    setSyncingOffline(true);
+    setOfflineQueueCount(queue.length);
+    replayOfflineQueue().then(({ succeeded }) => {
+      setSyncingOffline(false);
+      setOfflineQueueCount(getOfflineQueue().length);
+      if (succeeded > 0) {
+        console.log(`[MoveOut] Synced ${succeeded} offline changes`);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     if (wasOffline && isOnline) {
       clearWasOffline();
-      const queue = getOfflineQueue();
-      if (queue.length > 0) {
-        setSyncingOffline(true);
-        setOfflineQueueCount(queue.length);
-        replayOfflineQueue().then(({ succeeded }) => {
-          setSyncingOffline(false);
-          setOfflineQueueCount(getOfflineQueue().length);
-          if (succeeded > 0) {
-            console.log(`[MoveOut] Synced ${succeeded} offline changes`);
-          }
-        });
-      }
+      replayQueueIfNeeded();
     }
-  }, [wasOffline, isOnline, clearWasOffline]);
+  }, [wasOffline, isOnline, clearWasOffline, replayQueueIfNeeded]);
+
+  useEffect(() => {
+    replayQueueIfNeeded();
+    const interval = setInterval(replayQueueIfNeeded, 60_000);
+    return () => clearInterval(interval);
+  }, [replayQueueIfNeeded]);
 
   // New inspection form (tenant info is resolved at send time, not creation)
   const [newForm, setNewForm] = useState({
@@ -269,27 +305,49 @@ function MoveOutInspectionContent() {
   const { queueSave, saveStatus, isDirty, flushSaveAsync, lastError, retrySave } = useSaveQueue<Inspection>({
     saveFn: async (insp) => {
       const body = JSON.stringify({ inspection: insp });
+      const dedupeKey = `inspection:${insp.id}`;
+      const queueLocally = () => {
+        enqueueOfflineSave({ endpoint: "/api/inspections/crud", method: "POST", body, dedupeKey });
+        setOfflineQueueCount(getOfflineQueue().length);
+      };
 
       // If offline, queue locally and return success
       if (!navigator.onLine) {
-        enqueueOfflineSave({ endpoint: "/api/inspections/crud", method: "POST", body });
-        setOfflineQueueCount(getOfflineQueue().length);
+        queueLocally();
         return;
       }
 
-      const res = await fetch("/api/inspections/crud", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        // keepalive lets the request complete even if the tab/window is
-        // closing or the component unmounts mid-send. Critical for not
-        // losing the final "completed" save when the user navigates away.
-        keepalive: true,
-      });
+      let res: Response;
+      try {
+        res = await fetch("/api/inspections/crud", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          // keepalive lets the request complete even if the tab/window is
+          // closing or the component unmounts mid-send — but browsers reject
+          // keepalive bodies over ~64KB outright ("Failed to fetch"), so only
+          // request it for small payloads. Large inspections rely on the
+          // offline queue below instead.
+          keepalive: body.length < 60_000,
+          // Bound the request: on weak cellular, navigator.onLine stays true
+          // while fetches stall for minutes, freezing the save queue.
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (err) {
+        // Network-level failure (stall/timeout/connection drop) — persist the
+        // snapshot to the offline queue so the work survives navigation, then
+        // rethrow so the save queue retries and surfaces the state.
+        queueLocally();
+        throw err instanceof Error ? err : new Error("Network error");
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Network error" }));
         throw new Error(err.error || `Save failed (${res.status})`);
       }
+      // Live save succeeded — drop any older queued snapshot of this
+      // inspection so a later replay can't roll back newer data.
+      removeQueuedByKey(dedupeKey);
+      setOfflineQueueCount(getOfflineQueue().length);
     },
     debounceMs: 500,
     maxRetries: 3,
@@ -490,6 +548,27 @@ function MoveOutInspectionContent() {
     return name || "Contractor";
   }
 
+  /**
+   * Wrap a document-generation handler with shared loading + error state so
+   * every "Generate/Download" button on the completed screen behaves the same:
+   * shows progress, disables while running, and surfaces failures instead of
+   * silently doing nothing (PDF builds fetch photos as base64 — slow/cellular
+   * connections can take several seconds or fail).
+   */
+  async function runDocGen(key: string, fn: () => Promise<void>) {
+    if (generatingDoc) return;
+    setPdfError(null);
+    setGeneratingDoc(key);
+    try {
+      await fn();
+    } catch (err) {
+      console.error("[MoveOut] Document generation failed:", err);
+      setPdfError("Couldn't generate that document. Check your connection and try again.");
+    } finally {
+      setGeneratingDoc(null);
+    }
+  }
+
   function saveInspection(insp: Inspection) {
     const updated = inspections.map((i) => (i.id === insp.id ? insp : i));
     if (!inspections.find((i) => i.id === insp.id)) updated.push(insp);
@@ -599,6 +678,7 @@ function MoveOutInspectionContent() {
       }
     }
     setUploadError(null);
+    setScanningFloorPlan(true);
 
     try {
       // Produce a data URL: compress images, pass PDFs through untouched.
@@ -678,6 +758,8 @@ function MoveOutInspectionContent() {
     } catch (err) {
       setUploadError("Failed to process file. Please try again.");
       console.error("[MoveOut] Floor plan processing failed:", err);
+    } finally {
+      setScanningFloorPlan(false);
     }
   }
 
@@ -1052,6 +1134,7 @@ function MoveOutInspectionContent() {
             roomName: rooms[ri].name,
             itemName: item.item,
           }),
+          signal: AbortSignal.timeout(60_000),
         });
         const analysis = await res.json();
 
@@ -1130,6 +1213,7 @@ function MoveOutInspectionContent() {
             roomName: rooms[roomIdx].name,
             itemName: item.item,
           }),
+          signal: AbortSignal.timeout(60_000),
         });
         const analysis = await res.json();
         if (analysis.condition) {
@@ -1846,7 +1930,15 @@ function MoveOutInspectionContent() {
         )}
 
         <div className="bg-card rounded-xl border border-border p-4 sm:p-6 text-center space-y-4">
-          {activeInspection.floorPlanUrl ? (
+          {scanningFloorPlan ? (
+            <div className="py-12 flex flex-col items-center">
+              <div className="w-10 h-10 border-2 border-accent/30 border-t-accent rounded-full animate-spin mb-4" />
+              <p className="text-base font-semibold">Scanning floor plan…</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Uploading and detecting rooms with AI. This takes a few seconds.
+              </p>
+            </div>
+          ) : activeInspection.floorPlanUrl ? (
             <div>
               <FloorPlanPreview
                 url={activeInspection.floorPlanUrl}
@@ -1885,13 +1977,15 @@ function MoveOutInspectionContent() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="min-h-[48px] px-5 py-3 border border-border text-sm font-medium rounded-xl hover:bg-muted active:bg-muted/80 transition-colors"
+              disabled={scanningFloorPlan}
+              className="min-h-[48px] px-5 py-3 border border-border text-sm font-medium rounded-xl hover:bg-muted active:bg-muted/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {activeInspection.floorPlanUrl ? "Replace Floor Plan" : "Upload Floor Plan"}
             </button>
             <button
               onClick={activeInspection.rooms.length > 0 ? startWalk : skipFloorPlan}
-              className="min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 active:scale-[0.98] transition-all"
+              disabled={scanningFloorPlan}
+              className="min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {activeInspection.rooms.length > 0 ? "Start Walk →" : "Skip — Use Default Rooms →"}
             </button>
@@ -1958,9 +2052,22 @@ function MoveOutInspectionContent() {
           </div>
 
           {analyzing && analysisProgress && (
-            <p className="text-xs text-accent">
-              Analyzing: {analysisProgress.label}
-            </p>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-accent font-medium truncate">
+                  Analyzing: {analysisProgress.label}
+                </span>
+                <span className="text-muted-foreground tabular-nums shrink-0">
+                  {analysisProgress.current}/{analysisProgress.total}
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-1.5 bg-accent rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.round((analysisProgress.current / analysisProgress.total) * 100)}%` }}
+                />
+              </div>
+            </div>
           )}
 
           {/* Action buttons */}
@@ -2510,7 +2617,7 @@ function MoveOutInspectionContent() {
             <h2 className="text-sm font-semibold">Documents</h2>
           </div>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("disposition", async () => {
               const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2519,19 +2626,22 @@ function MoveOutInspectionContent() {
               }
               const letterPdf = generateDispositionLetterPDF(pdfData);
               downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            disabled={unitTenants.length > 0 && selectedTenants.size === 0}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
+            })}
+            disabled={(unitTenants.length > 0 && selectedTenants.size === 0) || !!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Generate & Download Disposition Letter</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">
-              {selectedTenantList.length > 0
-                ? `Addressed to: ${selectedTenantList.map((t) => t.name).join(", ")}`
-                : "CA Civil Code 1950.5 — formal cover letter for tenant"}
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Generate &amp; Download Disposition Letter</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">
+                {selectedTenantList.length > 0
+                  ? `Addressed to: ${selectedTenantList.map((t) => t.name).join(", ")}`
+                  : "CA Civil Code 1950.5 — formal cover letter for tenant"}
+              </span>
             </span>
+            {generatingDoc === "disposition" && <DocSpinner />}
           </button>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("deduction", async () => {
               const { generateDepositDeductionPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2540,14 +2650,18 @@ function MoveOutInspectionContent() {
               }
               const deductionPdf = generateDepositDeductionPDF(pdfData);
               downloadPDF(deductionPdf, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+            })}
+            disabled={!!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
+            </span>
+            {generatingDoc === "deduction" && <DocSpinner />}
           </button>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("contractor-report", async () => {
               const { generateContractorReportPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2558,11 +2672,15 @@ function MoveOutInspectionContent() {
               }
               const contractorPdf = generateContractorReportPDF(pdfData, floorPlanBase64);
               downloadPDF(contractorPdf, `ContractorReport-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+            })}
+            disabled={!!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
+            </span>
+            {generatingDoc === "contractor-report" && <DocSpinner />}
           </button>
           <div className="px-4 py-4 border border-border rounded-xl text-sm space-y-3">
             <div>
@@ -2600,20 +2718,22 @@ function MoveOutInspectionContent() {
               </div>
             </div>
             <button
-              onClick={async () => {
+              onClick={() => runDocGen("invoice", async () => {
                 const { generateContractorInvoicePDF, downloadPDF } = await import("@/lib/pdf-invoice");
                 const logo = await loadLogoBase64();
                 const pdfData = await buildPdfData(activeInspection, logo);
                 const invoicePdf = generateContractorInvoicePDF(pdfData, contractorInvoiceOpts());
                 downloadPDF(invoicePdf, `${invoiceFileLabel()}-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-              }}
-              className="w-full sm:w-auto min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
+              })}
+              disabled={!!generatingDoc}
+              className="inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm disabled:opacity-50"
             >
-              Download Contractor Invoice
+              {generatingDoc === "invoice" && <DocSpinner light />}
+              {generatingDoc === "invoice" ? "Generating…" : "Download Contractor Invoice"}
             </button>
           </div>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("photo-package", async () => {
               const { generatePhotoPackagePDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2631,12 +2751,21 @@ function MoveOutInspectionContent() {
               );
               const packagePdf = generatePhotoPackagePDF(pdfData, allPhotoDataUrls);
               downloadPDF(packagePdf, `PhotoEvidence-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+            })}
+            disabled={!!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Download Photo Evidence Package</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">All inspection photos by room — for tenant disclosure requests</span>
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Download Photo Evidence Package</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">All inspection photos by room — for tenant disclosure requests</span>
+            </span>
+            {generatingDoc === "photo-package" && <DocSpinner />}
           </button>
+          {pdfError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+              {pdfError}
+            </div>
+          )}
           {selectedEmails.length > 0 && (
             <a
               href={`mailto:${selectedEmails.join(",")}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${selectedTenantList.map((t) => t.name).join(", ")},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}

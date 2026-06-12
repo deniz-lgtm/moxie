@@ -16,10 +16,22 @@ export async function POST(request: Request) {
     if (!billId) {
       return NextResponse.json({ error: "Missing billId" }, { status: 400 });
     }
+    if (!Array.isArray(units) || units.length === 0) {
+      return NextResponse.json(
+        { error: "Missing units array — cannot allocate a bill with no unit data" },
+        { status: 400 },
+      );
+    }
 
     const bill = await getBillById(billId);
     if (!bill) {
       return NextResponse.json({ error: "Bill not found" }, { status: 404 });
+    }
+    if (bill.status === "posted") {
+      return NextResponse.json(
+        { error: "Bill has already been posted to AppFolio — recalculating would desync charges" },
+        { status: 409 },
+      );
     }
 
     const mapping = await getMeterMappingById(bill.mappingId);
@@ -30,9 +42,17 @@ export async function POST(request: Request) {
     const allocations = calculateAllocations({
       totalAmount: bill.totalAmount,
       mapping,
-      units: units || [],
+      units,
       splitMethod,
     });
+    if (allocations.length === 0) {
+      // None of the mapping's unitIds matched the provided units — saving a
+      // "calculated" bill with zero allocations would silently bill nobody.
+      return NextResponse.json(
+        { error: "No units matched this meter mapping; check the mapping's unit assignments" },
+        { status: 422 },
+      );
+    }
 
     // Update the bill with calculated allocations
     const updatedBill = {
