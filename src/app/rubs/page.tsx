@@ -1075,6 +1075,47 @@ function BillDetailView({
 
 type ImportStep = "scan" | "parsing" | "preview";
 
+// Compact 3-step indicator so users know where they are in the import flow.
+function ImportStepper({ current }: { current: ImportStep }) {
+  const steps: { key: ImportStep; label: string }[] = [
+    { key: "scan", label: "Upload" },
+    { key: "parsing", label: "Parse" },
+    { key: "preview", label: "Review" },
+  ];
+  const currentIdx = steps.findIndex((s) => s.key === current);
+  return (
+    <div className="flex items-center gap-1.5 text-xs">
+      {steps.map((s, i) => {
+        const done = i < currentIdx;
+        const active = i === currentIdx;
+        return (
+          <div key={s.key} className="flex items-center gap-1.5">
+            <span
+              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg font-medium ${
+                active
+                  ? "bg-accent text-white"
+                  : done
+                  ? "text-green-700"
+                  : "text-muted-foreground"
+              }`}
+            >
+              <span
+                className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                  active ? "bg-white/20 text-white" : done ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {done ? "✓" : i + 1}
+              </span>
+              {s.label}
+            </span>
+            {i < steps.length - 1 && <span className={`w-4 h-px ${done ? "bg-green-300" : "bg-border"}`} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ImportBillsFlow({
   propertyNames,
   mappings,
@@ -1323,6 +1364,7 @@ function ImportBillsFlow({
     const isUploading = uploading.total > 0;
     return (
       <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+        <ImportStepper current="scan" />
         <h2 className="font-semibold">Import Utility Bills</h2>
         <p className="text-sm text-muted-foreground">
           Drop PDF bills below. They upload to secure cloud storage, then AI extracts billing data automatically.
@@ -1484,6 +1526,7 @@ function ImportBillsFlow({
   if (step === "parsing") {
     return (
       <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+        <ImportStepper current="parsing" />
         <h2 className="font-semibold">Parsing Bills with AI...</h2>
         <div className="w-full bg-muted rounded-full h-2">
           <div
@@ -1560,6 +1603,7 @@ function ImportBillsFlow({
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       <div className="p-5 border-b border-border space-y-3">
+        <ImportStepper current="preview" />
         <div>
           <h2 className="font-semibold">Review Extracted Bills ({parsedBills.length} found)</h2>
           <p className="text-xs text-muted-foreground mt-1">

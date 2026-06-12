@@ -22,6 +22,56 @@ import {
 } from "@/lib/rubs-db";
 import { parseImportFile, transformRowsToMappings, type ImportResult } from "@/lib/rubs-csv-import";
 
+// ─── Concept explainer ──────────────────────────────────────────
+// Meter mapping is the most jargon-heavy screen (master vs sub-metered,
+// split methods). This collapsible primer de-intimidates first-time admins.
+
+function MappingHelp({ defaultOpen }: { defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="bg-blue-50/60 border border-blue-200 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3 text-left hover:bg-blue-100/40 transition-colors"
+      >
+        <span className="text-sm font-semibold text-blue-900">How meter mapping works</span>
+        <span className={`text-blue-700 transition-transform ${open ? "rotate-180" : ""}`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </span>
+      </button>
+      {open && (
+        <div className="px-4 sm:px-5 pb-4 pt-1 text-sm text-blue-900 space-y-3 border-t border-blue-200/60">
+          <p className="pt-2">
+            A <strong>meter mapping</strong> tells RUBS which units share one utility meter, so a
+            bill for that meter can be split across the right tenants. On a scattered-site portfolio
+            this varies a lot — e.g. one <strong>water</strong> meter may serve <em>every</em> unit
+            in a building, while each <strong>electric</strong> meter serves only <em>some</em>.
+            Create one mapping per meter.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2">
+            <div>
+              <p className="font-semibold mb-1">Metering method</p>
+              <ul className="space-y-1 text-[13px]">
+                <li><strong>Master metered</strong> — one shared meter; the bill is divided using the split method.</li>
+                <li><strong>Sub-metered</strong> — each unit has its own meter/reading.</li>
+              </ul>
+            </div>
+            <div>
+              <p className="font-semibold mb-1">Split method</p>
+              <ul className="space-y-1 text-[13px]">
+                <li><strong>By occupancy</strong> — share by tenant count (common for student units).</li>
+                <li><strong>By square footage</strong> — larger units pay more.</li>
+                <li><strong>Equal split</strong> — divided evenly across units.</li>
+                <li><strong>Custom %</strong> — set each unit&apos;s share by hand.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RubsSettingsPage() {
   const { portfolioId } = usePortfolio();
   const [units, setUnits] = useState<Unit[]>([]);
@@ -298,6 +348,9 @@ export default function RubsSettingsPage() {
         </div>
       </div>
 
+      {/* Concept explainer — open by default for first-time (no mappings) users */}
+      <MappingHelp defaultOpen={mappings.length === 0} />
+
       {/* CSV Import Error */}
       {importError && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
@@ -321,6 +374,7 @@ export default function RubsSettingsPage() {
       {/* Add/Edit Form */}
       {(showForm || editMapping) && (
         <MappingForm
+          key={editMapping?.id || prefill?.propertyName || "new"}
           propertyNames={propertyNames}
           units={units}
           existing={editMapping}
@@ -561,9 +615,27 @@ export default function RubsSettingsPage() {
           No mappings match the current filters.
         </div>
       ) : (
-        <div className="text-center py-12 text-muted-foreground">
-          No meter mappings configured. Click &quot;Import Spreadsheet&quot; to bulk-load,
-          or &quot;+ Add Mapping&quot; to add one manually.
+        <div className="text-center py-14 bg-card rounded-xl border border-border">
+          <div className="w-12 h-12 bg-accent/10 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">⚡</div>
+          <p className="text-sm font-semibold">No meter mappings yet</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+            Map each utility meter to the units it serves. Bulk-load from a spreadsheet, or add
+            one at a time — you can edit split methods inline afterward.
+          </p>
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={() => { setShowForm(true); setEditMapping(null); }}
+              className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+            >
+              + Add Mapping
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+            >
+              Import Spreadsheet
+            </button>
+          </div>
         </div>
       )}
 
@@ -578,17 +650,30 @@ export default function RubsSettingsPage() {
         onDelete={handleAliasDelete}
       />
 
-      {/* Properties without any mappings */}
+      {/* Properties without any mappings — click one to start a mapping for it */}
       {propertyNames.filter((p) => !mappingsByProperty[p]).length > 0 && (
         <div className="bg-card rounded-xl border border-border p-5">
-          <h3 className="font-semibold text-sm mb-3">Unconfigured Properties</h3>
+          <h3 className="font-semibold text-sm">Properties without meter mappings</h3>
+          <p className="text-xs text-muted-foreground mt-0.5 mb-3">
+            These AppFolio properties have no meters configured yet. Click one to set it up.
+          </p>
           <div className="flex flex-wrap gap-2">
             {propertyNames
               .filter((p) => !mappingsByProperty[p])
               .map((name) => (
-                <span key={name} className="text-xs px-3 py-1 rounded-full bg-muted text-muted-foreground">
+                <button
+                  key={name}
+                  onClick={() => {
+                    setEditMapping(null);
+                    setPrefill({ propertyName: name });
+                    setShowForm(true);
+                    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className="group inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-muted text-muted-foreground hover:bg-accent/10 hover:text-accent transition-colors"
+                >
                   {name}
-                </span>
+                  <span className="text-accent opacity-0 group-hover:opacity-100 transition-opacity font-medium">+ map</span>
+                </button>
               ))}
           </div>
         </div>
@@ -693,6 +778,11 @@ function MappingForm({
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            {meteringMethod === "master"
+              ? "One shared meter for these units — the bill is divided by the split method."
+              : "Each unit has its own meter reading."}
+          </p>
         </div>
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Split Method</label>
@@ -705,6 +795,15 @@ function MappingForm({
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            {splitMethod === "sqft"
+              ? "Larger units pay a bigger share."
+              : splitMethod === "occupancy"
+              ? "Share by tenant count — common for student units."
+              : splitMethod === "equal"
+              ? "Divided evenly across the assigned units."
+              : "Set each unit's percentage by hand."}
+          </p>
         </div>
         <div className="md:col-span-2">
           <label className="text-xs text-muted-foreground block mb-1">Meter ID / Account Number</label>
