@@ -47,6 +47,149 @@ import {
   type StoredBillFile,
 } from "@/lib/rubs-storage";
 
+// ─── Workflow guide ────────────────────────────────────────────
+// New users land on a wall of buttons with no sense of the order of
+// operations. This status-aware checklist orients them: it shows the five
+// steps of the RUBS pipeline, marks what's done, and surfaces the next action.
+
+function WorkflowGuide({
+  mappingsConfigured,
+  hasTemplate,
+  billCount,
+  calculatedCount,
+  postedCount,
+  onImport,
+  onUploadTemplate,
+  onExport,
+}: {
+  mappingsConfigured: number;
+  hasTemplate: boolean;
+  billCount: number;
+  calculatedCount: number;
+  postedCount: number;
+  onImport: () => void;
+  onUploadTemplate: () => void;
+  onExport: () => void;
+}) {
+  const steps = [
+    {
+      title: "Configure meters",
+      desc: "Map each utility meter to the units it serves. Do this once per property.",
+      done: mappingsConfigured > 0,
+      action: (
+        <Link href="/rubs/settings" className="text-xs font-medium text-accent hover:underline whitespace-nowrap">
+          Open Settings →
+        </Link>
+      ),
+    },
+    {
+      title: "Load AppFolio template",
+      desc: "Upload the blank Bulk Charges template so exported charges line up with AppFolio.",
+      done: hasTemplate,
+      action: (
+        <button onClick={onUploadTemplate} className="text-xs font-medium text-accent hover:underline whitespace-nowrap">
+          Upload template →
+        </button>
+      ),
+    },
+    {
+      title: "Import bills",
+      desc: "Drop in this cycle's utility PDFs — AI reads the amount, dates, and meter.",
+      done: billCount > 0,
+      action: (
+        <button onClick={onImport} className="text-xs font-medium text-accent hover:underline whitespace-nowrap">
+          Import bills →
+        </button>
+      ),
+    },
+    {
+      title: "Review & calculate",
+      desc: "Open each bill to check how the cost splits across tenants before exporting.",
+      done: calculatedCount > 0,
+      action: null,
+    },
+    {
+      title: "Export to AppFolio",
+      desc: "Send the calculated charges back to AppFolio to bill the students.",
+      done: postedCount > 0,
+      action: (
+        <button onClick={onExport} className="text-xs font-medium text-accent hover:underline whitespace-nowrap">
+          Export →
+        </button>
+      ),
+    },
+  ];
+
+  const doneCount = steps.filter((s) => s.done).length;
+  const allDone = doneCount === steps.length;
+  // First not-yet-done step is the user's current focus.
+  const currentIdx = steps.findIndex((s) => !s.done);
+  const [open, setOpen] = useState(!allDone);
+
+  return (
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 text-left hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <span className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${allDone ? "bg-green-100 text-green-700" : "bg-accent/10 text-accent"}`}>
+            {allDone ? "✓" : `${doneCount}/${steps.length}`}
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">
+              {allDone ? "You're all set up" : "How RUBS works"}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {allDone
+                ? "Setup complete — import this cycle's bills to begin."
+                : currentIdx >= 0
+                ? `Next: ${steps[currentIdx].title}`
+                : "Follow these steps to bill utilities."}
+            </p>
+          </div>
+        </div>
+        <span className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </span>
+      </button>
+
+      {open && (
+        <ol className="border-t border-border divide-y divide-border">
+          {steps.map((s, i) => {
+            const isCurrent = i === currentIdx;
+            return (
+              <li
+                key={s.title}
+                className={`flex items-start gap-3 px-4 sm:px-5 py-3 ${isCurrent ? "bg-accent/5" : ""}`}
+              >
+                <span
+                  className={`shrink-0 mt-0.5 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold ${
+                    s.done
+                      ? "bg-green-100 text-green-700"
+                      : isCurrent
+                      ? "bg-accent text-white"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {s.done ? "✓" : i + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={`text-sm font-medium ${s.done ? "text-muted-foreground" : ""}`}>{s.title}</p>
+                    {!s.done && isCurrent && s.action}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{s.desc}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ─────────────────────────────────────────────────
 
 export default function RubsPage() {
@@ -320,7 +463,7 @@ export default function RubsPage() {
             Ratio Utility Billing — split utility costs across tenants
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/rubs/settings"
             className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
@@ -366,6 +509,18 @@ export default function RubsPage() {
         </div>
       </div>
 
+      {/* Getting-started workflow guide */}
+      <WorkflowGuide
+        mappingsConfigured={propertiesConfigured}
+        hasTemplate={!!occupancy}
+        billCount={bills.length}
+        calculatedCount={bills.filter((b) => b.status === "calculated" || b.status === "posted").length}
+        postedCount={bills.filter((b) => b.status === "posted").length}
+        onImport={() => { setShowImport(true); setShowExport(false); setShowPdfLibrary(false); }}
+        onUploadTemplate={() => templateInputRef.current?.click()}
+        onExport={() => { setShowExport(true); setShowImport(false); setShowPdfLibrary(false); }}
+      />
+
       {/* AppFolio Template Status */}
       <input
         ref={templateInputRef}
@@ -374,6 +529,10 @@ export default function RubsPage() {
         onChange={handleTemplateUpload}
         className="hidden"
       />
+      {/* Once a template is loaded, keep showing the status (and the stale
+          warning). Brand-new users get the prompt from the workflow guide
+          instead, so we don't double up "upload template" calls-to-action. */}
+      {occupancy && (
       <div className={`rounded-lg px-4 py-3 flex items-center justify-between text-sm ${
         occupancy
           ? Math.floor((Date.now() - new Date(occupancy.importedAt).getTime()) / 86400000) > 30
@@ -407,6 +566,7 @@ export default function RubsPage() {
           {occupancy ? "Refresh Template" : "Upload Template"}
         </button>
       </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-4">
@@ -546,21 +706,44 @@ export default function RubsPage() {
             </table>
           </div>
         </div>
-      ) : !seeded ? (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground mb-4">
-            No RUBS data yet. Seed demo data to get started, or configure meters in Settings.
+      ) : bills.length === 0 ? (
+        // No bills at all — point the user at the real next action.
+        <div className="text-center py-14 bg-card rounded-xl border border-border">
+          <div className="w-12 h-12 bg-accent/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+          </div>
+          <p className="text-sm font-semibold">No bills imported yet</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+            Import this cycle&apos;s utility PDFs and the system will read the amounts, match each
+            bill to a meter, and split the cost across tenants.
           </p>
-          <button
-            onClick={handleSeed}
-            className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
-          >
-            Seed Demo Data
-          </button>
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={() => { setShowImport(true); setShowExport(false); setShowPdfLibrary(false); }}
+              className="px-4 py-2 bg-accent text-white text-sm rounded-lg hover:bg-accent/90 transition-colors"
+            >
+              Import Bills
+            </button>
+            {!seeded && (
+              <button
+                onClick={handleSeed}
+                className="px-4 py-2 text-sm border border-border rounded-lg hover:bg-muted transition-colors"
+              >
+                Load Demo Data
+              </button>
+            )}
+          </div>
         </div>
       ) : (
-        <div className="text-center py-12 text-muted-foreground">
-          No bills match the current filters. Click &quot;+ New Bill&quot; to create one.
+        // Bills exist but the current filters hide them all.
+        <div className="text-center py-12 bg-card rounded-xl border border-border">
+          <p className="text-sm text-muted-foreground">No bills match the current filters.</p>
+          <button
+            onClick={() => { setFilterMonth(""); setFilterProperty(""); }}
+            className="text-xs font-medium text-accent hover:underline mt-1"
+          >
+            Clear filters
+          </button>
         </div>
       )}
     </div>
