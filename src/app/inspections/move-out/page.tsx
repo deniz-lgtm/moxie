@@ -128,6 +128,18 @@ const WIZARD_STEPS: { key: WizardStep; label: string; shortLabel: string }[] = [
   { key: "completed", label: "Complete", shortLabel: "Done" },
 ];
 
+/** Small inline spinner used on document-generation buttons. */
+function DocSpinner({ light = false }: { light?: boolean }) {
+  return (
+    <span
+      className={`shrink-0 w-4 h-4 rounded-full border-2 animate-spin ${
+        light ? "border-white/30 border-t-white" : "border-accent/30 border-t-accent"
+      }`}
+      aria-label="Generating"
+    />
+  );
+}
+
 function StepProgressBar({
   currentStep,
   onStepClick,
@@ -221,6 +233,10 @@ function MoveOutInspectionContent() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [pdfError, setPdfError] = useState<string | null>(null);
+  // Tracks which document is currently being generated on the completed screen
+  // so each button can show progress and we never leave the user staring at a
+  // dead button on a slow connection.
+  const [generatingDoc, setGeneratingDoc] = useState<string | null>(null);
   const [savedFloorPlan, setSavedFloorPlan] = useState<{ id: string; storage_url: string; label: string; rooms?: string[] } | null>(null);
   const [loadingFloorPlan, setLoadingFloorPlan] = useState(false);
   const [scanningFloorPlan, setScanningFloorPlan] = useState(false);
@@ -530,6 +546,27 @@ function MoveOutInspectionContent() {
     const vendor = vendors.find((v) => v.id === selectedVendorId);
     const name = (vendor?.name || "DJA").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
     return name || "Contractor";
+  }
+
+  /**
+   * Wrap a document-generation handler with shared loading + error state so
+   * every "Generate/Download" button on the completed screen behaves the same:
+   * shows progress, disables while running, and surfaces failures instead of
+   * silently doing nothing (PDF builds fetch photos as base64 — slow/cellular
+   * connections can take several seconds or fail).
+   */
+  async function runDocGen(key: string, fn: () => Promise<void>) {
+    if (generatingDoc) return;
+    setPdfError(null);
+    setGeneratingDoc(key);
+    try {
+      await fn();
+    } catch (err) {
+      console.error("[MoveOut] Document generation failed:", err);
+      setPdfError("Couldn't generate that document. Check your connection and try again.");
+    } finally {
+      setGeneratingDoc(null);
+    }
   }
 
   function saveInspection(insp: Inspection) {
@@ -2580,7 +2617,7 @@ function MoveOutInspectionContent() {
             <h2 className="text-sm font-semibold">Documents</h2>
           </div>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("disposition", async () => {
               const { generateDispositionLetterPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2589,19 +2626,22 @@ function MoveOutInspectionContent() {
               }
               const letterPdf = generateDispositionLetterPDF(pdfData);
               downloadPDF(letterPdf, `DispositionLetter-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            disabled={unitTenants.length > 0 && selectedTenants.size === 0}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
+            })}
+            disabled={(unitTenants.length > 0 && selectedTenants.size === 0) || !!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Generate & Download Disposition Letter</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">
-              {selectedTenantList.length > 0
-                ? `Addressed to: ${selectedTenantList.map((t) => t.name).join(", ")}`
-                : "CA Civil Code 1950.5 — formal cover letter for tenant"}
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Generate &amp; Download Disposition Letter</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">
+                {selectedTenantList.length > 0
+                  ? `Addressed to: ${selectedTenantList.map((t) => t.name).join(", ")}`
+                  : "CA Civil Code 1950.5 — formal cover letter for tenant"}
+              </span>
             </span>
+            {generatingDoc === "disposition" && <DocSpinner />}
           </button>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("deduction", async () => {
               const { generateDepositDeductionPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2610,14 +2650,18 @@ function MoveOutInspectionContent() {
               }
               const deductionPdf = generateDepositDeductionPDF(pdfData);
               downloadPDF(deductionPdf, `MoveOut-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+            })}
+            disabled={!!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Download Itemized Deduction Statement</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Forensic assessment with quantified findings and costs</span>
+            </span>
+            {generatingDoc === "deduction" && <DocSpinner />}
           </button>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("contractor-report", async () => {
               const { generateContractorReportPDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2628,11 +2672,15 @@ function MoveOutInspectionContent() {
               }
               const contractorPdf = generateContractorReportPDF(pdfData, floorPlanBase64);
               downloadPDF(contractorPdf, `ContractorReport-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+            })}
+            disabled={!!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Download Contractor Work Order</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">Repair checklist for contractor — no prices, areas and floor plan only</span>
+            </span>
+            {generatingDoc === "contractor-report" && <DocSpinner />}
           </button>
           <div className="px-4 py-4 border border-border rounded-xl text-sm space-y-3">
             <div>
@@ -2670,20 +2718,22 @@ function MoveOutInspectionContent() {
               </div>
             </div>
             <button
-              onClick={async () => {
+              onClick={() => runDocGen("invoice", async () => {
                 const { generateContractorInvoicePDF, downloadPDF } = await import("@/lib/pdf-invoice");
                 const logo = await loadLogoBase64();
                 const pdfData = await buildPdfData(activeInspection, logo);
                 const invoicePdf = generateContractorInvoicePDF(pdfData, contractorInvoiceOpts());
                 downloadPDF(invoicePdf, `${invoiceFileLabel()}-Invoice-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-              }}
-              className="w-full sm:w-auto min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm"
+              })}
+              disabled={!!generatingDoc}
+              className="inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-[48px] px-5 py-3 bg-accent text-white text-sm font-medium rounded-xl hover:bg-accent-hover transition-colors shadow-sm disabled:opacity-50"
             >
-              Download Contractor Invoice
+              {generatingDoc === "invoice" && <DocSpinner light />}
+              {generatingDoc === "invoice" ? "Generating…" : "Download Contractor Invoice"}
             </button>
           </div>
           <button
-            onClick={async () => {
+            onClick={() => runDocGen("photo-package", async () => {
               const { generatePhotoPackagePDF, downloadPDF } = await import("@/lib/pdf-invoice");
               const logo = await loadLogoBase64();
               const pdfData = await buildPdfData(activeInspection, logo);
@@ -2701,12 +2751,21 @@ function MoveOutInspectionContent() {
               );
               const packagePdf = generatePhotoPackagePDF(pdfData, allPhotoDataUrls);
               downloadPDF(packagePdf, `PhotoEvidence-${activeInspection.unitNumber}-${activeInspection.scheduledDate}.pdf`);
-            }}
-            className="group block w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm transition-colors"
+            })}
+            disabled={!!generatingDoc}
+            className="group flex items-center justify-between gap-3 w-full text-left px-4 py-4 min-h-[56px] border border-border rounded-xl hover:bg-muted/50 active:bg-muted text-sm disabled:opacity-40 transition-colors"
           >
-            <span className="font-medium group-hover:text-accent transition-colors">Download Photo Evidence Package</span>
-            <span className="block text-xs text-muted-foreground mt-0.5">All inspection photos by room — for tenant disclosure requests</span>
+            <span className="min-w-0">
+              <span className="font-medium group-hover:text-accent transition-colors">Download Photo Evidence Package</span>
+              <span className="block text-xs text-muted-foreground mt-0.5">All inspection photos by room — for tenant disclosure requests</span>
+            </span>
+            {generatingDoc === "photo-package" && <DocSpinner />}
           </button>
+          {pdfError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+              {pdfError}
+            </div>
+          )}
           {selectedEmails.length > 0 && (
             <a
               href={`mailto:${selectedEmails.join(",")}?subject=Security Deposit Disposition - ${activeInspection.unitNumber}&body=Dear ${selectedTenantList.map((t) => t.name).join(", ")},%0A%0APlease find attached your Security Deposit Disposition Letter and Itemized Statement of Deductions pursuant to California Civil Code Section 1950.5.%0A%0ASincerely,%0AMoxie Management`}
