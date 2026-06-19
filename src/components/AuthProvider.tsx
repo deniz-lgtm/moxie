@@ -2,13 +2,22 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { User, Session } from "@supabase/supabase-js";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
+
+const ALLOWED_EMAIL_DOMAINS = ["bradmanagement.com", "moxieusc.com"];
+
+function isAllowedEmail(email: string | undefined | null): boolean {
+  if (!email) return false;
+  const domain = email.split("@")[1]?.toLowerCase();
+  return !!domain && ALLOWED_EMAIL_DOMAINS.includes(domain);
+}
 
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  authError: string | null;
+  signInWithMicrosoft: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -16,7 +25,8 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   loading: true,
-  signIn: async () => ({ error: "Not initialized" }),
+  authError: null,
+  signInWithMicrosoft: async () => ({ error: "Not initialized" }),
   signOut: async () => {},
 });
 
@@ -28,36 +38,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) {
-      // No Supabase — skip auth (dev/local mode)
       setLoading(false);
       return;
     }
 
-    // Get initial session
-    sb.auth.getSession().then(({ data: { session: s } }) => {
+    async function applySession(s: Session | null) {
+      if (s?.user && !isAllowedEmail(s.user.email)) {
+        await sb!.auth.signOut();
+        setSession(null);
+        setUser(null);
+        setAuthError(
+          "Your account isn't authorized for Moxie. Sign in with a @bradmanagement.com or @moxieusc.com address."
+        );
+        return;
+      }
       setSession(s);
       setUser(s?.user ?? null);
-      setLoading(false);
+      if (s?.user) setAuthError(null);
+    }
+
+    sb.auth.getSession().then(({ data: { session: s } }) => {
+      applySession(s).finally(() => setLoading(false));
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = sb.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
+      applySession(s);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signInWithMicrosoft = useCallback(async () => {
     const sb = getSupabase();
     if (!sb) return { error: "Supabase not configured" };
-
-    const { error } = await sb.auth.signInWithPassword({ email, password });
+    setAuthError(null);
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: "azure",
+      options: {
+        scopes: "email openid profile",
+        redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
     if (error) return { error: error.message };
     return { error: null };
   }, []);
@@ -66,10 +92,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const sb = getSupabase();
     if (!sb) return;
     await sb.auth.signOut();
+    setAuthError(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{ user, session, loading, authError, signInWithMicrosoft, signOut }}
+    >
       {children}
     </AuthContext.Provider>
   );
