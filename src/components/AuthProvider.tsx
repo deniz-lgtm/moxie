@@ -1,23 +1,39 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import type { User, Session } from "@supabase/supabase-js";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+
+export type SessionUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: string | null;
+  totpEnrolled: boolean;
+};
+
+export type LoginStep1Result =
+  | { ok: true; challengeId: string; enroll: { secret: string; otpauthUrl: string; qrDataUrl: string } | null }
+  | { ok: false; error: string };
+
+export type LoginStep2Result = { ok: true } | { ok: false; error: string };
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: SessionUser | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  /** Step 1: verify password, returns a challenge for the 2FA code. */
+  beginSignIn: (email: string, password: string) => Promise<LoginStep1Result>;
+  /** Step 2: verify TOTP code, sets the session. */
+  completeSignIn: (challengeId: string, code: string) => Promise<LoginStep2Result>;
   signOut: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  session: null,
   loading: true,
-  signIn: async () => ({ error: "Not initialized" }),
+  beginSignIn: async () => ({ ok: false, error: "Not initialized" }),
+  completeSignIn: async () => ({ ok: false, error: "Not initialized" }),
   signOut: async () => {},
+  refresh: async () => {},
 });
 
 export function useAuth() {
@@ -25,51 +41,66 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const sb = getSupabase();
-    if (!sb) {
-      // No Supabase — skip auth (dev/local mode)
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const json = await res.json();
+      setUser(json.user ?? null);
+    } catch {
+      setUser(null);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Get initial session
-    sb.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = sb.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const sb = getSupabase();
-    if (!sb) return { error: "Supabase not configured" };
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
-    const { error } = await sb.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return { error: null };
+  const beginSignIn = useCallback<AuthContextType["beginSignIn"]>(async (email, password) => {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const json = await res.json();
+      if (!res.ok) return { ok: false, error: json.error || "Login failed" };
+      return { ok: true, challengeId: json.challengeId, enroll: json.enroll ?? null };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    }
+  }, []);
+
+  const completeSignIn = useCallback<AuthContextType["completeSignIn"]>(async (challengeId, code) => {
+    try {
+      const res = await fetch("/api/auth/verify-2fa", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ challengeId, code }),
+      });
+      const json = await res.json();
+      if (!res.ok) return { ok: false, error: json.error || "Verification failed" };
+      setUser(json.user ?? null);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+    }
   }, []);
 
   const signOut = useCallback(async () => {
-    const sb = getSupabase();
-    if (!sb) return;
-    await sb.auth.signOut();
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      setUser(null);
+    }
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, beginSignIn, completeSignIn, signOut, refresh }}>
       {children}
     </AuthContext.Provider>
   );

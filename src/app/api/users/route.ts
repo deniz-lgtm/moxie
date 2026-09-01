@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin, isAdminConfigured } from "@/lib/supabase-admin";
 import { upsertContact } from "@/lib/contacts-db";
 import { getSupabase } from "@/lib/supabase";
+import { hashPassword } from "@/lib/auth";
 import type { Contact, ContactRole } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ type AppUser = {
   lastSignInAt: string | null;
   contactId: string | null;
   isActive: boolean;
+  totpEnrolled: boolean;
 };
 
 function notConfiguredError() {
@@ -68,51 +70,58 @@ async function hydrateContacts(userIds: string[]): Promise<Map<string, Contact>>
   return map;
 }
 
-function toAppUser(authUser: any, contact: Contact | undefined): AppUser {
-  const meta = authUser.user_metadata || {};
+type AppUserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: string | null;
+  is_active: boolean;
+  last_sign_in_at: string | null;
+  totp_enrolled_at: string | null;
+  totp_secret: string | null;
+  created_at: string;
+};
+
+function toAppUser(row: AppUserRow, contact: Contact | undefined): AppUser {
   return {
-    id: authUser.id,
-    email: authUser.email ?? null,
-    name: contact?.name ?? (typeof meta.name === "string" ? meta.name : null),
-    role:
-      contact?.role ??
-      (normalizeRole(meta.role) || null),
-    createdAt: authUser.created_at,
-    lastSignInAt: authUser.last_sign_in_at ?? null,
+    id: row.id,
+    email: row.email ?? null,
+    name: contact?.name ?? row.name,
+    role: contact?.role ?? (normalizeRole(row.role) || null),
+    createdAt: row.created_at,
+    lastSignInAt: row.last_sign_in_at ?? null,
     contactId: contact?.id ?? null,
-    isActive: contact?.isActive ?? true,
+    isActive: contact?.isActive ?? row.is_active,
+    totpEnrolled: Boolean(row.totp_enrolled_at && row.totp_secret),
   };
 }
 
-/** GET /api/users — list all Supabase auth users with their linked contact. */
+/** GET /api/users — list all app users with their linked contact. */
 export async function GET() {
   if (!isAdminConfigured()) return notConfiguredError();
   try {
     const admin = getSupabaseAdmin();
     if (!admin) return notConfiguredError();
-    const { data, error } = await admin.auth.admin.listUsers({ perPage: 200 });
+    const { data, error } = await admin
+      .from("app_users")
+      .select("id,email,name,role,is_active,last_sign_in_at,totp_enrolled_at,totp_secret,created_at")
+      .order("email", { ascending: true })
+      .limit(500);
     if (error) throw error;
-    const authUsers = data?.users ?? [];
-    const contactByUserId = await hydrateContacts(authUsers.map((u) => u.id));
-    const users: AppUser[] = authUsers
-      .map((u) => toAppUser(u, contactByUserId.get(u.id)))
-      .sort((a, b) => (a.email ?? "").localeCompare(b.email ?? ""));
+    const rows = (data ?? []) as AppUserRow[];
+    const contactByUserId = await hydrateContacts(rows.map((u) => u.id));
+    const users: AppUser[] = rows.map((u) => toAppUser(u, contactByUserId.get(u.id)));
     return NextResponse.json({ users });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to list users" }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to list users" }, { status: 500 });
   }
 }
 
 /**
  * POST /api/users
- *
- * Body: { email, password?, name, role?, phone?, sendInvite? }
- *
- * Creates a Supabase auth user and an aligned contact row in one go. If
- * `sendInvite` is true (or `password` is absent), sends a magic-link
- * invitation email so the user sets their own password. Otherwise
- * creates with the provided password and marks the email confirmed so
- * they can sign in immediately.
+ * Body: { email, password, name, role?, phone? }
+ * Creates an app_users row + linked contact. The user enrolls TOTP on
+ * their first sign-in. `password` is required (min 8 chars).
  */
 export async function POST(request: Request) {
   if (!isAdminConfigured()) return notConfiguredError();
@@ -120,35 +129,38 @@ export async function POST(request: Request) {
     const body = await request.json();
     const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
     const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
     if (!email || !name) {
       return NextResponse.json({ error: "Missing email or name" }, { status: 400 });
     }
+    if (password.length < 8) {
+      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
+    }
     const role = normalizeRole(body?.role);
     const phone = typeof body?.phone === "string" && body.phone.trim() ? body.phone.trim() : null;
-    const password = typeof body?.password === "string" ? body.password : "";
-    const sendInvite = body?.sendInvite === true || !password;
 
     const admin = getSupabaseAdmin();
     if (!admin) return notConfiguredError();
 
-    let userId: string;
-    if (sendInvite) {
-      const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
-        data: { name, ...(role ? { role } : {}) },
-      });
-      if (error) throw error;
-      userId = data.user.id;
-    } else {
-      const { data, error } = await admin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { name, ...(role ? { role } : {}) },
-      });
-      if (error) throw error;
-      userId = data.user.id;
+    // Reject duplicates explicitly so we can return a friendly message.
+    const { data: existing } = await admin
+      .from("app_users")
+      .select("id")
+      .ilike("email", email)
+      .maybeSingle();
+    if (existing) {
+      return NextResponse.json({ error: "A user with that email already exists." }, { status: 409 });
     }
 
+    const password_hash = await hashPassword(password);
+    const { data: inserted, error: insertError } = await admin
+      .from("app_users")
+      .insert({ email, name, role: role ?? null, password_hash })
+      .select("id,email,name,role,is_active,last_sign_in_at,totp_enrolled_at,totp_secret,created_at")
+      .single();
+    if (insertError || !inserted) throw insertError ?? new Error("Insert failed");
+
+    const userId = (inserted as AppUserRow).id;
     const contact: Contact = {
       id: `user_${userId}`,
       name,
@@ -162,27 +174,24 @@ export async function POST(request: Request) {
     };
     try {
       await upsertContact(contact);
-    } catch (e: any) {
-      // The user is created either way; surface the contact error but
-      // don't 500 — the admin can retry linking from the UI.
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "unknown";
       return NextResponse.json({
-        user: toAppUser({ id: userId, email, user_metadata: { name, role } }, contact),
-        warning: `User created, but contact insert failed: ${e.message}`,
+        user: toAppUser(inserted as AppUserRow, contact),
+        warning: `User created, but contact insert failed: ${msg}`,
       });
     }
 
-    return NextResponse.json({
-      user: toAppUser({ id: userId, email, user_metadata: { name, role } }, contact),
-      invited: sendInvite,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to create user" }, { status: 500 });
+    return NextResponse.json({ user: toAppUser(inserted as AppUserRow, contact) });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to create user" }, { status: 500 });
   }
 }
 
 /**
- * PATCH /api/users?id=<auth_user_id>
- * Body: partial { name?, role?, phone? }
+ * PATCH /api/users?id=<id>
+ * Body: partial { name?, role?, phone?, password?, resetTotp? }
+ *  - resetTotp clears the TOTP secret so the user re-enrolls on next login.
  */
 export async function PATCH(request: Request) {
   if (!isAdminConfigured()) return notConfiguredError();
@@ -194,21 +203,33 @@ export async function PATCH(request: Request) {
     const name = typeof body?.name === "string" ? body.name.trim() : undefined;
     const role = "role" in body ? normalizeRole(body.role) : undefined;
     const phone = typeof body?.phone === "string" ? body.phone.trim() : undefined;
+    const password = typeof body?.password === "string" ? body.password : undefined;
+    const resetTotp = body?.resetTotp === true;
 
     const admin = getSupabaseAdmin();
     if (!admin) return notConfiguredError();
 
-    // Update auth user_metadata
-    const nextMeta: Record<string, unknown> = {};
-    if (name !== undefined) nextMeta.name = name;
-    if (role !== undefined) nextMeta.role = role;
-    if (Object.keys(nextMeta).length > 0) {
-      await admin.auth.admin.updateUserById(id, {
-        user_metadata: nextMeta,
-      });
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (name !== undefined) update.name = name;
+    if (role !== undefined) update.role = role;
+    if (password !== undefined) {
+      if (password.length < 8) {
+        return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
+      }
+      update.password_hash = await hashPassword(password);
+    }
+    if (resetTotp) {
+      update.totp_secret = null;
+      update.totp_enrolled_at = null;
+      // Invalidate any active sessions for this user — force re-login.
+      await admin.from("user_sessions").delete().eq("user_id", id);
     }
 
-    // Update linked contact
+    if (Object.keys(update).length > 1) {
+      const { error } = await admin.from("app_users").update(update).eq("id", id);
+      if (error) throw error;
+    }
+
     const sb = getSupabase();
     if (sb) {
       const { data: existing } = await sb
@@ -233,15 +254,15 @@ export async function PATCH(request: Request) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to update user" }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to update user" }, { status: 500 });
   }
 }
 
 /**
- * DELETE /api/users?id=<auth_user_id>
- * Removes the user from Supabase Auth and marks their linked contact
- * is_active=false (soft delete — keeps history).
+ * DELETE /api/users?id=<id>
+ * Hard-deletes the app_users row (cascades sessions) and marks the linked
+ * contact is_active=false (soft delete — keeps history).
  */
 export async function DELETE(request: Request) {
   if (!isAdminConfigured()) return notConfiguredError();
@@ -253,7 +274,7 @@ export async function DELETE(request: Request) {
     const admin = getSupabaseAdmin();
     if (!admin) return notConfiguredError();
 
-    const { error } = await admin.auth.admin.deleteUser(id);
+    const { error } = await admin.from("app_users").delete().eq("id", id);
     if (error) throw error;
 
     const sb = getSupabase();
@@ -265,7 +286,7 @@ export async function DELETE(request: Request) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to delete user" }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to delete user" }, { status: 500 });
   }
 }
