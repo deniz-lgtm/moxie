@@ -3,7 +3,7 @@
 // ============================================
 
 import { getSupabase, type DbContact } from "./supabase";
-import type { Contact, ContactRole } from "./types";
+import type { Contact, ContactRole, Department } from "./types";
 
 function dbToContact(row: DbContact): Contact {
   return {
@@ -13,6 +13,7 @@ function dbToContact(row: DbContact): Contact {
     email: row.email ?? undefined,
     phone: row.phone ?? undefined,
     department: row.department ?? undefined,
+    departments: Array.isArray(row.departments) ? (row.departments as Department[]) : [],
     notes: row.notes ?? undefined,
     isActive: row.is_active,
     userId: row.user_id ?? undefined,
@@ -29,6 +30,7 @@ function contactToDb(c: Contact): Omit<DbContact, "created_at" | "updated_at"> {
     email: c.email ?? null,
     phone: c.phone ?? null,
     department: c.department ?? null,
+    departments: c.departments ?? [],
     notes: c.notes ?? null,
     is_active: c.isActive,
     user_id: c.userId ?? null,

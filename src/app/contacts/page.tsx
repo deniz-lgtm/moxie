@@ -1,20 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { Contact, ContactRole } from "@/lib/types";
+import type { Contact, ContactRole, Department } from "@/lib/types";
+import { COMMON_CONTACT_ROLES, DEPARTMENTS } from "@/lib/types";
 
-const ROLE_OPTIONS: { value: ContactRole; label: string }[] = [
-  { value: "property_manager", label: "Property Manager" },
-  { value: "maintenance", label: "Maintenance" },
-  { value: "leasing", label: "Leasing" },
-  { value: "asset_manager", label: "Asset Manager" },
-  { value: "owner_rep", label: "Owner Rep" },
-  { value: "other", label: "Other" },
-];
+const ROLE_DATALIST_ID = "contact-role-suggestions";
 
 function roleLabel(role?: ContactRole): string {
-  if (!role) return "—";
-  return ROLE_OPTIONS.find((r) => r.value === role)?.label ?? role;
+  return role && role.trim() ? role : "—";
+}
+
+function departmentLabels(values?: Department[]): string {
+  if (!values || values.length === 0) return "—";
+  return values
+    .map((v) => DEPARTMENTS.find((d) => d.value === v)?.label ?? v)
+    .join(", ");
+}
+
+function toggleDepartment(list: Department[] | undefined, value: Department): Department[] {
+  const cur = list ?? [];
+  return cur.includes(value) ? cur.filter((d) => d !== value) : [...cur, value];
 }
 
 export default function ContactsPage() {
@@ -25,12 +30,18 @@ export default function ContactsPage() {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<Contact | null>(null);
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<{
+    name: string;
+    role: ContactRole;
+    email: string;
+    phone: string;
+    departments: Department[];
+  }>({
     name: "",
-    role: "property_manager" as ContactRole,
+    role: "",
     email: "",
     phone: "",
-    department: "",
+    departments: [],
   });
 
   async function load() {
@@ -54,11 +65,16 @@ export default function ContactsPage() {
     if (roleFilter !== "all" && c.role !== roleFilter) return false;
     if (query) {
       const q = query.toLowerCase();
-      const hay = [c.name, c.email, c.phone, c.department, roleLabel(c.role)].filter(Boolean).join(" ").toLowerCase();
+      const hay = [c.name, c.email, c.phone, c.department, departmentLabels(c.departments), roleLabel(c.role)]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
   });
+
+  const allRoles = Array.from(new Set(contacts.map((c) => (c.role ?? "").trim()).filter(Boolean))).sort();
 
   async function addContact() {
     if (!draft.name.trim()) return;
@@ -66,10 +82,10 @@ export default function ContactsPage() {
     const contact: Contact = {
       id: `c-${Date.now()}`,
       name: draft.name.trim(),
-      role: draft.role,
+      role: draft.role.trim() || undefined,
       email: draft.email || undefined,
       phone: draft.phone || undefined,
-      department: draft.department || undefined,
+      departments: draft.departments,
       isActive: true,
       createdAt: now,
       updatedAt: now,
@@ -85,7 +101,7 @@ export default function ContactsPage() {
     }
     const j = await res.json();
     setContacts((prev) => [...prev, j.contact]);
-    setDraft({ name: "", role: "property_manager", email: "", phone: "", department: "" });
+    setDraft({ name: "", role: "", email: "", phone: "", departments: [] });
     setShowAdd(false);
   }
 
@@ -155,19 +171,41 @@ export default function ContactsPage() {
             <h2 className="font-semibold">Contact Info</h2>
             <Editable label="Email" value={selected.email || ""} type="email" onSave={(v) => updateContact(selected.id, "email", v || undefined)} />
             <Editable label="Phone" value={selected.phone || ""} onSave={(v) => updateContact(selected.id, "phone", v || undefined)} />
+            <Editable
+              label="Role"
+              value={selected.role || ""}
+              listId={ROLE_DATALIST_ID}
+              onSave={(v) => updateContact(selected.id, "role", v.trim() || undefined)}
+            />
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Role</label>
-              <select
-                value={selected.role || "other"}
-                onChange={(e) => updateContact(selected.id, "role", e.target.value as ContactRole)}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
-              >
-                {ROLE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <label className="text-xs text-muted-foreground block mb-1">Departments</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {DEPARTMENTS.map((d) => {
+                  const checked = (selected.departments ?? []).includes(d.value);
+                  return (
+                    <label key={d.value} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          updateContact(
+                            selected.id,
+                            "departments",
+                            toggleDepartment(selected.departments, d.value)
+                          )
+                        }
+                      />
+                      <span>{d.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {selected.department && (
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  Legacy department: {selected.department}
+                </p>
+              )}
             </div>
-            <Editable label="Department" value={selected.department || ""} onSave={(v) => updateContact(selected.id, "department", v || undefined)} />
           </div>
           <div className="bg-card rounded-xl border border-border p-5 space-y-2">
             <h2 className="font-semibold">Notes</h2>
@@ -220,15 +258,14 @@ export default function ContactsPage() {
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
             />
-            <select
+            <input
+              type="text"
+              placeholder="Role (e.g. Property Manager, custom title)"
+              list={ROLE_DATALIST_ID}
               value={draft.role}
-              onChange={(e) => setDraft({ ...draft, role: e.target.value as ContactRole })}
+              onChange={(e) => setDraft({ ...draft, role: e.target.value })}
               className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
-            >
-              {ROLE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+            />
             <input
               type="email"
               placeholder="Email"
@@ -243,13 +280,26 @@ export default function ContactsPage() {
               onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
               className="text-sm border border-border rounded-lg px-3 py-2 bg-card"
             />
-            <input
-              type="text"
-              placeholder="Department"
-              value={draft.department}
-              onChange={(e) => setDraft({ ...draft, department: e.target.value })}
-              className="text-sm border border-border rounded-lg px-3 py-2 bg-card md:col-span-2"
-            />
+            <div className="md:col-span-2">
+              <label className="text-xs text-muted-foreground block mb-1">Departments</label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {DEPARTMENTS.map((d) => {
+                  const checked = draft.departments.includes(d.value);
+                  return (
+                    <label key={d.value} className="flex items-center gap-2 text-sm py-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setDraft({ ...draft, departments: toggleDepartment(draft.departments, d.value) })
+                        }
+                      />
+                      <span>{d.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <button
             onClick={addContact}
@@ -274,11 +324,20 @@ export default function ContactsPage() {
           className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card"
         >
           <option value="all">All Roles</option>
-          {ROLE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
+          {allRoles.map((r) => (
+            <option key={r} value={r}>{r}</option>
           ))}
         </select>
       </div>
+
+      <datalist id={ROLE_DATALIST_ID}>
+        {COMMON_CONTACT_ROLES.map((r) => (
+          <option key={r} value={r} />
+        ))}
+        {allRoles.filter((r) => !COMMON_CONTACT_ROLES.includes(r as typeof COMMON_CONTACT_ROLES[number])).map((r) => (
+          <option key={r} value={r} />
+        ))}
+      </datalist>
 
       {loading ? (
         <div className="text-center py-12 text-muted-foreground text-sm">Loading contacts…</div>
@@ -292,7 +351,7 @@ export default function ContactsPage() {
                   <th className="text-left px-4 py-3 font-medium">Role</th>
                   <th className="text-left px-4 py-3 font-medium">Email</th>
                   <th className="text-left px-4 py-3 font-medium">Phone</th>
-                  <th className="text-left px-4 py-3 font-medium">Department</th>
+                  <th className="text-left px-4 py-3 font-medium">Departments</th>
                   <th className="text-left px-4 py-3 font-medium">Status</th>
                 </tr>
               </thead>
@@ -307,7 +366,11 @@ export default function ContactsPage() {
                     <td className="px-4 py-3 text-muted-foreground">{roleLabel(c.role)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{c.email || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">{c.phone || "—"}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{c.department || "—"}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {c.departments && c.departments.length > 0
+                        ? departmentLabels(c.departments)
+                        : c.department || "—"}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${c.isActive ? "bg-green-50 text-green-700" : "bg-slate-100 text-slate-600"}`}>
                         {c.isActive ? "Active" : "Inactive"}
@@ -334,11 +397,13 @@ function Editable({
   label,
   value,
   type = "text",
+  listId,
   onSave,
 }: {
   label: string;
   value: string;
   type?: string;
+  listId?: string;
   onSave: (value: string) => void;
 }) {
   const [local, setLocal] = useState(value);
@@ -349,6 +414,7 @@ function Editable({
       <input
         type={type}
         value={local}
+        list={listId}
         onChange={(e) => setLocal(e.target.value)}
         onBlur={() => {
           if (local !== value) onSave(local);
